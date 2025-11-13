@@ -1,0 +1,6 @@
+@Express_Service_HostAddress = http://localhost:5148
+
+GET {{Express_Service_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
