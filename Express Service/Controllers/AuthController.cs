@@ -1,0 +1,59 @@
+﻿
+using Application.Auth;
+using Application.Contracts.Auth;
+using Application.Services.Auth;
+using Microsoft.AspNetCore.Mvc;
+
+namespace Express_Service.Controllers;
+
+[Route("[controller]")]
+[ApiController]
+public class AuthController(IAuthService service) : ControllerBase
+{
+    private readonly IAuthService service = service;
+
+    [HttpPost("register")]
+    public async Task<IActionResult> Register([FromBody] RegisterRequest request)
+    {
+        var response = await service.RegisterAsync(request);
+
+        return response.IsSuccess ?
+            Ok(new Resu("Done please try to Login")) :
+            response.ToProblem();
+    }
+
+    [HttpPost("admin-register")]
+    public async Task<IActionResult> AdminRegister([FromBody] RegisterRequest request)
+    {
+        var response = await service.AdminRegisterAsync(request);
+
+        return response.IsSuccess ?
+            Ok(new Resu("Done please try to Login")) :
+            response.ToProblem();
+    }
+    
+    [HttpPost("master-register")]
+    public async Task<IActionResult> MasterRegister([FromBody] RegisterRequest request)
+    {
+        var response = await service.AdminRegisterAsync(request);
+
+        return response.IsSuccess ?
+            Ok(new Resu("Done please try to Login")) :
+            response.ToProblem();
+    }
+
+    [HttpPost("login")]
+    public async Task<IActionResult> login([FromBody] AuthRequest request)
+    {
+        var response = await service.SingInAsync(request);
+
+        return response.IsSuccess ?
+            Ok(response.Value) :
+            response.ToProblem();
+    }
+
+    public class Resu(string massage)
+    {
+        public string Massage { get; set; } = massage;
+    }
+}
