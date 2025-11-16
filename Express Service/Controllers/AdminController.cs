@@ -1,4 +1,5 @@
 ﻿using Application.Admin;
+using Application.User;
 using Microsoft.AspNetCore.Mvc;
 
 
@@ -6,9 +7,10 @@ using Microsoft.AspNetCore.Mvc;
 namespace Express_Service.Controllers;
 [Route("[controller]")]
 [ApiController]
-public class AdminController(IAdminService service) : ControllerBase
+public class AdminController(IAdminService service,IUserService service1) : ControllerBase
 {
     private readonly IAdminService service = service;
+    private readonly IUserService service1 = service1;
 
     [HttpGet("")]
     public async Task<IActionResult> GetUsers()
@@ -18,6 +20,14 @@ public class AdminController(IAdminService service) : ControllerBase
         return users is not null ?
             Ok(users) :
             BadRequest();
+    }
+
+    [HttpGet("change-role")]
+    public async Task<IActionResult> ChangeRoles(string UserName, string NewRole)
+    {
+        var result = await service1.ChangeRoleForUser(UserName, NewRole);
+
+        return result.IsSuccess ? Ok() : result.ToProblem();
     }
 
     [HttpGet("id/{Id}")]
@@ -40,10 +50,10 @@ public class AdminController(IAdminService service) : ControllerBase
             user.ToProblem();
     }
 
-    [HttpPut("toggle-status/{UserId}")]
-    public async Task<IActionResult> ToggleStatusAsync(string UserId)
+    [HttpPut("toggle-status/{UserName}")]
+    public async Task<IActionResult> ToggleStatusAsync(string UserName)
     {
-        var user = await service.ToggleStatusAsync(UserId);
+        var user = await service.ToggleStatusAsync(UserName);
         return user.IsSuccess ?
             NoContent() :
             user.ToProblem();

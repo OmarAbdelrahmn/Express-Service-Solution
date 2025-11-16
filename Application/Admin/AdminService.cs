@@ -84,9 +84,9 @@ public class AdminService(
         return Result.Success(response);
     }
 
-    public async Task<Result> ToggleStatusAsync(string UserId)
+    public async Task<Result> ToggleStatusAsync(string UserName)
     {
-        if (await manager.FindByIdAsync(UserId) is not { } user)
+        if (await manager.FindByNameAsync(UserName) is not { } user)
             return Result.Failure(UserErrors.UserNotFound);
 
         user.IsDisable = !user.IsDisable;

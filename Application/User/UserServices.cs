@@ -1,4 +1,5 @@
 ﻿using Application.Abstraction;
+using Application.Abstraction.Errors;
 using Application.Contracts.Users;
 using Domain.Entities;
 using Mapster;
@@ -24,6 +25,34 @@ public class UserServices(UserManager<ApplicationUser> manager) : IUserService
         var error = result.Errors.First();
 
         return Result.Failure(new Error(error.Code, error.Description, StatusCodes.Status400BadRequest));
+    }
+
+    public async Task<Result> ChangeRoleForUser(string UserName, string NewRole)
+    {
+        var User = await manager.FindByNameAsync(UserName);
+
+        if (User == null)
+            return Result.Failure(UserErrors.UserNotFound);
+
+        var Roles = await manager.GetRolesAsync(User);
+
+        if(Roles == null || Roles.Count ==0)
+            return Result.Failure(RolesErrors.somethingwrong);
+        
+        if (Roles.Contains(NewRole))
+            return Result.Failure(RolesErrors.haveit);
+        
+        var RemoveRoleResult = await manager.RemoveFromRolesAsync(User, Roles);
+        
+        if (!RemoveRoleResult.Succeeded)
+            return Result.Failure(RolesErrors.somethingwrong);
+
+        var AddRoleResult = await manager.AddToRoleAsync(User, NewRole);
+
+        if (!AddRoleResult.Succeeded)
+            return Result.Failure(RolesErrors.somethingwrong);
+
+        return Result.Success();
     }
 
     public async Task<Result<UserProfileResponse>> GetUserProfile(string id)

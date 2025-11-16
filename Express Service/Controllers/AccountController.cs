@@ -12,31 +12,6 @@ namespace Express_Service.Controllers;
 public class AccountController(IUserService service) : ControllerBase
 {
     private readonly IUserService service = service;
-
-    //[HttpGet("")]
-    //public async Task<IActionResult> ShowUserProfile(string userid)
-    //{
-    //    var result = await service.GetUserProfile(userid);
-
-    //    return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
-    //}
-
-    //[HttpPut("info")]
-    //public async Task<IActionResult> UpdateUserProfile([FromBody] UpdateUserProfileRequest request , string userid)
-    //{
-    //    var result = await service.UpdateUserProfile(userid, request);
-
-    //    return NoContent();
-    //}
-
-    //[HttpPut("change-passord")]
-    //public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordRequest request , string userid)
-    //{
-    //    var result = await service.ChangePassword(userid, request);
-
-    //    return result.IsSuccess ? NoContent(new sa() : result.ToProblem();
-    //}
-
     public class Resu(string massage)
     {
         public string Massage { get; set; } = massage;
@@ -49,6 +24,7 @@ public class AccountController(IUserService service) : ControllerBase
 
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
+    
 
     [HttpPut("info")]
     public async Task<IActionResult> UpdateUserProfile([FromBody] UpdateUserProfileRequest request)
