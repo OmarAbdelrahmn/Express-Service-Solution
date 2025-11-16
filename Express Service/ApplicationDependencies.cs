@@ -1,6 +1,8 @@
-﻿using Application.Auth;
+﻿using Application.Admin;
+using Application.Auth;
 using Application.Authentication;
 using Application.Services.Auth;
+using Application.User;
 using Domain;
 using Domain.Entities;
 using FluentValidation;
@@ -27,6 +29,8 @@ public static class ApplicationDependencies
         Services.AddEndpointsApiExplorer();
         Services.AddScoped<IJwtProvider, JwtProvider>();
         Services.AddScoped<IAuthService, AuthService>();
+        Services.AddScoped<IUserService, UserServices>();
+        Services.AddScoped<IAdminService, AdminService>();
 
 
         Services.AddAuth(configuration)

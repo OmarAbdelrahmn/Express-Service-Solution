@@ -7,12 +7,12 @@ public class UpdateUserProfileRequestValidator_ : AbstractValidator<UpdateUserPr
     public UpdateUserProfileRequestValidator_()
     {
 
-        RuleFor(i => i.FirstName)
+        RuleFor(i => i.FullName)
              .NotEmpty()
              .Length(3, 100);
 
 
-        RuleFor(i => i.LastName)
+        RuleFor(i => i.Address)
             .NotEmpty()
             .Length(3, 100);
 

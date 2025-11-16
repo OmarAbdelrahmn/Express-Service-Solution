@@ -9,8 +9,6 @@ public class ApplicationUser : IdentityUser
 {
     public override string? Email { get; set; }
     public override string? NormalizedEmail { get; set; }
-
-
     public string? FullName { get; set; } = string.Empty;
 
     public string? Address { get; set; } = string.Empty;
