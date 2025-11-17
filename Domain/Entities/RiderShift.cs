@@ -6,14 +6,12 @@ namespace Domain.Entities;
 
 public class RiderShift
 { 
-    public int Id { get; set; }
     public int RiderId { get; set; }
-    public int IqamaNo { get; set; }
-    public string WorkingId { get; set; } = null!;
+    public int WorkingId { get; set; } 
     public DateOnly ShiftDate { get; set; }
     public int DailyOrders { get; set; }
-    public string ShiftStatus => DailyOrders > 14 ? "Active" : "Inactive";
-
+    public string ShiftStatus { get; set; } = string.Empty;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public RiderDetails Rider { get; set; } = null!;
 
 }
