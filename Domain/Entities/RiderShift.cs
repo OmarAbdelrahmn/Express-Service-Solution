@@ -7,10 +7,12 @@ namespace Domain.Entities;
 public class RiderShift
 { 
     public int Id { get; set; }
+    public int RiderId { get; set; }
     public int IqamaNo { get; set; }
     public string WorkingId { get; set; } = null!;
-    public DateTime ShiftDate { get; set; }
+    public DateOnly ShiftDate { get; set; }
     public int DailyOrders { get; set; }
+    public string ShiftStatus => DailyOrders > 14 ? "Active" : "Inactive";
 
     public RiderDetails Rider { get; set; } = null!;
 
