@@ -16,7 +16,16 @@ public class ApplicationDbcontext(DbContextOptions<ApplicationDbcontext> options
     public required DbSet<ApplicationUser> ApplicationUsers { get; set; }
 
     public required DbSet<ApplicationRole> ApplicationRoles { get; set; }
-
+    public required DbSet<Company> Companies{ get; set; }
+    public required DbSet<Employees> Employees{ get; set; }
+    public required DbSet<EmployeeDocuments> EmployeeDocuments{ get; set; }
+    public required DbSet<Housing> Housings{ get; set; }
+    public required DbSet<RiderDetails> RiderDetails{ get; set; }
+    public required DbSet<RiderShift> RiderShifts{ get; set; }
+    public required DbSet<RiderShiftSubstitution> RiderShiftSubstitutions{ get; set; }
+    public required DbSet<Vehicle> Vehicles { get; set; }
+    public required DbSet<DeletedEmployees> DeletedEmployees { get; set; }
+    public required DbSet<ArchivedRiderShift> ArchivedRiderShifts { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

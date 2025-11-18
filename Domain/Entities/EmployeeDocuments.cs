@@ -23,5 +23,5 @@ public class EmployeeDocuments
     
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
-    public Employees Employee { get; set; } = null!;
+    public Employees Employee { get; set; } = default!;
 }

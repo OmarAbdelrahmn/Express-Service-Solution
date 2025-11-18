@@ -4,6 +4,7 @@ using Domain;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Domain.Migrations
 {
     [DbContext(typeof(ApplicationDbcontext))]
-    partial class ApplicationDbcontextModelSnapshot : ModelSnapshot
+    [Migration("20251117111214_init2")]
+    partial class init2
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -169,7 +172,7 @@ namespace Domain.Migrations
                             IsDisable = false,
                             LockoutEnabled = false,
                             NormalizedUserName = "ADMIN",
-                            PasswordHash = "AQAAAAIAAYagAAAAEEkKyKaBKiw3WODOMsiWw955eq1htUKpi3b3B6oWM3ackwlrD5w+fpJZ8hJOgqKHmQ==",
+                            PasswordHash = "AQAAAAIAAYagAAAAEP1zb8q9gOTg4rDdPDodsZ++2R++dPLe7+LBG05CTFUp4WHtHAlCmU+qaX/SyX8bJg==",
                             PhoneNumberConfirmed = false,
                             SecurityStamp = "9FABB58491024B7BB140E4D6658B5BDA",
                             TwoFactorEnabled = false,
@@ -186,41 +189,12 @@ namespace Domain.Migrations
                             IsDisable = false,
                             LockoutEnabled = false,
                             NormalizedUserName = "MASTER",
-                            PasswordHash = "AQAAAAIAAYagAAAAEMmxhOHpuM46ONSzcDwDPHGas60bptOsNddagWQxsR7jRE1cxP+YfjWILwlhOnvP5A==",
+                            PasswordHash = "AQAAAAIAAYagAAAAEBpEKEP1p5Qp9OPDcVylw/Nzm/6BEcwLYlw2qPhQfigq5dJmDnkYAdGnCjfBVjrjbA==",
                             PhoneNumberConfirmed = false,
                             SecurityStamp = "9FABB58491024B7BB140E4D6658B5BDA",
                             TwoFactorEnabled = false,
                             UserName = "Master"
                         });
-                });
-
-            modelBuilder.Entity("Domain.Entities.ArchivedRiderShift", b =>
-                {
-                    b.Property<int>("id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("id"));
-
-                    b.Property<int>("DailyOrders")
-                        .HasColumnType("int");
-
-                    b.Property<int>("RiderId")
-                        .HasColumnType("int");
-
-                    b.Property<DateOnly>("ShiftDate")
-                        .HasColumnType("date");
-
-                    b.Property<string>("ShiftStatus")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<int>("WorkingId")
-                        .HasColumnType("int");
-
-                    b.HasKey("id");
-
-                    b.ToTable("ArchivedRiderShifts");
                 });
 
             modelBuilder.Entity("Domain.Entities.Company", b =>
@@ -260,91 +234,6 @@ namespace Domain.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("Companies");
-                });
-
-            modelBuilder.Entity("Domain.Entities.DeletedEmployees", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
-
-                    b.Property<int?>("CompanyId")
-                        .HasColumnType("int");
-
-                    b.Property<string>("Country")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<DateTime>("DateOfBirth")
-                        .HasColumnType("datetime2");
-
-                    b.Property<int?>("HousingId")
-                        .HasColumnType("int");
-
-                    b.Property<string>("IBAN")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<bool>("INKSA")
-                        .HasColumnType("bit");
-
-                    b.Property<DateOnly>("IqamaEndH")
-                        .HasColumnType("date");
-
-                    b.Property<DateOnly>("IqamaEndM")
-                        .HasColumnType("date");
-
-                    b.Property<int>("IqamaNo")
-                        .HasColumnType("int");
-
-                    b.Property<string>("JobTitle")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("LicenseNumber")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("NameAR")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("NameEN")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<DateOnly?>("PassportEnd")
-                        .HasColumnType("date");
-
-                    b.Property<string>("PassportNo")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("Phone")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("Sponsor")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("TshirtSize")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<int?>("VehicleId")
-                        .HasColumnType("int");
-
-                    b.Property<int?>("WorkingId")
-                        .HasColumnType("int");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("DeletedEmployees");
                 });
 
             modelBuilder.Entity("Domain.Entities.EmployeeDocuments", b =>
@@ -570,17 +459,9 @@ namespace Domain.Migrations
 
                     b.Property<string>("ShiftStatus")
                         .IsRequired()
-                        .HasColumnType("nvarchar(450)");
+                        .HasColumnType("nvarchar(max)");
 
                     b.HasKey("RiderId", "ShiftDate", "WorkingId");
-
-                    b.HasIndex("RiderId");
-
-                    b.HasIndex("ShiftDate");
-
-                    b.HasIndex("ShiftStatus");
-
-                    b.HasIndex("WorkingId");
 
                     b.ToTable("RiderShifts");
                 });

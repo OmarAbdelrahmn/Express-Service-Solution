@@ -12,7 +12,7 @@ public class RiderShift
     public int DailyOrders { get; set; }
     public string ShiftStatus { get; set; } = string.Empty;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
-    public RiderDetails Rider { get; set; } = null!;
+    public RiderDetails Rider { get; set; } = default!;
 
 }
 //RiderId: 1, WorkingId: WD-1001, TotalOrders: 25

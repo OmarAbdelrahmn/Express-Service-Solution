@@ -14,8 +14,10 @@ public class RiderDetails
     public int CompanyId { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.Now;
 
-    public Company Company { get; set; } = null!;
+    public Company Company { get; set; } = default!;
     public Employees Employee { get; set; } = default!;
     public ICollection<RiderShift> RiderShifts { get; set; } = [];
-
+                   
+    public int? VehicleId { get; set; }
+    public Vehicle? Vehicle { get; set; } 
 }

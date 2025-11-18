@@ -1,4 +1,6 @@
-﻿using Mapster;
+﻿using Application.Contracts.Employees;
+using Domain.Entities;
+using Mapster;
 
 namespace Application.Mapping;
 
@@ -17,5 +19,14 @@ public class MappingConfigration : IRegister
         //config.NewConfig<(ApplicataionUser user, IList<string> userroles), UserResponse>()
         //    .Map(des => des, src => src.user)
         //    .Map(des => des.Roles, src => src.userroles);
+
+
+        //config.NewConfig<Employees, EmpolyeeResponse>
+        //        ()
+        //        .Map(dest => dest.IBAN, src => src.IBAN)
+        //        .Map(dest => dest.NameEN, src => src.NameEN)
+        //        .Map(dest => dest.NameAR, src => src.NameAR);
+
+
     }
 }

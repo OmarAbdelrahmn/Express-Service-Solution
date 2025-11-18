@@ -2,6 +2,7 @@
 using Application.Auth;
 using Application.Authentication;
 using Application.Roles;
+using Application.Service.Empolyee;
 using Application.Services.Auth;
 using Application.User;
 using Domain;
@@ -33,6 +34,7 @@ public static class ApplicationDependencies
         Services.AddScoped<IUserService, UserServices>();
         Services.AddScoped<IAdminService, AdminService>();
         Services.AddScoped<IRoleService, RoleService>();
+        Services.AddScoped<IEmployeeService, EmployeeService>();
 
 
         Services.AddAuth(configuration)
