@@ -13,7 +13,6 @@ public class RiderDetails
     public string? LicenseNumber { get; set; }
     public int CompanyId { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.Now;
-
     public Company Company { get; set; } = default!;
     public Employees Employee { get; set; } = default!;
     public ICollection<RiderShift> RiderShifts { get; set; } = [];

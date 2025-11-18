@@ -15,6 +15,9 @@ public class HousingConfigration :IEntityTypeConfiguration<Housing>
         builder.Property(h => h.Name)
             .IsRequired()
             .HasMaxLength(50);
+
+        builder.HasIndex(h => h.Name)
+            .IsUnique();
         builder.Property(h => h.Address)
             .IsRequired()
             .HasMaxLength(50);

@@ -50,23 +50,6 @@ public class EmployeeController(IEmployeeService service) : ControllerBase
             response.ToProblem();
     }
     
-    [HttpPut("{IqamaNo}/housing/{HousingName}")]
-    public async Task<IActionResult> Update(int IqamaNo, string HousingName)
-    {
-        var response = await service.AddEmployeeToHousing(IqamaNo, HousingName);
-        return response.IsSuccess ?
-            Ok(new Re("done")) :
-            response.ToProblem();
-    }
-    
-    [HttpPut("{IqamaNo}/housing/{oldHousingName}-{NewHousingName}")]
-    public async Task<IActionResult> Update(int IqamaNo, string oldHousingName , string NewHousingName)
-    {
-        var response = await service.ChangeEmployeeToHousing(IqamaNo, oldHousingName, NewHousingName);
-        return response.IsSuccess ?
-            Ok(new Re("done")) :
-            response.ToProblem();
-    }
 
     [HttpDelete("{IqamaNo}")]
     public async Task<IActionResult> Delete(int IqamaNo)

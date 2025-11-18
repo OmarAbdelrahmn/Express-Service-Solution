@@ -10,6 +10,7 @@ public class RiderShift
     public int WorkingId { get; set; } 
     public DateOnly ShiftDate { get; set; }
     public int DailyOrders { get; set; }
+    public int CompanyId { get; set; }
     public string ShiftStatus { get; set; } = string.Empty;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public RiderDetails Rider { get; set; } = default!;

@@ -16,6 +16,7 @@ public class RiderShiftConfigration : IEntityTypeConfiguration<RiderShift>
         builder.HasIndex(rs => rs.RiderId);
         builder.HasIndex(rs => rs.WorkingId);
         builder.HasIndex(rs => rs.ShiftStatus);
+        builder.HasIndex(rs => rs.CompanyId);
 
     }
 }

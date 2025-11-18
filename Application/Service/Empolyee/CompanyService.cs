@@ -16,7 +16,7 @@ public class CompanyService(ApplicationDbcontext dbcontext) : ICompanyService
 
     public async Task<Result<CompanyResponse>> CreateAsync(CompanyRequest Request)
     {
-        var isExist =await dbcontext.Companies.AnyAsync(c => c.Name.StartsWith(Request.Name));
+        var isExist =await dbcontext.Companies.AnyAsync(c => c.Name == Request.Name);
 
         if (isExist)
             return Result.Failure<CompanyResponse>(new Error("Company.AlreadyExists", $"Company with name {Request.Name} already exists.", 409));
@@ -34,7 +34,7 @@ public class CompanyService(ApplicationDbcontext dbcontext) : ICompanyService
 
     public async Task<Result> DeleteAsync(string CompanyName, CancellationToken cancellationToken = default)
     {
-        var companies = await dbcontext.Companies.Where(c => c.Name.StartsWith(CompanyName)).SingleOrDefaultAsync();
+        var companies = await dbcontext.Companies.Where(c => c.Name == CompanyName).SingleOrDefaultAsync();
 
         if (companies == null)
             return Result.Failure(new Error("Company.NotFound", $"Company with name {CompanyName} was not found.", 404));
@@ -48,7 +48,7 @@ public class CompanyService(ApplicationDbcontext dbcontext) : ICompanyService
 
     public async Task<Result<IEnumerable<CompanyResponse>>> Get(string CompanyName)
     {
-        var companies = await dbcontext.Companies.Where(c => c.Name.StartsWith(CompanyName)).ToListAsync();
+        var companies = await dbcontext.Companies.Where(c => c.Name.StartsWith(CompanyName)).AsNoTracking().ToListAsync();
 
         if (companies == null)
             return Result.Failure<IEnumerable<CompanyResponse>>(new Error("Company.NotFound", $"Companies starts with name {CompanyName} was not found.", 404));
@@ -60,7 +60,7 @@ public class CompanyService(ApplicationDbcontext dbcontext) : ICompanyService
 
     public async Task<Result<IEnumerable<CompanyResponse>>> GetAllEmployee()
     {
-        var companies = await dbcontext.Companies.ToListAsync();
+        var companies = await dbcontext.Companies.AsNoTracking().ToListAsync();
 
         if (companies == null)
             return Result.Failure<IEnumerable<CompanyResponse>>(new Error("CompanIes.NotFound", " no Company found.", 404));
@@ -72,7 +72,7 @@ public class CompanyService(ApplicationDbcontext dbcontext) : ICompanyService
 
     public async Task<Result<CompanyResponse>> UpdateAsync(string CompanyName, CompanyRequest Request)
     {
-        var companies = await dbcontext.Companies.Where(c => c.Name.StartsWith(CompanyName)).SingleOrDefaultAsync();
+        var companies = await dbcontext.Companies.Where(c => c.Name == CompanyName).SingleOrDefaultAsync();
 
         if (companies == null)
             return Result.Failure<CompanyResponse>(new Error("Company.NotFound", $"Company with name {CompanyName} was not found.", 404));

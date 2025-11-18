@@ -26,6 +26,7 @@ public class ApplicationDbcontext(DbContextOptions<ApplicationDbcontext> options
     public required DbSet<Vehicle> Vehicles { get; set; }
     public required DbSet<DeletedEmployees> DeletedEmployees { get; set; }
     public required DbSet<ArchivedRiderShift> ArchivedRiderShifts { get; set; }
+    public required DbSet<RiderCompanyHistory> RiderCompanyHistory { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
