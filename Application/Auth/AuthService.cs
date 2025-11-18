@@ -21,13 +21,16 @@ public class AuthService(
     UserManager<ApplicationUser> manager,
     SignInManager<ApplicationUser> signInManager
     , IJwtProvider jwtProvider,
-    ILogger<AuthService> logger
+    ILogger<AuthService> logger,
+    RoleManager<ApplicationRole> _roleManager
     ) : IAuthService
 {
     private readonly UserManager<ApplicationUser> manager = manager;
     private readonly SignInManager<ApplicationUser> signInMaganager = signInManager;
     private readonly IJwtProvider jwtProvider = jwtProvider;
     private readonly ILogger<AuthService> logger = logger;
+    private readonly RoleManager<ApplicationRole> roleManager = _roleManager;
+
     public async Task<Result<AuthResponse>> SingInAsync(AuthRequest request)
     {
 
@@ -81,7 +84,9 @@ public class AuthService(
 
         if (result.Succeeded)
         {
-            await manager.AddToRoleAsync(user, DefaultRoles.Member);
+            var role = await roleManager.FindByIdAsync(DefaultRoles.MemberRoleId);
+
+            await manager.AddToRoleAsync(user, role!.Name!);
 
             return Result.Success();
         }
@@ -103,7 +108,9 @@ public class AuthService(
 
         if (result.Succeeded)
         {
-            await manager.AddToRoleAsync(user, DefaultRoles.Admin);
+            var role = await roleManager.FindByIdAsync(DefaultRoles.AdminRoleId);
+
+            await manager.AddToRoleAsync(user, role!.Name!);
 
             return Result.Success();
         }
@@ -124,7 +131,9 @@ public class AuthService(
 
         if (result.Succeeded)
         {
-            await manager.AddToRoleAsync(user, DefaultRoles.Master);
+            var role = await roleManager.FindByIdAsync(DefaultRoles.MasterRoleId);
+
+            await manager.AddToRoleAsync(user, role!.Name!);
 
             return Result.Success();
         }

@@ -60,6 +60,35 @@ public class EmployeeController(IEmployeeService service) : ControllerBase
             response.ToProblem();
     }
 
+    [HttpGet("search")]
+    public async Task<IActionResult> Search([FromQuery] EmployeeFilter Request)
+    {
+        var response = await service.Filter(Request);
+        return response.IsSuccess ?
+            Ok(response.Value) :
+            response.ToProblem();
+    }
+
+    [HttpGet("multi-search")]
+    public async Task<IActionResult> Filter([FromQuery] EmployeeFilter2 filter)
+    {
+        var response = await service.Filter2(filter);
+        return response.IsSuccess ?
+            Ok(response.Value) :
+            response.ToProblem();
+    }
+
+    [HttpGet("smart-search")]
+    public async Task<IActionResult> Search([FromQuery] string q)
+    {
+        if (string.IsNullOrWhiteSpace(q))
+            return BadRequest("Query cannot be empty.");
+
+        var result = await service.SmartSearch(q);
+
+        return Ok(result);
+    }
+
 }
 
 public record Re(string massege);

@@ -35,7 +35,7 @@ public class AuthController(IAuthService service) : ControllerBase
     [HttpPost("master-register")]
     public async Task<IActionResult> MasterRegister([FromBody] RegisterRequest request)
     {
-        var response = await service.AdminRegisterAsync(request);
+        var response = await service.MasterRegisterAsync(request);
 
         return response.IsSuccess ?
             Ok(new Resu("Done please try to Login")) :

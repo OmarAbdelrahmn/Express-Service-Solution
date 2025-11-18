@@ -242,6 +242,71 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
         return Result.Success();
 
     }
+    public async Task<Result<IEnumerable<EmpolyeeResponse>>> Filter(EmployeeFilter filter)
+    {
+        var query = dbcontext.Employees
+            .Include(e => e.Housing)
+            .AsQueryable();
+
+        if (filter.IqamaEndH is not null)
+            query = query.Where(e => e.IqamaEndH == filter.IqamaEndH);
+
+        if (filter.IqamaEndM is not null)
+            query = query.Where(e => e.IqamaEndM == filter.IqamaEndM);
+
+        if (!string.IsNullOrWhiteSpace(filter.Sponsor))
+            query = query.Where(e => e.Sponsor.Contains(filter.Sponsor));
+
+        if (filter.PassportEnd is not null)
+            query = query.Where(e => e.PassportEnd == filter.PassportEnd);
+
+        if (!string.IsNullOrWhiteSpace(filter.JobTitle))
+            query = query.Where(e => e.JobTitle.Contains(filter.JobTitle));
+
+        if (!string.IsNullOrWhiteSpace(filter.NameAR))
+            query = query.Where(e => e.NameAR.Contains(filter.NameAR));
+
+        if (!string.IsNullOrWhiteSpace(filter.NameEN))
+            query = query.Where(e => e.NameEN.Contains(filter.NameEN));
+
+        if (!string.IsNullOrWhiteSpace(filter.Country))
+            query = query.Where(e => e.Country.Contains(filter.Country));
+
+        if (!string.IsNullOrWhiteSpace(filter.Status))
+            query = query.Where(e => e.Status.Contains(filter.Status));
+
+        if (filter.INKSA is not null)
+            query = query.Where(e => e.INKSA == filter.INKSA);
+
+        if (!string.IsNullOrWhiteSpace(filter.HousingName))
+            query = query.Where(e => e.Housing != null &&
+                                     e.Housing.Name.Contains(filter.HousingName));
+
+        var list = await query
+            .Select(emp => new EmpolyeeResponse(
+           emp.IqamaNo,
+           emp.IqamaEndM,
+           emp.IqamaEndH,
+           emp.PassportNo!,
+           emp.PassportEnd ?? default,
+           emp.Sponsor,
+           emp.JobTitle,
+           emp.NameAR,
+           emp.NameEN,
+           emp.Country,
+           emp.Phone,
+           emp.DateOfBirth,
+           emp.Status,
+           emp.IBAN!,
+           emp.INKSA,
+           emp.CreatedAt,
+           emp.Housing.Name ?? null  // safe
+                )).ToListAsync();
+
+
+        return Result.Success<IEnumerable<EmpolyeeResponse>>(list);
+    }
+
     private static EmpolyeeResponse MapToResponse(Employees employee)
     {
         return new EmpolyeeResponse(
@@ -265,4 +330,130 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
         );
     }
 
+    public async Task<Result<PagedList<EmpolyeeResponse>>> Filter2(EmployeeFilter2 filter)
+    {
+    
+        var query = dbcontext.Employees
+            .Include(e => e.Housing)
+            .AsQueryable();
+
+        if (filter.Sponsor?.Any() == true)
+            query = query.Where(e => filter.Sponsor!.Contains(e.Sponsor));
+
+        if (filter.JobTitle?.Any() == true)
+            query = query.Where(e => filter.JobTitle!.Contains(e.JobTitle));
+
+        if (filter.NameAR?.Any() == true)
+            query = query.Where(e => filter.NameAR!.Any(v => e.NameAR.Contains(v)));
+
+        if (filter.NameEN?.Any() == true)
+            query = query.Where(e => filter.NameEN!.Any(v => e.NameEN.Contains(v)));
+
+        if (filter.Country?.Any() == true)
+            query = query.Where(e => filter.Country!.Contains(e.Country));
+
+        if (filter.Status?.Any() == true)
+            query = query.Where(e => filter.Status!.Contains(e.Status));
+
+        if (filter.INKSA is not null)
+            query = query.Where(e => e.INKSA == filter.INKSA);
+
+        if (filter.HousingName?.Any() == true)
+            query = query.Where(e => e.Housing != null &&
+                                     filter.HousingName!.Contains(e.Housing.Name));
+
+
+        if (!string.IsNullOrWhiteSpace(filter.SortBy))
+        {
+            bool descending = filter.SortDirection?.ToUpper() == "DESC";
+
+            query = filter.SortBy switch
+            {
+                "IqamaEndH" => descending ? query.OrderByDescending(e => e.IqamaEndH)
+                                             : query.OrderBy(e => e.IqamaEndH),
+
+                "IqamaEndM" => descending ? query.OrderByDescending(e => e.IqamaEndM)
+                                             : query.OrderBy(e => e.IqamaEndM),
+
+                "Sponsor" => descending ? query.OrderByDescending(e => e.Sponsor)
+                                             : query.OrderBy(e => e.Sponsor),
+
+                "JobTitle" => descending ? query.OrderByDescending(e => e.JobTitle)
+                                             : query.OrderBy(e => e.JobTitle),
+
+                _ => query
+            };
+        }
+
+        
+        int skip = (filter.Page - 1) * filter.PageSize;
+
+        var totalCount = await query.CountAsync();
+
+        var data = await query
+            .Skip(skip)
+            .Take(filter.PageSize)
+            .Select(emp => new EmpolyeeResponse(
+                   emp.IqamaNo,
+                   emp.IqamaEndM,
+                   emp.IqamaEndH,
+                   emp.PassportNo!,
+                   emp.PassportEnd ?? default,
+                   emp.Sponsor,
+                   emp.JobTitle,
+                   emp.NameAR,
+                   emp.NameEN,
+                   emp.Country,
+                   emp.Phone,
+                   emp.DateOfBirth,
+                   emp.Status,
+                   emp.IBAN!,
+                   emp.INKSA,
+                   emp.CreatedAt,
+                   emp.Housing.Name ?? null  // safe
+                        )).ToListAsync();
+
+        return Result.Success(
+            new PagedList<EmpolyeeResponse>(data, totalCount, filter.Page, filter.PageSize)
+        );
+    }
+
+    public async Task<List<EmpolyeeResponse>> SmartSearch(string keyword)
+    {
+    
+        keyword = keyword.ToLower();
+
+        var query = dbcontext.Employees
+            .Include(e => e.Housing)
+            .Where(e =>
+                e.NameAR.ToLower().Contains(keyword) ||
+                e.NameEN.ToLower().Contains(keyword) ||
+                e.Country.ToLower().Contains(keyword) ||
+                e.Sponsor.ToLower().Contains(keyword) ||
+                e.JobTitle.ToLower().Contains(keyword)
+            );
+
+        return await query
+            .Select(emp => new EmpolyeeResponse(
+           emp.IqamaNo,
+           emp.IqamaEndM,
+           emp.IqamaEndH,
+           emp.PassportNo!,
+           emp.PassportEnd ?? default,
+           emp.Sponsor,
+           emp.JobTitle,
+           emp.NameAR,
+           emp.NameEN,
+           emp.Country,
+           emp.Phone,
+           emp.DateOfBirth,
+           emp.Status,
+           emp.IBAN!,
+           emp.INKSA,
+           emp.CreatedAt,
+           emp.Housing.Name ?? null  // safe
+                )).ToListAsync();
+    }
+
 }
+
