@@ -24,6 +24,7 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
         var isexist = await dbcontext
             .Employees
             .Where(e => e.IqamaNo == IqamaNo)
+            .Include(e => e.Housing)
             .AsNoTracking()
             .SingleOrDefaultAsync();
 

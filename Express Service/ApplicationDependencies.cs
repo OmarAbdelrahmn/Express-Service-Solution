@@ -35,6 +35,7 @@ public static class ApplicationDependencies
         Services.AddScoped<IAdminService, AdminService>();
         Services.AddScoped<IRoleService, RoleService>();
         Services.AddScoped<IEmployeeService, EmployeeService>();
+        Services.AddScoped<ICompanyService, CompanyService>();
 
 
         Services.AddAuth(configuration)
