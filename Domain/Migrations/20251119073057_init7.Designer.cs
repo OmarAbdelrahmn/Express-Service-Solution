@@ -4,6 +4,7 @@ using Domain;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Domain.Migrations
 {
     [DbContext(typeof(ApplicationDbcontext))]
-    partial class ApplicationDbcontextModelSnapshot : ModelSnapshot
+    [Migration("20251119073057_init7")]
+    partial class init7
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -169,7 +172,7 @@ namespace Domain.Migrations
                             IsDisable = false,
                             LockoutEnabled = false,
                             NormalizedUserName = "ADMIN",
-                            PasswordHash = "AQAAAAIAAYagAAAAEPf7PZvC4+7TAiQ9AbE5olaMMFzJW8g4dMB7FEodkVpgCLdV51ArPYqiSTPl4Wpq0w==",
+                            PasswordHash = "AQAAAAIAAYagAAAAEGZNKJiY2AK+k76lhXzBW7fK7QwO6MMSxyzhhxDTYGyI4M1/Mqp8/wQi72RwCLMubw==",
                             PhoneNumberConfirmed = false,
                             SecurityStamp = "9FABB58491024B7BB140E4D6658B5BDA",
                             TwoFactorEnabled = false,
@@ -186,7 +189,7 @@ namespace Domain.Migrations
                             IsDisable = false,
                             LockoutEnabled = false,
                             NormalizedUserName = "MASTER",
-                            PasswordHash = "AQAAAAIAAYagAAAAEMcT5KYCI0lr5Qzr8xOaXIyqqCqS36/wpJoDqi/ZmV39GM9NwokJrLYRHpTJWtZzhg==",
+                            PasswordHash = "AQAAAAIAAYagAAAAEJ9TVG9GNCJYcdRSRn2mknBkjn9LEl2MaxSvi4j17h+owiKshc6I2Nk4f8jPqH/brA==",
                             PhoneNumberConfirmed = false,
                             SecurityStamp = "9FABB58491024B7BB140E4D6658B5BDA",
                             TwoFactorEnabled = false,
@@ -690,7 +693,13 @@ namespace Domain.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(450)");
 
+                    b.Property<string>("VehicleNumber1")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(450)");
+
                     b.HasKey("Id");
+
+                    b.HasIndex("VehicleNumber1");
 
                     b.HasIndex("VehicleNumber", "IsActive");
 
@@ -717,34 +726,9 @@ namespace Domain.Migrations
                     b.Property<string>("LicenseImagePath")
                         .HasColumnType("nvarchar(max)");
 
-                    b.Property<string>("Location")
+                    b.Property<string>("LicenseNumber")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
-
-                    b.Property<int>("ManufactureYear")
-                        .HasColumnType("int");
-
-                    b.Property<string>("Manufacturer")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<int>("OwnerId")
-                        .HasColumnType("int");
-
-                    b.Property<string>("OwnerName")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("PlateNumberA")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<string>("PlateNumberE")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<int>("SerialNumber")
-                        .HasColumnType("int");
 
                     b.Property<string>("VehicleImagePath")
                         .HasColumnType("nvarchar(max)");
@@ -754,10 +738,6 @@ namespace Domain.Migrations
                         .HasColumnType("nvarchar(max)");
 
                     b.HasKey("VehicleNumber");
-
-                    b.HasIndex("PlateNumberA");
-
-                    b.HasIndex("SerialNumber");
 
                     b.HasIndex("VehicleNumber");
 
@@ -941,8 +921,8 @@ namespace Domain.Migrations
             modelBuilder.Entity("Domain.Entities.RiderVehicleStatus", b =>
                 {
                     b.HasOne("Domain.Entities.Vehicle", "Vehicle")
-                        .WithMany("RiderVehicleStatuses")
-                        .HasForeignKey("VehicleNumber")
+                        .WithMany()
+                        .HasForeignKey("VehicleNumber1")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
@@ -1018,8 +998,6 @@ namespace Domain.Migrations
             modelBuilder.Entity("Domain.Entities.Vehicle", b =>
                 {
                     b.Navigation("RiderDetails");
-
-                    b.Navigation("RiderVehicleStatuses");
                 });
 #pragma warning restore 612, 618
         }

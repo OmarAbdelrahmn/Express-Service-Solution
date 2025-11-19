@@ -4,6 +4,7 @@ using Domain;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Domain.Migrations
 {
     [DbContext(typeof(ApplicationDbcontext))]
-    partial class ApplicationDbcontextModelSnapshot : ModelSnapshot
+    [Migration("20251119122716_vehicles")]
+    partial class vehicles
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -169,7 +172,7 @@ namespace Domain.Migrations
                             IsDisable = false,
                             LockoutEnabled = false,
                             NormalizedUserName = "ADMIN",
-                            PasswordHash = "AQAAAAIAAYagAAAAEPf7PZvC4+7TAiQ9AbE5olaMMFzJW8g4dMB7FEodkVpgCLdV51ArPYqiSTPl4Wpq0w==",
+                            PasswordHash = "AQAAAAIAAYagAAAAEC+4iDVRgG/0kjcGytl7hV5M1opMRkfLJFHge8xGaGfsvQJ35SumHdnrEjG4WbO5Gw==",
                             PhoneNumberConfirmed = false,
                             SecurityStamp = "9FABB58491024B7BB140E4D6658B5BDA",
                             TwoFactorEnabled = false,
@@ -186,7 +189,7 @@ namespace Domain.Migrations
                             IsDisable = false,
                             LockoutEnabled = false,
                             NormalizedUserName = "MASTER",
-                            PasswordHash = "AQAAAAIAAYagAAAAEMcT5KYCI0lr5Qzr8xOaXIyqqCqS36/wpJoDqi/ZmV39GM9NwokJrLYRHpTJWtZzhg==",
+                            PasswordHash = "AQAAAAIAAYagAAAAEM+Hx9kmSk6NZRjBQpkLwmMuoSrkp68xG4ZNXPStWLaP2n+gxJketZCsxEA8L6Lv+Q==",
                             PhoneNumberConfirmed = false,
                             SecurityStamp = "9FABB58491024B7BB140E4D6658B5BDA",
                             TwoFactorEnabled = false,
@@ -690,7 +693,13 @@ namespace Domain.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(450)");
 
+                    b.Property<string>("VehicleNumber1")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(450)");
+
                     b.HasKey("Id");
+
+                    b.HasIndex("VehicleNumber1");
 
                     b.HasIndex("VehicleNumber", "IsActive");
 
@@ -941,8 +950,8 @@ namespace Domain.Migrations
             modelBuilder.Entity("Domain.Entities.RiderVehicleStatus", b =>
                 {
                     b.HasOne("Domain.Entities.Vehicle", "Vehicle")
-                        .WithMany("RiderVehicleStatuses")
-                        .HasForeignKey("VehicleNumber")
+                        .WithMany()
+                        .HasForeignKey("VehicleNumber1")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
@@ -1018,8 +1027,6 @@ namespace Domain.Migrations
             modelBuilder.Entity("Domain.Entities.Vehicle", b =>
                 {
                     b.Navigation("RiderDetails");
-
-                    b.Navigation("RiderVehicleStatuses");
                 });
 #pragma warning restore 612, 618
         }

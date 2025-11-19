@@ -4,6 +4,7 @@ using Domain;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Domain.Migrations
 {
     [DbContext(typeof(ApplicationDbcontext))]
-    partial class ApplicationDbcontextModelSnapshot : ModelSnapshot
+    [Migration("20251118143829_andingstatus")]
+    partial class andingstatus
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -169,7 +172,7 @@ namespace Domain.Migrations
                             IsDisable = false,
                             LockoutEnabled = false,
                             NormalizedUserName = "ADMIN",
-                            PasswordHash = "AQAAAAIAAYagAAAAEPf7PZvC4+7TAiQ9AbE5olaMMFzJW8g4dMB7FEodkVpgCLdV51ArPYqiSTPl4Wpq0w==",
+                            PasswordHash = "AQAAAAIAAYagAAAAEHRZj8Pt+x3m9Ywsb+scsHhqyoeEgq4FY0Y3Z2pTWmBPoAPivikpY8TaEUQaERStaA==",
                             PhoneNumberConfirmed = false,
                             SecurityStamp = "9FABB58491024B7BB140E4D6658B5BDA",
                             TwoFactorEnabled = false,
@@ -186,7 +189,7 @@ namespace Domain.Migrations
                             IsDisable = false,
                             LockoutEnabled = false,
                             NormalizedUserName = "MASTER",
-                            PasswordHash = "AQAAAAIAAYagAAAAEMcT5KYCI0lr5Qzr8xOaXIyqqCqS36/wpJoDqi/ZmV39GM9NwokJrLYRHpTJWtZzhg==",
+                            PasswordHash = "AQAAAAIAAYagAAAAED/Qvs0qyM3Z2ZEJbGUqyqfsA5+gxlLr/YOnjCOtoXikId30HKvtzAlAq++kjyrQ4A==",
                             PhoneNumberConfirmed = false,
                             SecurityStamp = "9FABB58491024B7BB140E4D6658B5BDA",
                             TwoFactorEnabled = false,
@@ -567,6 +570,9 @@ namespace Domain.Migrations
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("VehicleNumber")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("VehicleNumber1")
                         .HasColumnType("nvarchar(450)");
 
                     b.Property<int?>("WorkingId")
@@ -579,9 +585,7 @@ namespace Domain.Migrations
                     b.HasIndex("EmployeeIqamaNo")
                         .IsUnique();
 
-                    b.HasIndex("VehicleNumber")
-                        .IsUnique()
-                        .HasFilter("[VehicleNumber] IS NOT NULL");
+                    b.HasIndex("VehicleNumber1");
 
                     b.ToTable("RiderDetails");
                 });
@@ -690,7 +694,13 @@ namespace Domain.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(450)");
 
+                    b.Property<string>("VehicleNumber1")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(450)");
+
                     b.HasKey("Id");
+
+                    b.HasIndex("VehicleNumber1");
 
                     b.HasIndex("VehicleNumber", "IsActive");
 
@@ -717,34 +727,9 @@ namespace Domain.Migrations
                     b.Property<string>("LicenseImagePath")
                         .HasColumnType("nvarchar(max)");
 
-                    b.Property<string>("Location")
+                    b.Property<string>("LicenseNumber")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
-
-                    b.Property<int>("ManufactureYear")
-                        .HasColumnType("int");
-
-                    b.Property<string>("Manufacturer")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<int>("OwnerId")
-                        .HasColumnType("int");
-
-                    b.Property<string>("OwnerName")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("PlateNumberA")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<string>("PlateNumberE")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<int>("SerialNumber")
-                        .HasColumnType("int");
 
                     b.Property<string>("VehicleImagePath")
                         .HasColumnType("nvarchar(max)");
@@ -754,10 +739,6 @@ namespace Domain.Migrations
                         .HasColumnType("nvarchar(max)");
 
                     b.HasKey("VehicleNumber");
-
-                    b.HasIndex("PlateNumberA");
-
-                    b.HasIndex("SerialNumber");
 
                     b.HasIndex("VehicleNumber");
 
@@ -917,8 +898,8 @@ namespace Domain.Migrations
                         .IsRequired();
 
                     b.HasOne("Domain.Entities.Vehicle", "Vehicle")
-                        .WithOne("RiderDetails")
-                        .HasForeignKey("Domain.Entities.RiderDetails", "VehicleNumber");
+                        .WithMany()
+                        .HasForeignKey("VehicleNumber1");
 
                     b.Navigation("Company");
 
@@ -941,8 +922,8 @@ namespace Domain.Migrations
             modelBuilder.Entity("Domain.Entities.RiderVehicleStatus", b =>
                 {
                     b.HasOne("Domain.Entities.Vehicle", "Vehicle")
-                        .WithMany("RiderVehicleStatuses")
-                        .HasForeignKey("VehicleNumber")
+                        .WithMany()
+                        .HasForeignKey("VehicleNumber1")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
@@ -1013,13 +994,6 @@ namespace Domain.Migrations
             modelBuilder.Entity("Domain.Entities.RiderDetails", b =>
                 {
                     b.Navigation("RiderShifts");
-                });
-
-            modelBuilder.Entity("Domain.Entities.Vehicle", b =>
-                {
-                    b.Navigation("RiderDetails");
-
-                    b.Navigation("RiderVehicleStatuses");
                 });
 #pragma warning restore 612, 618
         }

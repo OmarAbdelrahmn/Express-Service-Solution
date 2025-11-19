@@ -27,6 +27,7 @@ public class ApplicationDbcontext(DbContextOptions<ApplicationDbcontext> options
     public required DbSet<DeletedEmployees> DeletedEmployees { get; set; }
     public required DbSet<ArchivedRiderShift> ArchivedRiderShifts { get; set; }
     public required DbSet<RiderCompanyHistory> RiderCompanyHistory { get; set; }
+    public required DbSet<RiderVehicleStatus> RiderVehicleStatus { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -39,6 +40,21 @@ public class ApplicationDbcontext(DbContextOptions<ApplicationDbcontext> options
         foreach (var fk in cascadeFKs)
             fk.DeleteBehavior = DeleteBehavior.Restrict;
 
+        modelBuilder.Entity<RiderDetails>()
+        .HasOne(r => r.Vehicle)
+        .WithOne(v => v.RiderDetails)
+        .HasForeignKey<RiderDetails>(r => r.VehicleNumber);
+
+        modelBuilder.Entity<Employees>()
+        .HasOne(e => e.RiderDetails)
+        .WithOne(r => r.Employee)
+        .HasForeignKey<RiderDetails>(r => r.EmployeeIqamaNo);
+
+        modelBuilder.Entity<RiderVehicleStatus>()
+        .HasOne(r => r.Vehicle)
+        .WithMany(v => v.RiderVehicleStatuses)
+        .HasForeignKey(r => r.VehicleNumber)
+        .HasPrincipalKey(v => v.VehicleNumber);
 
         base.OnModelCreating(modelBuilder);
 

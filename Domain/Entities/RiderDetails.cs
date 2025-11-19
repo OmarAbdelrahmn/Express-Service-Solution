@@ -17,6 +17,6 @@ public class RiderDetails
     public Employees Employee { get; set; } = default!;
     public ICollection<RiderShift> RiderShifts { get; set; } = [];
                    
-    public int? VehicleId { get; set; }
+    public string? VehicleNumber { get; set; }
     public Vehicle? Vehicle { get; set; } 
 }
