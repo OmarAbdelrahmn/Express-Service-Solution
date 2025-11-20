@@ -3,6 +3,7 @@ using Application.Auth;
 using Application.Authentication;
 using Application.Roles;
 using Application.Service.Empolyee;
+using Application.Service.Riders;
 using Application.Services.Auth;
 using Application.User;
 using Domain;
@@ -38,6 +39,7 @@ public static class ApplicationDependencies
         Services.AddScoped<ICompanyService, CompanyService>();
         Services.AddScoped<IHousingService, HousingService>();
         Services.AddScoped<IVehicleService, VehicleService>();
+        Services.AddScoped<IRiderService, RiderService>();
 
 
         Services.AddAuth(configuration)

@@ -19,22 +19,42 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
 {
     private readonly ApplicationDbcontext dbcontext = dbcontext;
 
-    public async Task<Result<EmpolyeeResponse>> Get(int IqamaNo)
+    public async Task<Result<IEnumerable<EmpolyeeResponse>>> Get(int IqamaNo)
     {
         var isexist = await dbcontext
             .Employees
-            .Where(e => e.IqamaNo == IqamaNo)
-            .Include(e => e.Housing)
             .AsNoTracking()
-            .SingleOrDefaultAsync();
+            .Where(e => e.IqamaNo.ToString().StartsWith(IqamaNo.ToString()))
+            .Include(e => e.Housing)
+            .ToListAsync();
+
+        if (isexist.Count == 0)
+            return Result.Failure<IEnumerable<EmpolyeeResponse>>(
+                new Error("No Employees Found", "no employees", 400)
+            );
+
+        var res = isexist.Select(emp => new EmpolyeeResponse(
+       emp.IqamaNo,
+       emp.IqamaEndM,
+       emp.IqamaEndH,
+       emp.PassportNo!,
+       emp.PassportEnd ?? default,
+       emp.Sponsor,
+       emp.JobTitle,
+       emp.NameAR,
+       emp.NameEN,
+       emp.Country,
+       emp.Phone,
+       emp.DateOfBirth,
+       emp.Status,
+       emp.IBAN!,
+       emp.INKSA,
+       emp.CreatedAt,
+       emp.Housing?.Name   // safe
+            )).ToList();
 
 
-        if (isexist is null)
-            return Result.Failure<EmpolyeeResponse>(error: new Error("No Employee Found", "no employee found with this Iqama", 400));
-
-        var response = MapToResponse(isexist);
-
-        return Result.Success(response);
+        return Result.Success<IEnumerable<EmpolyeeResponse>>(res);
     }
 
     public async Task<Result<IEnumerable<EmpolyeeResponse>>> GetAllEmployee()

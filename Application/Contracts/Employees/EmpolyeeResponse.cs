@@ -75,10 +75,10 @@ public record RiderResponse(
     bool INKSA,
     DateTime CreatedAt,
     string HousingAddress,
-    int WorkingId, 
+    int? WorkingId, 
     int EmployeeIqamaNo,
-    string TshirtSize, 
-    string LicenseNumber, 
-    string CompanyName 
+    string? TshirtSize, 
+    string? LicenseNumber, 
+    string? CompanyName 
     );
 
