@@ -119,7 +119,7 @@ public class RiderService(ApplicationDbcontext dbcontext) : IRiderService
             var Company = await dbcontext.Companies.FirstOrDefaultAsync(c => c.Name == Request.CompanyName);
 
             if (Company is null)
-                return Result.Failure(error: new Error("no company found", $"no company found with this name {Company.Name}", 400));
+                return Result.Failure(error: new Error("no company found", $"no company found with this name ", 400));
 
 
             var employee = new Employees
@@ -152,7 +152,7 @@ public class RiderService(ApplicationDbcontext dbcontext) : IRiderService
 
             await dbcontext.Employees.AddAsync(employee);
             await dbcontext.SaveChangesAsync();
-
+            await transaction.CommitAsync();
             return Result.Success();
 
         }
@@ -193,6 +193,7 @@ public class RiderService(ApplicationDbcontext dbcontext) : IRiderService
 
             dbcontext.Employees.Remove(isexist);
             dbcontext.SaveChanges();
+            await transaction.CommitAsync();
 
             return Result.Success();
         }
@@ -287,6 +288,7 @@ public class RiderService(ApplicationDbcontext dbcontext) : IRiderService
             await dbcontext.SaveChangesAsync();
 
             var response = MapToResponse(employee, riderDetails);
+            await transaction.CommitAsync();
 
             return Result.Success(response);
         }
@@ -414,6 +416,7 @@ public class RiderService(ApplicationDbcontext dbcontext) : IRiderService
             };
             await dbcontext.RiderDetails.AddAsync(emtor);
             await dbcontext.SaveChangesAsync();
+            await transaction.CommitAsync();
             return Result.Success();
         }
         catch (Exception ex)
@@ -422,6 +425,45 @@ public class RiderService(ApplicationDbcontext dbcontext) : IRiderService
             return Result.Failure(new Error("Server Error", ex.Message, 500));
 
         }
+    }
+
+    public async Task<Result<RiderResponse>> Getbyid(int Id)
+    {
+        var rider = await
+            dbcontext.Employees
+            .Include(e => e.Housing)
+            .Include(e => e.RiderDetails)
+                .ThenInclude(rd => rd.Company)
+            .FirstOrDefaultAsync(e => e.IqamaNo == Id && e.RiderDetails != null);
+
+        if (rider is null)
+            return Result.Failure<RiderResponse>(error: new Error("No Employee Found", "no employee found with this Iqama", 400));
+
+        var response = new RiderResponse(
+            rider.IqamaNo,
+            rider.IqamaEndM,
+            rider.IqamaEndH,
+            rider.PassportNo!,
+            rider.PassportEnd ?? default,
+            rider.Sponsor,
+            rider.JobTitle,
+            rider.NameAR,
+            rider.NameEN,
+            rider.Country,
+            rider.Phone,
+            rider.DateOfBirth,
+            rider.Status,
+            rider.IBAN!,
+            rider.INKSA,
+            rider.CreatedAt,
+            rider.Housing?.Name,
+            rider.RiderDetails!.WorkingId!,
+            rider.IqamaNo,
+            rider.RiderDetails.TshirtSize!,
+            rider.RiderDetails.LicenseNumber!,
+            rider.RiderDetails.Company.Name
+            );
+        return Result.Success(response);
     }
 }
 

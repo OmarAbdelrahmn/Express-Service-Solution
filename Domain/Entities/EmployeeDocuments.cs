@@ -1,13 +1,17 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 using System.Text;
 
 namespace Domain.Entities;
 
 public class EmployeeDocuments
 {
+
     public int Id { get; set; }
-    public long EmployeeIqamaNo { get; set; }  
+    [ForeignKey("EmployeeIqamaNo")]
+    public int EmployeeIqamaNo { get; set; }  
 
    
     public string? ProfileImagePath { get; set; }  

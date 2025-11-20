@@ -11,6 +11,7 @@ public interface IRiderService
 {
     Task<Result<IEnumerable<RiderResponse>>> GetAllEmployee();
     Task<Result<IEnumerable<RiderResponse>>> Get(int IqamaNo);
+    Task<Result<RiderResponse>> Getbyid(int Id);
     Task<Result> CreateAsync(RiderRequest Request);
     Task<Result<RiderResponse>> UpdateAsync(int IqamaNo, URiderRequest Request);
     Task<Result> DeleteAsync(int IqamaNo, CancellationToken cancellationToken = default);

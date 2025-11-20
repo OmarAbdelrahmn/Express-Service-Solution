@@ -12,13 +12,15 @@ public class RiderShiftSubstitutionConfigration : IEntityTypeConfiguration<Rider
     public void Configure(EntityTypeBuilder<RiderShiftSubstitution> builder)
     {
         builder.HasKey(rss => rss.Id);
-        builder.Property(rss => rss.OriginalWorkingId)
+        builder.Property(rss => rss.ActualRiderId)
             .IsRequired()
             .HasMaxLength(50);
         builder.Property(rss => rss.SubstituteWorkingId)
             .IsRequired()
             .HasMaxLength(50);
-        builder.Property(rss => rss.ShiftDate)
+        builder.Property(rss => rss.StartDate)
+            .IsRequired();
+        builder.Property(rss => rss.EndDate)
             .IsRequired();
         builder.Property(rss => rss.Reason)
             .IsRequired()

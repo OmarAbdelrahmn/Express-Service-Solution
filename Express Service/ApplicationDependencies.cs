@@ -40,6 +40,7 @@ public static class ApplicationDependencies
         Services.AddScoped<IHousingService, HousingService>();
         Services.AddScoped<IVehicleService, VehicleService>();
         Services.AddScoped<IRiderService, RiderService>();
+        Services.AddScoped<IRiderSub, RiderSub>();
 
 
         Services.AddAuth(configuration)

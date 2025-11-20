@@ -56,6 +56,12 @@ public class ApplicationDbcontext(DbContextOptions<ApplicationDbcontext> options
         .HasForeignKey(r => r.VehicleNumber)
         .HasPrincipalKey(v => v.VehicleNumber);
 
+        //modelBuilder.Entity<EmployeeDocuments>()
+        //.HasOne(ed => ed.Employee)
+        //.WithOne(r => r.EmployeeDocuments)
+        //.HasForeignKey(ed => ed.EmployeeIqamaNo);
+
+
         base.OnModelCreating(modelBuilder);
 
     }

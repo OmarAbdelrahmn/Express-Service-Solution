@@ -29,6 +29,7 @@ public class Employees
 
     public RiderDetails? RiderDetails { get; set; }
 
+    public EmployeeDocuments? EmployeeDocuments { get; set; }
 
-}
+    }
 

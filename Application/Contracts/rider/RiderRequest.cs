@@ -23,7 +23,6 @@ public record RiderRequest
     bool INKSA,
     string HousingAddress,
     int WorkingId,
-    int EmployeeIqamaNo,
     string TshirtSize,
     string LicenseNumber,
     string CompanyName
