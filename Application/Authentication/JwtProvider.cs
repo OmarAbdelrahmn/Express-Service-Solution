@@ -12,13 +12,13 @@ public class JwtProvider(IOptions<JwtOptions> options) : IJwtProvider
 {
     private readonly JwtOptions options = options.Value;
 
-    public (string Token, int Expiry) GenerateToken(ApplicationUser user, IEnumerable<string> Roles)
+    public (string Token, int Expiry) GenerateToken(ApplicationUser user, IEnumerable<string> roles)
     {
         Claim[] claims = [
             new (System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub, user.Id),
             new (System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.UniqueName, user.UserName!),
             new (System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
-            new (nameof(Roles),JsonSerializer.Serialize(Roles),System.IdentityModel.Tokens.Jwt.JsonClaimValueTypes.JsonArray)
+            new (nameof(roles),JsonSerializer.Serialize(roles),System.IdentityModel.Tokens.Jwt.JsonClaimValueTypes.JsonArray)
             ];
 
         var SymmetricSecuritykey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(options.Key));

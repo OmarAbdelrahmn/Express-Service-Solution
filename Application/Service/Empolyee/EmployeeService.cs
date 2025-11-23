@@ -62,6 +62,7 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
         var isexist = await dbcontext
             .Employees
             .AsNoTracking()
+            .Where(c=>c.RiderDetails == null)
             .Include(e => e.Housing)
             .ToListAsync();
 

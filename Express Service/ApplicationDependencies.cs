@@ -3,6 +3,7 @@ using Application.Auth;
 using Application.Authentication;
 using Application.Roles;
 using Application.Service.Empolyee;
+using Application.Service.Reports;
 using Application.Service.Riders;
 using Application.Services.Auth;
 using Application.User;
@@ -41,6 +42,8 @@ public static class ApplicationDependencies
         Services.AddScoped<IVehicleService, VehicleService>();
         Services.AddScoped<IRiderService, RiderService>();
         Services.AddScoped<IRiderSub, RiderSub>();
+        Services.AddScoped<IRiderShiftService, RiderShiftService>();
+        Services.AddScoped<IReportService, ReportService>();
 
 
         Services.AddAuth(configuration)

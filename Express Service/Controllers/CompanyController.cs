@@ -1,5 +1,6 @@
 ﻿using Application.Contracts.Employees;
 using Application.Service.Empolyee;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
@@ -7,6 +8,7 @@ namespace Express_Service.Controllers;
 
 [Route("[controller]")]
 [ApiController]
+//[Authorize(Roles = )]
 public class CompanyController(ICompanyService service) : ControllerBase
 {
     private readonly ICompanyService service = service;

@@ -17,5 +17,5 @@ public class RiderShift
     public string ShiftStatus { get; set; } = string.Empty;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public RiderDetails Rider { get; set; } = default!;
-
+    public Company Company { get; set; } = default!;
 }
