@@ -1,5 +1,6 @@
 ﻿using Application.Abstraction;
 using Application.Service.Reports;
+using Domain.Entities;
 using System;
 using System.Collections.Generic;
 using System.Text;
@@ -19,36 +20,16 @@ public interface IRiderShiftService
     Task<Result<BulkDeleteResult>> DeleteShiftsByDateAsync(DateOnly shiftDate, CancellationToken cancellationToken = default);
     Task<Result<BulkDeleteResult>> DeleteShiftsByDateRangeAsync(DateOnly startDate, DateOnly endDate, CancellationToken cancellationToken = default);
     Task<Result<BulkDeleteResult>> DeleteShiftsByRiderAndDateRangeAsync(int workingId, DateOnly startDate, DateOnly endDate, CancellationToken cancellationToken = default);
-    Task<Result<BulkImportResult>> ImportShiftsFromExcelAsync(Stream excelStream,DateOnly shiftDate,int rejectionThreshold = 2, CancellationToken cancellationToken = default);
-
-    Task<Result<BulkUpdateResult>> ApplyBulkUpdateAsync(
-        Stream excelStream,
-        DateOnly shiftDate,
-        UpdateChoice choice,
-        int rejectionThreshold = 2,
-        CancellationToken cancellationToken = default);
-
-
-    Task<Result<List<RiderShiftResponse>>> GetRiderShiftsByDateAsync(
-        DateOnly shiftDate,
-        CancellationToken cancellationToken = default);
-
+    Task<Result<BulkComparisonResult>> CreateShiftComparisonsAsync(Stream excelStream,DateOnly shiftDate,int rejectionThreshold = 2, CancellationToken cancellationToken = default);
+    Task<Result<BulkImportResult>> ImportShiftsFromExcelAsync(Stream excelStream,DateOnly shiftDate,int rejectionThreshold = 2,CancellationToken cancellationToken = default);
+    Task<Result<ResolutionResult>> ResolveShiftComparisonsAsync(ResolveComparisonsRequest request,CancellationToken cancellationToken = default);
+    Task<Result<BulkComparisonResult>> GetPendingComparisonsAsync(DateOnly shiftDate,CancellationToken cancellationToken = default);
 
 }
 
-public record BulkUpdateResult(
-    int TotalRecords,
-    int UpdatedCount,
-    int ErrorCount,
-    List<ImportError> Errors);
 
-public enum UpdateChoice
-{
-    KeepOld,
-    ReplaceWithNew
-}
 public record CreateRiderShiftRequest(
-    int WorkingId,  // Current WorkingId
+    int WorkingId,  
     DateOnly ShiftDate,
     int AcceptedDailyOrders,
     int RejectedDailyOrders,
@@ -57,7 +38,7 @@ public record CreateRiderShiftRequest(
 );
 
 public record UpdateRiderShiftRequest(
-    int WorkingId,  // Current WorkingId
+    int WorkingId, 
     DateOnly ShiftDate,
     int? AcceptedDailyOrders,
     int? RejectedDailyOrders,
@@ -85,11 +66,7 @@ public record RiderShiftResponse(
 );
 
 
-public record ImportError(
-    int RowNumber,
-    string WorkingId,
-    string ErrorMessage
-);
+
 
 public record BulkDeleteResult(
     int TotalDeleted,
@@ -201,11 +178,10 @@ public record MonthlyBreakdown(
 public record DateRangeReport(
     int RiderId,
     string RiderName,
-    int WorkingId,  // ✅ Current WorkingId
+    int WorkingId,  
     DateOnly StartDate,
     DateOnly EndDate,
 
-    // Overall totals
     int TotalWorkingDays,
     int CompletedShifts,
     int IncompleteShifts,
@@ -218,12 +194,10 @@ public record DateRangeReport(
     decimal TotalPenaltyAmount,
     decimal OverallPerformanceScore,
 
-    // Per-company breakdown
     List<CompanyPeriodBreakdown> CompanyBreakdowns,
 
     List<ProblemShiftDetail> ProblematicShifts,
 
-    // WorkingId change history (optional)
     List<WorkingIdPeriod> WorkingIdHistory
 );
 
@@ -251,7 +225,7 @@ public record CompanyPerformanceReport(
 public record ProblemShiftDetail(
     int RiderId,
     string RiderName,
-    int WorkingId,  // Historical WorkingId for this shift
+    int WorkingId,  
     DateOnly ShiftDate,
     string CompanyName,
     int AcceptedOrders,
@@ -266,7 +240,7 @@ public record ProblemShiftDetail(
 public record RiderPerformanceSummary(
     int RiderId,
     string RiderName,
-    int WorkingId,  // Current WorkingId
+    int WorkingId,  
     int TotalShifts,
     int CompletedShifts,
     int TotalAcceptedOrders,
@@ -275,7 +249,6 @@ public record RiderPerformanceSummary(
     decimal PerformanceScore
 );
 
-// NEW: Tracks WorkingId changes during a period
 public record WorkingIdPeriod(
     int WorkingId,
     DateOnly StartDate,

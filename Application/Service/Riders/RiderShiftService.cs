@@ -265,40 +265,30 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
         }
     }
 
-    public async Task<Result<BulkUpdateResult>> ApplyBulkUpdateAsync(
-    Stream excelStream,
-    DateOnly shiftDate,
-    UpdateChoice choice,
-    int rejectionThreshold = 2,
-    CancellationToken cancellationToken = default)
+
+    public async Task<Result<BulkComparisonResult>> CreateShiftComparisonsAsync(
+        Stream excelStream,
+        DateOnly shiftDate,
+        int rejectionThreshold = 2,
+        CancellationToken cancellationToken = default)
     {
         var errors = new List<ImportError>();
-        var updatedCount = 0;
-        var totalRecords = 0;
+        var comparisons = new List<ShiftComparisonResponse>();
+        var newShiftCount = 0;
+        var updateCount = 0;
 
         try
         {
-            if (choice == UpdateChoice.KeepOld)
-            {
-                return Result.Success(new BulkUpdateResult(0, 0, 0, new List<ImportError>()));
-            }
-
-            // User chose ReplaceWithNew - proceed with update
             using var workbook = new XLWorkbook(excelStream);
             var worksheet = workbook.Worksheet(1);
 
             var columnMapping = FindColumnIndices(worksheet);
-
             if (!columnMapping.IsValid)
             {
-                return Result.Failure<BulkUpdateResult>(
+                return Result.Failure<BulkComparisonResult>(
                     new Error("InvalidExcel", columnMapping.ErrorMessage!, 400));
             }
 
-            var rows = worksheet.RowsUsed().Skip(1);
-            totalRecords = rows.Count();
-
-            // Load active substitutions
             var activeSubstitutions = await dbcontext.Set<RiderShiftSubstitution>()
                 .Where(s => s.IsActive)
                 .Include(s => s.ActualRider)
@@ -311,7 +301,6 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
             var substitutionDict = activeSubstitutions
                 .ToDictionary(s => s.SubstituteWorkingId, s => s);
 
-            // Load all riders
             var allRiderDetails = await dbcontext.RiderDetails
                 .Include(r => r.Company)
                 .Include(r => r.Employee)
@@ -322,10 +311,31 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
                 .Where(r => r.WorkingId.HasValue)
                 .ToDictionary(r => r.WorkingId!.Value, r => r);
 
-            var shiftsToAdd = new List<RiderShift>();
-            var rowNumber = 1;
+            var existingShifts = await dbcontext.RiderShifts
+                .Include(s => s.Rider)
+                    .ThenInclude(r => r.Company)
+                .Include(s => s.Rider)
+                    .ThenInclude(r => r.Employee)
+                .Where(s => s.ShiftDate == shiftDate)
+                .ToListAsync(cancellationToken);
 
-            // Parse all rows from Excel
+            var existingShiftDict = existingShifts
+                .ToDictionary(s => (s.RiderId, s.WorkingId), s => s);
+
+            var oldComparisons = await dbcontext.TempRiderShiftComparisons
+                .Where(t => t.ShiftDate == shiftDate && !t.IsResolved)
+                .ToListAsync(cancellationToken);
+
+            if (oldComparisons.Any())
+            {
+                dbcontext.TempRiderShiftComparisons.RemoveRange(oldComparisons);
+                await dbcontext.SaveChangesAsync(cancellationToken);
+            }
+
+            var rows = worksheet.RowsUsed().Skip(1);
+            var rowNumber = 1;
+            var tempComparisons = new List<TempRiderShiftComparison>();
+
             foreach (var row in rows)
             {
                 rowNumber++;
@@ -333,22 +343,33 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
                 try
                 {
                     var shiftData = ParseExcelRowByName(row, columnMapping, rowNumber);
-
                     if (!shiftData.IsValid)
                     {
-                        errors.Add(new ImportError(rowNumber, shiftData.WorkingId?.ToString() ?? "N/A", shiftData.ErrorMessage!));
+                        errors.Add(new ImportError(
+                            rowNumber,
+                            shiftData.WorkingId?.ToString() ?? "N/A",
+                            shiftData.ErrorMessage!));
                         continue;
                     }
 
                     RiderDetails? actualRider = null;
+                    bool isSubstitution = false;
+                    int? originalRiderWorkingId = null;
 
                     if (substitutionDict.TryGetValue(shiftData.WorkingId!.Value, out var substitution))
                     {
                         actualRider = substitution.ActualRider;
+                        isSubstitution = true;
+                        originalRiderWorkingId = actualRider.WorkingId; 
+
+                        //Console.WriteLine($"[SUBSTITUTION] Rider {actualRider.Employee.NameEN} (Original ID: {originalRiderWorkingId}) " +
+                        //                $"working under substitute ID {shiftData.WorkingId}");
                     }
                     else if (ridersByWorkingId.TryGetValue(shiftData.WorkingId!.Value, out var rider))
                     {
                         actualRider = rider;
+                        isSubstitution = false;
+                        originalRiderWorkingId = null;
                     }
 
                     if (actualRider is null)
@@ -356,54 +377,80 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
                         errors.Add(new ImportError(
                             rowNumber,
                             shiftData.WorkingId!.Value.ToString(),
-                            $"No rider found with working ID {shiftData.WorkingId}"));
+                            $"No rider found with working ID {shiftData.WorkingId}. " +
+                            $"Check if rider exists or if there's an active substitution."));
                         continue;
                     }
 
-                    var duplicateInBatch = shiftsToAdd.Any(s =>
-                        s.RiderId == actualRider.Id &&
-                        s.WorkingId == shiftData.WorkingId &&
-                        s.ShiftDate == shiftDate);
+                    var duplicateInBatch = tempComparisons.Any(t =>
+                        t.RiderId == actualRider.Id &&
+                        t.WorkingId == shiftData.WorkingId!.Value &&
+                        t.ShiftDate == shiftDate);
 
                     if (duplicateInBatch)
                     {
                         errors.Add(new ImportError(
                             rowNumber,
                             shiftData.WorkingId!.Value.ToString(),
-                            $"Duplicate shift in Excel file for Working ID {shiftData.WorkingId}"));
+                            $"Duplicate entry in Excel for Working ID {shiftData.WorkingId} " +
+                            $"(Rider: {actualRider.Employee.NameEN})"));
                         continue;
                     }
 
-                    var shiftStatus = CalculateShiftStatus(
+                    var newShiftStatus = CalculateShiftStatus(
                         shiftData.AcceptedDailyOrders!.Value,
                         actualRider.Company.Name);
 
-                    var hasRejectionProblem = shiftData.RealRejectedDailyOrders!.Value > rejectionThreshold;
-                    var penaltyAmount = CalculateRejectionPenalty(shiftData.RealRejectedDailyOrders.Value);
+                    var (hasNewRejectionProblem, newPenalty) =
+                        CalculateRejectionPenalty(shiftData.RealRejectedDailyOrders!.Value);
 
-                    var shift = new RiderShift
+                    var existingShift = existingShiftDict
+                        .GetValueOrDefault((actualRider.Id, shiftData.WorkingId.Value));
+
+                    var tempComparison = new TempRiderShiftComparison
                     {
-                        RiderId = actualRider.Id,
-                        WorkingId = shiftData.WorkingId!.Value,
+                        RiderId = actualRider.Id,  
+                        WorkingId = shiftData.WorkingId.Value, 
                         ShiftDate = shiftDate,
-                        AcceptedDailyOrders = shiftData.AcceptedDailyOrders!.Value,
-                        RejectedDailyOrders = shiftData.RejectedDailyOrders!.Value,
-                        RealRejectedDailyOrders = shiftData.RealRejectedDailyOrders!.Value,
-                        WorkingHours = shiftData.WorkingHours!.Value,
                         CompanyId = actualRider.CompanyId,
-                        ShiftStatus = shiftStatus,
-                        CreatedAt = DateTime.UtcNow,
-                        Rider = actualRider
+
+                        IsSubstitution = isSubstitution,
+                        OriginalRiderWorkingId = originalRiderWorkingId,
+
+                        OldAcceptedDailyOrders = existingShift?.AcceptedDailyOrders,
+                        OldRejectedDailyOrders = existingShift?.RejectedDailyOrders,
+                        OldRealRejectedDailyOrders = existingShift?.RealRejectedDailyOrders,
+                        OldWorkingHours = existingShift?.WorkingHours,
+                        OldShiftStatus = existingShift?.ShiftStatus,
+                        OldCreatedAt = existingShift?.CreatedAt,
+
+                        NewAcceptedDailyOrders = shiftData.AcceptedDailyOrders.Value,
+                        NewRejectedDailyOrders = shiftData.RejectedDailyOrders.Value,
+                        NewRealRejectedDailyOrders = shiftData.RealRejectedDailyOrders.Value,
+                        NewWorkingHours = shiftData.WorkingHours.Value,
+                        NewShiftStatus = newShiftStatus,
+
+                        UploadedAt = DateTime.UtcNow,
+                        IsResolved = false,
+
+                        Rider = actualRider,
+                        Company = actualRider.Company
                     };
 
-                    shiftsToAdd.Add(shift);
+                    tempComparisons.Add(tempComparison);
 
-                    if (hasRejectionProblem)
+                    if (existingShift == null)
+                        newShiftCount++;
+                    else
+                        updateCount++;
+
+                    if (isSubstitution)
                     {
                         errors.Add(new ImportError(
                             rowNumber,
                             shiftData.WorkingId!.Value.ToString(),
-                            $"WARNING: Shift has {shiftData.RealRejectedDailyOrders} rejections (exceeds threshold of {rejectionThreshold}). Penalty: {penaltyAmount} SAR"));
+                            $"INFO: Rider {actualRider.Employee.NameEN} (Original ID: {originalRiderWorkingId}) " +
+                            $"is working under substitute ID {shiftData.WorkingId}"));
                     }
                 }
                 catch (Exception ex)
@@ -411,47 +458,77 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
                     errors.Add(new ImportError(
                         rowNumber,
                         "N/A",
-                        $"Error parsing row: {ex.Message}"));
+                        $"Error processing row: {ex.Message}"));
                 }
             }
 
-            // If we have valid shifts to add, proceed with transaction
-            if (shiftsToAdd.Any())
+            if (tempComparisons.Any())
             {
-                using var transaction = await dbcontext.Database.BeginTransactionAsync(cancellationToken);
+                await dbcontext.TempRiderShiftComparisons.AddRangeAsync(
+                    tempComparisons,
+                    cancellationToken);
+                await dbcontext.SaveChangesAsync(cancellationToken);
 
-                try
+                foreach (var temp in tempComparisons)
                 {
-                    // Step 1: Delete ALL existing shifts for this date
-                    var existingShifts = await dbcontext.RiderShifts
-                        .Where(s => s.ShiftDate == shiftDate)
-                        .ToListAsync(cancellationToken);
+                    var (hasOldProblem, oldPenalty) = temp.OldRealRejectedDailyOrders.HasValue
+                        ? CalculateRejectionPenalty(temp.OldRealRejectedDailyOrders.Value)
+                        : (false, 0m);
 
-                    if (existingShifts.Any())
-                    {
-                        dbcontext.RiderShifts.RemoveRange(existingShifts);
-                    }
+                    var (hasNewProblem, newPenalty) =
+                        CalculateRejectionPenalty(temp.NewRealRejectedDailyOrders);
 
-                    // Step 2: Add new shifts
-                    await dbcontext.RiderShifts.AddRangeAsync(shiftsToAdd, cancellationToken);
-                    await dbcontext.SaveChangesAsync(cancellationToken);
+                    var oldData = new ShiftComparisonData(
+                        temp.OldAcceptedDailyOrders,
+                        temp.OldRejectedDailyOrders,
+                        temp.OldRealRejectedDailyOrders,
+                        temp.OldWorkingHours,
+                        temp.OldShiftStatus,
+                        hasOldProblem,
+                        oldPenalty,
+                        temp.OldCreatedAt
+                    );
 
-                    updatedCount = shiftsToAdd.Count;
+                    var newData = new ShiftComparisonData(
+                        temp.NewAcceptedDailyOrders,
+                        temp.NewRejectedDailyOrders,
+                        temp.NewRealRejectedDailyOrders,
+                        temp.NewWorkingHours,
+                        temp.NewShiftStatus,
+                        hasNewProblem,
+                        newPenalty,
+                        temp.UploadedAt
+                    );
 
-                    await transaction.CommitAsync(cancellationToken);
-                }
-                catch (Exception ex)
-                {
-                    await transaction.RollbackAsync(cancellationToken);
-                    return Result.Failure<BulkUpdateResult>(
-                        new Error("ServerError", $"Database error during bulk update: {ex.Message}", 500));
+                    var analysis = CreateComparisonAnalysis(oldData, newData);
+
+                    var substitutionNote = temp.IsSubstitution
+                        ? $"⚠️ Using substitute Working ID {temp.WorkingId} (Original ID: {temp.OriginalRiderWorkingId})"
+                        : string.Empty;
+
+                    comparisons.Add(new ShiftComparisonResponse(
+                        temp.RiderId,
+                        temp.WorkingId,
+                        temp.ShiftDate,
+                        temp.Rider.Employee.NameEN,
+                        temp.Rider.Employee.NameAR,
+                        temp.Company.Name,
+                        CompanyShiftConfiguration.GetDailyOrderTarget(temp.Company.Name),
+                        temp.IsSubstitution,  
+                        temp.OriginalRiderWorkingId,  
+                        substitutionNote,  
+                        oldData,
+                        newData,
+                        analysis
+                    ));
                 }
             }
 
-            var result = new BulkUpdateResult(
-                totalRecords,
-                updatedCount,
-                errors.Count,
+            var result = new BulkComparisonResult(
+                tempComparisons.Count,
+                newShiftCount,
+                updateCount,
+                comparisons,
                 errors
             );
 
@@ -459,10 +536,296 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
         }
         catch (Exception ex)
         {
-            return Result.Failure<BulkUpdateResult>(
-                new Error("ServerError", $"Error reading Excel file: {ex.Message}", 500));
+            return Result.Failure<BulkComparisonResult>(
+                new Error("ServerError", $"Error processing Excel: {ex.Message}", 500));
         }
     }
+
+    public async Task<Result<BulkComparisonResult>> GetPendingComparisonsAsync(
+        DateOnly shiftDate,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var tempComparisons = await dbcontext.TempRiderShiftComparisons
+                .Include(t => t.Rider)
+                    .ThenInclude(r => r.Employee)
+                .Include(t => t.Company)
+                .Where(t => t.ShiftDate == shiftDate && !t.IsResolved)
+                .OrderBy(t => t.WorkingId)
+                .ToListAsync(cancellationToken);
+
+            if (!tempComparisons.Any())
+            {
+                return Result.Failure<BulkComparisonResult>(
+                    new Error("NotFound", "No pending comparisons found for this date", 404));
+            }
+
+            var comparisons = new List<ShiftComparisonResponse>();
+            var newShiftCount = 0;
+            var updateCount = 0;
+
+            foreach (var temp in tempComparisons)
+            {
+                if (!temp.OldAcceptedDailyOrders.HasValue)
+                    newShiftCount++;
+                else
+                    updateCount++;
+
+                var (hasOldProblem, oldPenalty) = temp.OldRealRejectedDailyOrders.HasValue
+                    ? CalculateRejectionPenalty(temp.OldRealRejectedDailyOrders.Value)
+                    : (false, 0m);
+
+                var (hasNewProblem, newPenalty) =
+                    CalculateRejectionPenalty(temp.NewRealRejectedDailyOrders);
+
+                var oldData = new ShiftComparisonData(
+                    temp.OldAcceptedDailyOrders,
+                    temp.OldRejectedDailyOrders,
+                    temp.OldRealRejectedDailyOrders,
+                    temp.OldWorkingHours,
+                    temp.OldShiftStatus,
+                    hasOldProblem,
+                    oldPenalty,
+                    temp.OldCreatedAt
+                );
+
+                var newData = new ShiftComparisonData(
+                    temp.NewAcceptedDailyOrders,
+                    temp.NewRejectedDailyOrders,
+                    temp.NewRealRejectedDailyOrders,
+                    temp.NewWorkingHours,
+                    temp.NewShiftStatus,
+                    hasNewProblem,
+                    newPenalty,
+                    temp.UploadedAt
+                );
+
+                var analysis = CreateComparisonAnalysis(oldData, newData);
+
+                var substitutionNote = temp.IsSubstitution
+                    ? $"⚠️ Using substitute Working ID {temp.WorkingId} (Original ID: {temp.OriginalRiderWorkingId})"
+                    : string.Empty;
+
+                comparisons.Add(new ShiftComparisonResponse(
+                    temp.RiderId,
+                    temp.WorkingId,
+                    temp.ShiftDate,
+                    temp.Rider.Employee.NameEN,
+                    temp.Rider.Employee.NameAR,
+                    temp.Company.Name,
+                    CompanyShiftConfiguration.GetDailyOrderTarget(temp.Company.Name),
+                    temp.IsSubstitution,  
+                    temp.OriginalRiderWorkingId,  
+                    substitutionNote,  
+                    oldData,
+                    newData,
+                    analysis
+                ));
+            }
+
+            var result = new BulkComparisonResult(
+                tempComparisons.Count,
+                newShiftCount,
+                updateCount,
+                comparisons,
+                new List<ImportError>()
+            );
+
+            return Result.Success(result);
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<BulkComparisonResult>(
+                new Error("ServerError", $"Error retrieving comparisons: {ex.Message}", 500));
+        }
+    }
+
+
+    public async Task<Result<ResolutionResult>> ResolveShiftComparisonsAsync(
+        ResolveComparisonsRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        using var transaction = await dbcontext.Database.BeginTransactionAsync(cancellationToken);
+
+        try
+        {
+            var tempComparisons = await dbcontext.TempRiderShiftComparisons
+                .Include(t => t.Rider)
+                    .ThenInclude(r => r.Employee)
+                .Include(t => t.Company)
+                .Where(t => t.ShiftDate == request.ShiftDate && !t.IsResolved)
+                .ToListAsync(cancellationToken);
+
+            if (!tempComparisons.Any())
+            {
+                return Result.Failure<ResolutionResult>(
+                    new Error("NotFound", "No pending comparisons to resolve", 404));
+            }
+
+            var details = new List<string>();
+            var updatedCount = 0;
+            var newCount = 0;
+            var unchangedCount = 0;
+
+            if (request.Choice == ResolutionChoice.KeepOld)
+            {
+                foreach (var temp in tempComparisons)
+                {
+                    temp.IsResolved = true;
+
+                    var riderInfo = temp.IsSubstitution
+                        ? $"{temp.Rider.Employee.NameEN} (Substitute ID: {temp.WorkingId}, Original ID: {temp.OriginalRiderWorkingId})"
+                        : $"{temp.Rider.Employee.NameEN} (ID: {temp.WorkingId})";
+
+                    details.Add($"Kept existing data for {riderInfo}");
+                }
+                unchangedCount = tempComparisons.Count;
+            }
+            else if (request.Choice == ResolutionChoice.UseNew)
+            {
+                var shiftKeys = tempComparisons
+                    .Select(t => new { t.RiderId, t.WorkingId, t.ShiftDate })
+                    .ToList();
+
+                var existingShifts = await dbcontext.RiderShifts
+                    .Where(s => shiftKeys.Any(k =>
+                        k.RiderId == s.RiderId &&
+                        k.WorkingId == s.WorkingId &&
+                        k.ShiftDate == s.ShiftDate))
+                    .ToListAsync(cancellationToken);
+
+                var existingShiftDict = existingShifts
+                    .ToDictionary(s => (s.RiderId, s.WorkingId, s.ShiftDate), s => s);
+
+                foreach (var temp in tempComparisons)
+                {
+                    var shiftKey = (temp.RiderId, temp.WorkingId, temp.ShiftDate);
+
+                    if (existingShiftDict.TryGetValue(shiftKey, out var existingShift))
+                    {
+                        existingShift.AcceptedDailyOrders = temp.NewAcceptedDailyOrders;
+                        existingShift.RejectedDailyOrders = temp.NewRejectedDailyOrders;
+                        existingShift.RealRejectedDailyOrders = temp.NewRealRejectedDailyOrders;
+                        existingShift.WorkingHours = temp.NewWorkingHours;
+                        existingShift.ShiftStatus = temp.NewShiftStatus;
+
+                        updatedCount++;
+
+                        var riderInfo = temp.IsSubstitution
+                            ? $"{temp.Rider.Employee.NameEN} (Substitute ID: {temp.WorkingId}, Original ID: {temp.OriginalRiderWorkingId})"
+                            : $"{temp.Rider.Employee.NameEN} (ID: {temp.WorkingId})";
+
+                        details.Add($"Updated shift for {riderInfo}");
+                    }
+                    else
+                    {
+                        var newShift = new RiderShift
+                        {
+                            RiderId = temp.RiderId,  
+                            WorkingId = temp.WorkingId,  
+                            ShiftDate = temp.ShiftDate,
+                            AcceptedDailyOrders = temp.NewAcceptedDailyOrders,
+                            RejectedDailyOrders = temp.NewRejectedDailyOrders,
+                            RealRejectedDailyOrders = temp.NewRealRejectedDailyOrders,
+                            WorkingHours = temp.NewWorkingHours,
+                            CompanyId = temp.CompanyId,
+                            ShiftStatus = temp.NewShiftStatus,
+                            CreatedAt = DateTime.UtcNow
+                        };
+
+                        await dbcontext.RiderShifts.AddAsync(newShift, cancellationToken);
+                        newCount++;
+
+                        var riderInfo = temp.IsSubstitution
+                            ? $"{temp.Rider.Employee.NameEN} (Substitute ID: {temp.WorkingId}, Original ID: {temp.OriginalRiderWorkingId})"
+                            : $"{temp.Rider.Employee.NameEN} (ID: {temp.WorkingId})";
+
+                        details.Add($"Created new shift for {riderInfo}");
+                    }
+
+                    temp.IsResolved = true;
+                }
+            }
+
+            await dbcontext.SaveChangesAsync(cancellationToken);
+
+            dbcontext.TempRiderShiftComparisons.RemoveRange(tempComparisons);
+            await dbcontext.SaveChangesAsync(cancellationToken);
+
+            await transaction.CommitAsync(cancellationToken);
+
+            var result = new ResolutionResult(
+                tempComparisons.Count,
+                updatedCount,
+                newCount,
+                unchangedCount,
+                details
+            );
+
+            return Result.Success(result);
+        }
+        catch (Exception ex)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            return Result.Failure<ResolutionResult>(
+                new Error("ServerError", $"Error resolving comparisons: {ex.Message}", 500));
+        }
+    }
+
+    private static ComparisonAnalysis CreateComparisonAnalysis(
+        ShiftComparisonData oldData,
+        ShiftComparisonData newData)
+    {
+        var hasChanges = oldData.AcceptedOrders.HasValue &&
+            (oldData.AcceptedOrders != newData.AcceptedOrders ||
+             oldData.RejectedOrders != newData.RejectedOrders ||
+             oldData.RealRejectedOrders != newData.RealRejectedOrders ||
+             Math.Abs(oldData.WorkingHours!.Value - newData.WorkingHours!.Value) > 0.01f);
+
+        var ordersDiff = newData.AcceptedOrders!.Value - (oldData.AcceptedOrders ?? 0);
+        var rejectionsDiff = newData.RealRejectedOrders!.Value - (oldData.RealRejectedOrders ?? 0);
+        var hoursDiff = newData.WorkingHours!.Value - (oldData.WorkingHours ?? 0);
+        var penaltyDiff = newData.PenaltyAmount!.Value - (oldData.PenaltyAmount ?? 0);
+
+        var statusChange = oldData.ShiftStatus != null
+            ? $"{oldData.ShiftStatus} → {newData.ShiftStatus}"
+            : $"New: {newData.ShiftStatus}";
+
+        string recommendation;
+        if (!oldData.AcceptedOrders.HasValue)
+        {
+            recommendation = "New shift - accept to add to database";
+        }
+        else if (!hasChanges)
+        {
+            recommendation = "No changes detected";
+        }
+        else if (ordersDiff > 0 && rejectionsDiff <= 0)
+        {
+            recommendation = "Improvement - consider accepting new data";
+        }
+        else if (ordersDiff < 0 || rejectionsDiff > 0)
+        {
+            recommendation = "Performance decline - verify data accuracy";
+        }
+        else
+        {
+            recommendation = "Mixed changes - review carefully";
+        }
+
+        return new ComparisonAnalysis(
+            hasChanges,
+            ordersDiff,
+            rejectionsDiff,
+            hoursDiff,
+            statusChange,
+            penaltyDiff,
+            recommendation
+        );
+    }
+
+
 
     private static string CalculateShiftStatus(int acceptedOrders, string companyName)
     {
@@ -602,88 +965,6 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
             }
         }
         return 0;
-    }
-
-    public class ShiftConflictDto
-    {
-        public int RiderId { get; set; }
-        public int WorkingId { get; set; }
-        public DateOnly ShiftDate { get; set; }
-        public int RowNumber { get; set; }
-        public string RiderName { get; set; } = string.Empty;
-        public string CompanyName { get; set; } = string.Empty;
-        public ShiftDto ExistingShift { get; set; } = null!;
-        public ShiftDto NewShift { get; set; } = null!;
-    }
-
-    public class ShiftDto
-    {
-        public int AcceptedOrders { get; set; }
-        public int RejectedOrders { get; set; }
-        public int RealRejectedOrders { get; set; }
-        public float WorkingHours { get; set; }
-        public string ShiftStatus { get; set; } = string.Empty;
-        public DateTime CreatedAt { get; set; }
-    }
-
-    public class ConflictResolutionChoice
-    {
-        public int RiderId { get; set; }
-        public int WorkingId { get; set; }
-        public DateOnly ShiftDate { get; set; }
-        public ConflictResolution Resolution { get; set; }
-    }
-
-    public enum ConflictResolution
-    {
-        KeepNewest,
-        KeepOldest
-    }
-
-    public class BulkImportResult
-    {
-        public int TotalRecords { get; set; }
-        public int SuccessCount { get; set; }
-        public int ErrorCount { get; set; }
-        public List<ImportError> Errors { get; set; }
-        public int ConflictCount { get; set; }
-        public List<ShiftConflictDto> Conflicts { get; set; }
-
-        public BulkImportResult(int totalRecords, int successCount, int errorCount,
-            List<ImportError> errors, int conflictCount = 0, List<ShiftConflictDto>? conflicts = null)
-        {
-            TotalRecords = totalRecords;
-            SuccessCount = successCount;
-            ErrorCount = errorCount;
-            Errors = errors;
-            ConflictCount = conflictCount;
-            Conflicts = conflicts ?? new List<ShiftConflictDto>();
-        }
-    }
-
-    public class ExcelColumnMapping
-    {
-        public bool IsValid { get; set; }
-        public string? ErrorMessage { get; set; }
-        public int WorkingIdColumn { get; set; }
-        public int AcceptedOrdersColumn { get; set; }
-        public int RejectedOrdersColumn { get; set; }
-        public int RealRejectedOrdersColumn { get; set; }
-        public int WorkingHoursColumn { get; set; }
-    }
-
-    public class ImportErrorImportError
-    {
-        public int RowNumber { get; set; }
-        public string WorkingId { get; set; }
-        public string Message { get; set; }
-
-        public ImportError(int rowNumber, string workingId, string message)
-        {
-            RowNumber = rowNumber;
-            WorkingId = workingId;
-            Message = message;
-        }
     }
 
 
@@ -989,7 +1270,6 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
         return rider != null ? (rider.Id, null, false) : (0, null, false);
     }
 
-    // Fixed MapToResponse - with proper null checking and navigation properties
     private static RiderShiftResponse MapToResponse(RiderShift shift)
     {
         // Parse shift status safely
@@ -1020,87 +1300,6 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
         );
     }
 
-
-    public async Task<List<RiderShiftResponse>> GetShiftsWrong(DateOnly date)
-    {
-        var shifts = await dbcontext.RiderShifts
-            .Where(s => s.ShiftDate == date)
-            .ToListAsync();
-
-        return shifts.Select(MapToResponse).ToList(); // ❌ Will crash!
-    }
-
-    // ✅ CORRECT - Include navigation properties
-    public async Task<List<RiderShiftResponse>> GetShiftsCorrect(DateOnly date)
-    {
-        var shifts = await dbcontext.RiderShifts
-            .Include(s => s.Rider)
-                .ThenInclude(r => r.Company)
-            .Include(s => s.Rider)
-                .ThenInclude(r => r.Employee)
-            .Where(s => s.ShiftDate == date)
-            .ToListAsync();
-
-        return shifts.Select(MapToResponse).ToList(); // ✅ Works!
-    }
-
-    // ✅ ALTERNATIVE - Use projection (more efficient)
-    public async Task<List<RiderShiftResponse>> GetShiftsProjection(DateOnly date)
-    {
-        return await dbcontext.RiderShifts
-            .Where(s => s.ShiftDate == date)
-            .Select(shift => new RiderShiftResponse(
-                shift.RiderId,
-                shift.WorkingId,
-                shift.ShiftDate,
-                shift.AcceptedDailyOrders,
-                shift.RejectedDailyOrders,
-                shift.RealRejectedDailyOrders,
-                shift.WorkingHours,
-                shift.CompanyId,
-                shift.Rider.Company.Name,
-                shift.Rider.Employee.NameEN,
-                shift.ShiftStatus,
-                shift.RealRejectedDailyOrders > 2,
-                shift.RealRejectedDailyOrders > 2
-                    ? (shift.RealRejectedDailyOrders - 2) * 10m
-                    : 0m,
-                shift.CreatedAt,
-                false,
-                null
-            ))
-            .ToListAsync();
-    }
-
-    public async Task<Result<List<RiderShiftResponse>>> GetRiderShiftsByDateAsync(
-        DateOnly shiftDate,
-        CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            var shifts = await dbcontext.RiderShifts
-                .Include(s => s.Rider)
-                    .ThenInclude(r => r.Company)
-                .Include(s => s.Rider)
-                    .ThenInclude(r => r.Employee)
-                .Include(s => s.Company) // Also include Company if used directly
-                .Where(s => s.ShiftDate == shiftDate)
-                .OrderBy(s => s.WorkingId)
-                .ToListAsync(cancellationToken);
-
-            var responses = shifts.Select(MapToResponse).ToList();
-
-            return Result.Success(responses);
-        }
-        catch (Exception ex)
-        {
-            return Result.Failure<List<RiderShiftResponse>>(
-                new Error("ServerError", $"Error retrieving shifts: {ex.Message}", 500));
-        }
-    }
-
-
-
     public async Task<Result<List<RiderShiftResponse>>> GetRiderShiftsByDateOptimizedAsync(
         DateOnly shiftDate,
         CancellationToken cancellationToken = default)
@@ -1108,7 +1307,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
         try
         {
             var shifts = await dbcontext.RiderShifts
-                .AsNoTracking() // Better performance for read-only queries
+                .AsNoTracking() 
                 .Include(s => s.Rider)
                     .ThenInclude(r => r.Company)
                 .Include(s => s.Rider)
@@ -1290,3 +1489,94 @@ public static class ExcelColumnConfig
     public static readonly string[] WorkingHoursColumns =
         { "Actual Working Hours", "Working_Hours", "Working Hours", "Hours", "TotalHours", "Total_Hours" };
 }
+
+public class ShiftConflictDto
+{
+    public int RiderId { get; set; }
+    public int WorkingId { get; set; }
+    public DateOnly ShiftDate { get; set; }
+    public int RowNumber { get; set; }
+    public string RiderName { get; set; } = string.Empty;
+    public string CompanyName { get; set; } = string.Empty;
+    public ShiftDto ExistingShift { get; set; } = null!;
+    public ShiftDto NewShift { get; set; } = null!;
+}
+
+public class ShiftDto
+{
+    public int AcceptedOrders { get; set; }
+    public int RejectedOrders { get; set; }
+    public int RealRejectedOrders { get; set; }
+    public float WorkingHours { get; set; }
+    public string ShiftStatus { get; set; } = string.Empty;
+    public DateTime CreatedAt { get; set; }
+}
+
+public class ConflictResolutionChoice
+{
+    public int RiderId { get; set; }
+    public int WorkingId { get; set; }
+    public DateOnly ShiftDate { get; set; }
+    public ConflictResolution Resolution { get; set; }
+}
+
+public enum ConflictResolution
+{
+    KeepNewest,
+    KeepOldest
+}
+
+public class BulkImportResult
+{
+    public int TotalRecords { get; set; }
+    public int SuccessCount { get; set; }
+    public int ErrorCount { get; set; }
+    public List<ImportError> Errors { get; set; }
+    public int ConflictCount { get; set; }
+    public List<ShiftConflictDto> Conflicts { get; set; }
+
+    public BulkImportResult(int totalRecords, int successCount, int errorCount,
+        List<ImportError> errors, int conflictCount = 0, List<ShiftConflictDto>? conflicts = null)
+    {
+        TotalRecords = totalRecords;
+        SuccessCount = successCount;
+        ErrorCount = errorCount;
+        Errors = errors;
+        ConflictCount = conflictCount;
+        Conflicts = conflicts ?? new List<ShiftConflictDto>();
+    }
+}
+
+public class ExcelColumnMapping
+{
+    public bool IsValid { get; set; }
+    public string? ErrorMessage { get; set; }
+    public int WorkingIdColumn { get; set; }
+    public int AcceptedOrdersColumn { get; set; }
+    public int RejectedOrdersColumn { get; set; }
+    public int RealRejectedOrdersColumn { get; set; }
+    public int WorkingHoursColumn { get; set; }
+}
+
+public class ImportError
+{
+
+    public int RowNumber { get; set; }
+    public string WorkingId { get; set; }
+    public string Message { get; set; }
+
+    public ImportError(int rowNumber, string workingId, string message)
+    {
+        RowNumber = rowNumber;
+        WorkingId = workingId;
+        Message = message;
+    }
+}
+
+public record BulkComparisonResult(
+    int TotalComparisons,
+    int NewShifts,
+    int UpdatedShifts,
+    List<ShiftComparisonResponse> Comparisons,
+    List<ImportError> Errors
+);

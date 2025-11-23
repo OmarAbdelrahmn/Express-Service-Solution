@@ -28,6 +28,7 @@ public class ApplicationDbcontext(DbContextOptions<ApplicationDbcontext> options
     public required DbSet<ArchivedRiderShift> ArchivedRiderShifts { get; set; }
     public required DbSet<RiderCompanyHistory> RiderCompanyHistory { get; set; }
     public required DbSet<RiderVehicleStatus> RiderVehicleStatus { get; set; }
+    public required DbSet<TempRiderShiftComparison> TempRiderShiftComparisons { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

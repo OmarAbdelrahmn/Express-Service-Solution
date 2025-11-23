@@ -1,4 +1,5 @@
 ﻿using Application.Service.Riders;
+using Domain.Entities;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
@@ -59,15 +60,15 @@ public class ShiftController(IRiderShiftService service) : ControllerBase
         return result.IsSuccess ? Ok(result.Value) : BadRequest(result.Error);
     }
 
-    [HttpPost("import")]
-    public async Task<IActionResult> ImportShiftsFromExcelAsync(IFormFile excelFile, CancellationToken cancellationToken)
+    [HttpPost("import/{ShiftDate}")]
+    public async Task<IActionResult> ImportShiftsFromExcelAsync(IFormFile excelFile , DateOnly ShiftDate)
     {
         if (excelFile == null || excelFile.Length == 0)
         {
             return BadRequest("No file uploaded.");
         }
         using var stream = excelFile.OpenReadStream();
-        var result = await service.ImportShiftsFromExcelAsync(stream, cancellationToken);
+        var result = await service.ImportShiftsFromExcelAsync(stream, ShiftDate);
         return result.IsSuccess ? Ok(result.Value) : BadRequest(result.Error);
     }
 
@@ -91,6 +92,34 @@ public class ShiftController(IRiderShiftService service) : ControllerBase
         var result = await service.DeleteShiftsByRiderAndDateRangeAsync(workingId, startDate, endDate, cancellationToken);
         return result.IsSuccess ? Ok(result.Value) : BadRequest(result.Error);
     }
+
+    [HttpGet("comparisons/{shiftDate}")]
+    public async Task<IActionResult> GetPendingComparisonsAsync(DateOnly shiftDate, CancellationToken cancellationToken)
+    {
+        var result = await service.GetPendingComparisonsAsync(shiftDate, cancellationToken);
+        return result.IsSuccess ? Ok(result.Value) : BadRequest(result.Error);
+    }
+
+    [HttpPost("comparisons/resolve")]
+    public async Task<IActionResult> ResolveShiftComparisonsAsync([FromBody] ResolveComparisonsRequest request, CancellationToken cancellationToken)
+    {
+        var result = await service.ResolveShiftComparisonsAsync(request, cancellationToken);
+        return result.IsSuccess ? Ok(result.Value) : BadRequest(result.Error);
+    }
+
+    [HttpPost("comparisons/{shiftDate}")]
+    public async Task<IActionResult> CreateShiftComparisonsAsync(IFormFile excelFile, DateOnly shiftDate, [FromQuery] int rejectionThreshold = 2)
+    {
+        if (excelFile == null || excelFile.Length == 0)
+        {
+            return BadRequest("No file uploaded.");
+        }
+        using var stream = excelFile.OpenReadStream();
+        var result = await service.CreateShiftComparisonsAsync(stream, shiftDate, rejectionThreshold);
+        return result.IsSuccess ? Ok(result.Value) : BadRequest(result.Error);
+    }
+
+
 
 
 }
