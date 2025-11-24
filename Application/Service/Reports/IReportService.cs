@@ -6,6 +6,12 @@ namespace Application.Service.Reports;
 
 public interface IReportService
 {
+    Task<Result<ComprehensiveDashboard>> GetComprehensiveDashboardAsync(
+       DateOnly? startDate = null,
+       DateOnly? endDate = null,
+       CancellationToken cancellationToken = default);
+
+
 
     Task<Result<MonthlyRiderReport>> GetMonthlyReportByWorkingIdAsync(
         int workingId,
@@ -109,7 +115,7 @@ public interface IReportService
 
  
     Task<Result<HousingPeriodComparison>> CompareSpecificHousingAsync(
-        int housingId,
+        string housingName,
         DateOnly period1Start,
         DateOnly period1End,
         DateOnly period2Start,
@@ -118,9 +124,33 @@ public interface IReportService
 
    
     Task<Result<List<RiderHousingAssignment>>> GetRidersForHousingAsync(
-        int housingId,
+        string housingName,
         DateOnly startDate,
         DateOnly endDate,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<TopRidersReport>> GetTopRidersInPeriodAsync(
+        TopRidersRequest request,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<TopRidersReport>> GetTopRidersForMonthAsync(
+        int year,
+        int month,
+        int topCount = 10,
+        string? companyFilter = null,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<TopRidersReport>> GetTopRidersForYearAsync(
+        int year,
+        int topCount = 10,
+        string? companyFilter = null,
+        CancellationToken cancellationToken = default);
+
+
+    Task<Result<Dictionary<string, List<TopRiderDetail>>>> GetTopRidersPerCompanyAsync(
+        DateOnly startDate,
+        DateOnly endDate,
+        int topCountPerCompany = 100,
         CancellationToken cancellationToken = default);
 }
 
@@ -248,7 +278,6 @@ public record RiderHousingAssignment(
 );
 
 public record HousingPeriodComparison(
-    int HousingId,
     string HousingName,
     HousingPeriodBreakdown Period1Breakdown,
     HousingPeriodBreakdown Period2Breakdown,
@@ -334,4 +363,218 @@ public record YearlyCompanyBreakdown(
     int TotalRejectedOrders,
     decimal AveragePerformanceScore,
     List<MonthlyCompanyData> MonthlyDetails
+);
+
+public record TopRidersReport(
+    DateOnly StartDate,
+    DateOnly EndDate,
+    int TotalRiders,
+    int TotalShifts,
+    int TotalOrders,
+    List<TopRiderDetail> TopRiders,
+    CompanyBreakdownSummary CompanyBreakdown
+);
+
+// Detailed information about each top rider
+public record TopRiderDetail(
+    int RiderId,
+    int WorkingId,
+    string RiderNameEN,
+    string RiderNameAR,
+    string CompanyName,
+    int TotalShifts,
+    int TotalAcceptedOrders,
+    int TotalRejectedOrders,
+    int TotalRealRejectedOrders,
+    float TotalWorkingHours,
+    int CompletedShifts,
+    int IncompleteShifts,
+    int FailedShifts,
+    decimal CompletionRate,
+    decimal AverageOrdersPerShift,
+    decimal RejectionRate,
+    decimal PerformanceScore,
+    decimal TotalPenalty,
+    int ProblematicShiftsCount,
+    int Rank,
+    string PerformanceGrade,
+    List<string> Achievements,
+    bool IsSubstitutionActive,
+    int? OriginalWorkingId
+);
+
+// Company-wise breakdown in the period
+public record CompanyBreakdownSummary(
+    List<CompanyTopRiders> CompaniesSummary
+);
+
+public record CompanyTopRiders(
+    string CompanyName,
+    int DailyOrderTarget,
+    int TotalRiders,
+    int TotalShifts,
+    int TotalOrders,
+    decimal CompanyPerformanceScore,
+    TopRiderDetail TopPerformer,
+    int TopPerformersCount
+);
+
+// Request parameters
+public record TopRidersRequest(
+    DateOnly StartDate,
+    DateOnly EndDate,
+    int TopCount = 10,
+    string? CompanyFilter = null,
+    TopRidersSortBy SortBy = TopRidersSortBy.TotalOrders,
+    bool IncludeAllCompanies = true,
+    decimal MinimumShifts = 0
+);
+
+// Sorting options
+public enum TopRidersSortBy
+{
+    TotalOrders,
+    CompletionRate,
+    PerformanceScore,
+    AverageOrdersPerShift,
+    TotalShifts,
+    WorkingHours
+}
+
+// Performance grade calculation
+public enum PerformanceGrade
+{
+    Exceptional,  // 95%+
+    Excellent,    // 85-94%
+    Good,         // 75-84%
+    Average,      // 65-74%
+    BelowAverage, // 50-64%
+    Poor          // <50%
+}
+
+public record ComprehensiveDashboard(
+    DateTime GeneratedAt,
+    DateOnly PeriodStart,
+    DateOnly PeriodEnd,
+    CompaniesStatistics Companies,
+    RidersStatistics Riders,
+    ShiftsStatistics Shifts,
+    OrdersStatistics Orders,
+    PerformanceMetrics Performance,
+    HousingStatistics Housing,
+    TrendsAnalysis Trends
+);
+
+public record CompaniesStatistics(
+    int TotalCompanies,
+    int ActiveCompanies,
+    List<CompanyDetail> CompanyDetails,
+    string? TopPerformingCompany,
+    string? LowestPerformingCompany,
+    decimal AverageCompanyPerformance
+);
+
+public record CompanyDetail(
+    int CompanyId,
+    string CompanyName,
+    int DailyOrderTarget,
+    int TotalShifts,
+    int ActiveRiders,
+    int TotalAcceptedOrders,
+    int TotalRejectedOrders,
+    int CompletedShifts,
+    int IncompleteShifts,
+    int FailedShifts,
+    decimal PerformanceScore,
+    float TotalWorkingHours
+);
+
+public record RidersStatistics(
+    int TotalRiders,
+    int ActiveRiders,
+    int InactiveRiders,
+    int RidersWithWorkingId,
+    int RidersWithSubstitution,
+    decimal AverageShiftsPerRider,
+    float TotalWorkingHours
+);
+
+public record ShiftsStatistics(
+    int TotalShifts,
+    int CompletedShifts,
+    int IncompleteShifts,
+    int FailedShifts,
+    decimal CompletionRate,
+    float AverageWorkingHoursPerShift,
+    float TotalWorkingHours,
+    List<DailyShiftBreakdown> DailyBreakdown
+);
+
+public record DailyShiftBreakdown(
+    DateOnly Date,
+    int TotalShifts,
+    int CompletedShifts,
+    int TotalOrders,
+    int AcceptedOrders,
+    int RejectedOrders
+);
+
+public record OrdersStatistics(
+    int TotalOrders,
+    int TotalAcceptedOrders,
+    int TotalRejectedOrders,
+    int TotalRealRejectedOrders,
+    decimal AcceptanceRate,
+    decimal RejectionRate,
+    decimal AverageOrdersPerShift,
+    int ProblematicShiftsCount,
+    decimal TotalPenaltyAmount
+);
+
+public record PerformanceMetrics(
+    decimal OverallPerformanceScore,
+    List<TopPerformer> TopPerformers,
+    decimal AverageCompletionRate,
+    decimal AverageOrdersPerDay
+);
+
+public record TopPerformer(
+    int RiderId,
+    string RiderName,
+    int WorkingId,
+    int TotalOrders,
+    decimal PerformanceScore,
+    decimal CompletionRate
+);
+
+public record HousingStatistics(
+    int TotalHousings,
+    int ActiveHousings,
+    List<HousingDetail> HousingDetails,
+    string? TopPerformingHousing,
+    double AverageRidersPerHousing
+);
+
+public record HousingDetail(
+    int HousingId,
+    string HousingName,
+    int TotalRiders,
+    int TotalShifts,
+    int TotalOrders,
+    int AcceptedOrders,
+    decimal CompletionRate
+);
+
+public record TrendsAnalysis(
+    List<WeeklyTrend> WeeklyTrends,
+    decimal OrdersGrowthRate,
+    decimal ShiftsGrowthRate,
+    string PerformanceTrend
+);
+
+public record WeeklyTrend(
+    int WeekNumber,
+    int TotalShifts,
+    int TotalOrders,
+    decimal AveragePerformance
 );
