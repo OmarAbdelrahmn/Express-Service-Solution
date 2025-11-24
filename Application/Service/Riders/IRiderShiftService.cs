@@ -33,6 +33,7 @@ public record CreateRiderShiftRequest(
     DateOnly ShiftDate,
     int AcceptedDailyOrders,
     int RejectedDailyOrders,
+    int StackedDeliveries,
     int RealRejectedDailyOrders,
     float WorkingHours
 );
@@ -42,6 +43,7 @@ public record UpdateRiderShiftRequest(
     DateOnly ShiftDate,
     int? AcceptedDailyOrders,
     int? RejectedDailyOrders,
+    int? StackedDeliveries,
     int? RealRejectedDailyOrders,
     float? WorkingHours
 );
@@ -53,6 +55,7 @@ public record RiderShiftResponse(
     int AcceptedDailyOrders,
     int RejectedDailyOrders,
     int RealRejectedDailyOrders,
+    int StackedDeliveries,
     float WorkingHours,
     int CompanyId,
     string CompanyName,
@@ -109,6 +112,8 @@ public record CompanyPeriodBreakdown(
     int TotalAcceptedOrders,
     int TotalRejectedOrders,
     int TotalRealRejectedOrders,
+    int TotalStackedDeliveries, // ADD THIS
+    decimal AverageStackedPerShift,
     float TotalWorkingHours,
     int ProblematicShiftsCount,
     decimal PenaltyAmount,
@@ -276,6 +281,19 @@ public class CompanyShiftConfiguration
         { "ToYou", 15 }
     };
 
+    public static int GetRejectionThreshold(string companyName)
+    {
+        return companyName switch
+        {
+            "Jahez" => 2,
+            "HungerStation" => 2,
+            "Careem" => 3,
+            "Marsool" => 2,
+            _ => 2
+        };
+    }
+
+
     public static int GetDailyOrderTarget(string companyName)
     {
         return CompanyDailyOrderTargets.TryGetValue(companyName, out var target)
@@ -286,3 +304,4 @@ public class CompanyShiftConfiguration
     public const int RejectionThreshold = 2;
     public const decimal PenaltyPerExcessRejection = 10.0m;
 }
+

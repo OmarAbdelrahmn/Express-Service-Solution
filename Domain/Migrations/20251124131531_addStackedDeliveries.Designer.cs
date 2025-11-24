@@ -4,6 +4,7 @@ using Domain;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Domain.Migrations
 {
     [DbContext(typeof(ApplicationDbcontext))]
-    partial class ApplicationDbcontextModelSnapshot : ModelSnapshot
+    [Migration("20251124131531_addStackedDeliveries")]
+    partial class addStackedDeliveries
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -169,7 +172,7 @@ namespace Domain.Migrations
                             IsDisable = false,
                             LockoutEnabled = false,
                             NormalizedUserName = "ADMIN",
-                            PasswordHash = "AQAAAAIAAYagAAAAECpXtZQKdeAzUt/IC51SQm45HLGJJUfMyWa/5HQhzkNJJH5DRMX6GZtOu/tWEGSeyg==",
+                            PasswordHash = "AQAAAAIAAYagAAAAEE1Svo010H2My2ObQElZ71uryViux9OvvMs3GNnIg2KCXFja+asnNi+mt67NhzfvLg==",
                             PhoneNumberConfirmed = false,
                             SecurityStamp = "9FABB58491024B7BB140E4D6658B5BDA",
                             TwoFactorEnabled = false,
@@ -186,7 +189,7 @@ namespace Domain.Migrations
                             IsDisable = false,
                             LockoutEnabled = false,
                             NormalizedUserName = "MASTER",
-                            PasswordHash = "AQAAAAIAAYagAAAAENdZVQ7YX5I9sfOKG/a3DKOyWUeV7ueDkR6dYVvlzZ6vc+gic1KSkJmaxPuZYk4ToQ==",
+                            PasswordHash = "AQAAAAIAAYagAAAAEGi49Ui+u+23pKW8dUdv3UQKa0prn/DJX/nxMDPDcNlVjVvIRj1aQsfxEBA6KezHIg==",
                             PhoneNumberConfirmed = false,
                             SecurityStamp = "9FABB58491024B7BB140E4D6658B5BDA",
                             TwoFactorEnabled = false,
@@ -743,9 +746,6 @@ namespace Domain.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
 
-                    b.Property<int>("NewStackedDeliveries")
-                        .HasColumnType("int");
-
                     b.Property<float>("NewWorkingHours")
                         .HasColumnType("real");
 
@@ -764,9 +764,6 @@ namespace Domain.Migrations
                     b.Property<string>("OldShiftStatus")
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
-
-                    b.Property<int?>("OldStackedDeliveries")
-                        .HasColumnType("int");
 
                     b.Property<float?>("OldWorkingHours")
                         .HasColumnType("real");

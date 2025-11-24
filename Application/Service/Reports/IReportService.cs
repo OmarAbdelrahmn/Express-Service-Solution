@@ -134,6 +134,13 @@ public interface IReportService
         TopRidersRequest request,
         CancellationToken cancellationToken = default);
 
+    Task<Result<MonthlyStackedDeliveriesReport>> GetMonthlyStackedDeliveriesByWorkingIdAsync(
+       int workingId,
+       int year,
+       int month,
+       CancellationToken cancellationToken = default);
+
+
     Task<Result<TopRidersReport>> GetTopRidersForMonthAsync(
         int year,
         int month,
@@ -179,9 +186,13 @@ public record PeriodSummary(
     int TotalAcceptedOrders,
     int TotalRejectedOrders,
     int TotalRealRejectedOrders,
+    int TotalStackedDeliveries, // ADD THIS
+
     float TotalWorkingHours,
     int ProblematicShiftsCount,
     decimal TotalPenaltyAmount,
+    decimal AverageStackedPerDay, // ADD THIS
+
     decimal AverageOrdersPerDay,
     decimal CompletionRate,
     decimal PerformanceScore,
@@ -391,6 +402,8 @@ public record TopRiderDetail(
     int CompletedShifts,
     int IncompleteShifts,
     int FailedShifts,
+    int TotalStackedDeliveries, // ADD THIS
+    decimal AverageStackedPerShift, // ADD THIS
     decimal CompletionRate,
     decimal AverageOrdersPerShift,
     decimal RejectionRate,
@@ -518,17 +531,42 @@ public record DailyShiftBreakdown(
     int CompletedShifts,
     int TotalOrders,
     int AcceptedOrders,
-    int RejectedOrders
+    int RejectedOrders,
+    int StackedDeliveries // ADD THIS
+
+);
+public record MonthlyStackedDeliveriesReport(
+    int RiderId,
+    string RiderName,
+    int WorkingId,
+    int Year,
+    int Month,
+    int TotalStackedDeliveries,
+    int TotalShifts,
+    decimal AverageStackedPerShift,
+    int MaxStackedInDay,
+    DateOnly? MaxStackedDate,
+    List<DailyStackedBreakdown> DailyBreakdown
 );
 
+
+public record DailyStackedBreakdown(
+    DateOnly Date,
+    int StackedDeliveries,
+    int AcceptedOrders,
+    decimal StackedPercentage
+);
 public record OrdersStatistics(
     int TotalOrders,
     int TotalAcceptedOrders,
     int TotalRejectedOrders,
     int TotalRealRejectedOrders,
+    int TotalStackedDeliveries, // ADD THIS
     decimal AcceptanceRate,
     decimal RejectionRate,
+    decimal StackedDeliveryRate, // ADD THIS
     decimal AverageOrdersPerShift,
+    decimal AverageStackedPerShift, // ADD THIS
     int ProblematicShiftsCount,
     decimal TotalPenaltyAmount
 );

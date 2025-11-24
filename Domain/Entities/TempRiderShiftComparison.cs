@@ -17,6 +17,7 @@ public class TempRiderShiftComparison
     public int? OldAcceptedDailyOrders { get; set; }
     public int? OldRejectedDailyOrders { get; set; }
     public int? OldRealRejectedDailyOrders { get; set; }
+    public int? OldStackedDeliveries { get; set; }
     public float? OldWorkingHours { get; set; }
     public string? OldShiftStatus { get; set; }
     public DateTime? OldCreatedAt { get; set; }
@@ -24,6 +25,7 @@ public class TempRiderShiftComparison
     public int NewAcceptedDailyOrders { get; set; }
     public int NewRejectedDailyOrders { get; set; }
     public int NewRealRejectedDailyOrders { get; set; }
+    public int NewStackedDeliveries { get; set; }
     public float NewWorkingHours { get; set; }
     public string NewShiftStatus { get; set; } = string.Empty;
 
@@ -55,6 +57,7 @@ public record ShiftComparisonData(
     int? AcceptedOrders,
     int? RejectedOrders,
     int? RealRejectedOrders,
+    int? StackedDeliveries,
     float? WorkingHours,
     string? ShiftStatus,
     bool? HasRejectionProblem,
@@ -69,7 +72,9 @@ public record ComparisonAnalysis(
     float HoursDifference,
     string StatusChange,
     decimal PenaltyDifference,
-    string Recommendation
+    string Recommendation,
+    int? StackedDeliveries
+
 );
 
 

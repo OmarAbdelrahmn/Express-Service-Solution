@@ -11,6 +11,7 @@ public class RiderShift
     public DateOnly ShiftDate { get; set; }
     public int AcceptedDailyOrders { get; set; }
     public int RejectedDailyOrders { get; set; }
+    public int StackedDeliveries{ get; set; }
     public int RealRejectedDailyOrders { get; set; }
     public float WorkingHours { get; set; }
     public int CompanyId { get; set; }

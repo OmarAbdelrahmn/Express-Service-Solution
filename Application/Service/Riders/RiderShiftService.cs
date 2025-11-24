@@ -118,8 +118,10 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
                         shiftData.AcceptedDailyOrders!.Value,
                         actualRider.Company.Name);
 
-                    var hasRejectionProblem = shiftData.RealRejectedDailyOrders!.Value > rejectionThreshold;
-                    var penaltyAmount = CalculateRejectionPenalty(shiftData.RealRejectedDailyOrders.Value);
+                    var realRejectedOrders = Math.Max(0, shiftData.RejectedDailyOrders!.Value - rejectionThreshold);
+                    var hasRejectionProblem = realRejectedOrders > rejectionThreshold;
+                    var penaltyAmount = CalculateRejectionPenalty(realRejectedOrders);
+
 
                     var shift = new RiderShift
                     {
@@ -128,7 +130,8 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
                         ShiftDate = shiftDate,
                         AcceptedDailyOrders = shiftData.AcceptedDailyOrders!.Value,
                         RejectedDailyOrders = shiftData.RejectedDailyOrders!.Value,
-                        RealRejectedDailyOrders = shiftData.RealRejectedDailyOrders!.Value,
+                        RealRejectedDailyOrders = realRejectedOrders,
+                        StackedDeliveries = shiftData.StackedDeliveries!.Value,  
                         WorkingHours = shiftData.WorkingHours!.Value,
                         CompanyId = actualRider.CompanyId,
                         ShiftStatus = shiftStatus,
@@ -143,7 +146,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
                         errors.Add(new ImportError(
                             rowNumber,
                             shiftData.WorkingId!.Value.ToString(),
-                            $"WARNING: Shift has {shiftData.RealRejectedDailyOrders} rejections (exceeds threshold of {rejectionThreshold}). Penalty: {penaltyAmount} SAR"));
+                            $"WARNING: Shift has {realRejectedOrders} rejections (exceeds threshold of {rejectionThreshold}). Penalty: {penaltyAmount} SAR"));  // USE realRejectedOrders
                     }
                 }
                 catch (Exception ex)
@@ -401,8 +404,13 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
                         shiftData.AcceptedDailyOrders!.Value,
                         actualRider.Company.Name);
 
-                    var (hasNewRejectionProblem, newPenalty) =
-                        CalculateRejectionPenalty(shiftData.RealRejectedDailyOrders!.Value);
+                    var newRealRejectedOrders = Math.Max(0, shiftData.RejectedDailyOrders!.Value - rejectionThreshold);
+
+                    var realRejectedOrders = Math.Max(0, shiftData.RejectedDailyOrders!.Value - rejectionThreshold);
+
+
+                    var (hasNewRejectionProblem, newPenalty) = CalculateRejectionPenalty(newRealRejectedOrders);
+
 
                     var existingShift = existingShiftDict
                         .GetValueOrDefault((actualRider.Id, shiftData.WorkingId.Value));
@@ -423,11 +431,14 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
                         OldWorkingHours = existingShift?.WorkingHours,
                         OldShiftStatus = existingShift?.ShiftStatus,
                         OldCreatedAt = existingShift?.CreatedAt,
+                        OldStackedDeliveries = existingShift?.StackedDeliveries,  // ADD THIS
 
                         NewAcceptedDailyOrders = shiftData.AcceptedDailyOrders.Value,
                         NewRejectedDailyOrders = shiftData.RejectedDailyOrders.Value,
-                        NewRealRejectedDailyOrders = shiftData.RealRejectedDailyOrders.Value,
                         NewWorkingHours = shiftData.WorkingHours.Value,
+
+                        NewRealRejectedDailyOrders = newRealRejectedOrders,  // USE CALCULATED VALUE
+                        NewStackedDeliveries = shiftData.StackedDeliveries.Value,
                         NewShiftStatus = newShiftStatus,
 
                         UploadedAt = DateTime.UtcNow,
@@ -482,6 +493,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
                         temp.OldAcceptedDailyOrders,
                         temp.OldRejectedDailyOrders,
                         temp.OldRealRejectedDailyOrders,
+                        temp.OldStackedDeliveries,
                         temp.OldWorkingHours,
                         temp.OldShiftStatus,
                         hasOldProblem,
@@ -493,6 +505,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
                         temp.NewAcceptedDailyOrders,
                         temp.NewRejectedDailyOrders,
                         temp.NewRealRejectedDailyOrders,
+                        temp.NewStackedDeliveries,
                         temp.NewWorkingHours,
                         temp.NewShiftStatus,
                         hasNewProblem,
@@ -580,20 +593,22 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
                     CalculateRejectionPenalty(temp.NewRealRejectedDailyOrders);
 
                 var oldData = new ShiftComparisonData(
-                    temp.OldAcceptedDailyOrders,
-                    temp.OldRejectedDailyOrders,
-                    temp.OldRealRejectedDailyOrders,
-                    temp.OldWorkingHours,
-                    temp.OldShiftStatus,
-                    hasOldProblem,
-                    oldPenalty,
-                    temp.OldCreatedAt
-                );
+                        temp.OldAcceptedDailyOrders,
+                        temp.OldRejectedDailyOrders,
+                        temp.OldRealRejectedDailyOrders,
+                        temp.OldStackedDeliveries,
+                        temp.OldWorkingHours,
+                        temp.OldShiftStatus,
+                        hasOldProblem,
+                        oldPenalty,
+                        temp.OldCreatedAt
+                    );
 
                 var newData = new ShiftComparisonData(
                     temp.NewAcceptedDailyOrders,
                     temp.NewRejectedDailyOrders,
                     temp.NewRealRejectedDailyOrders,
+                    temp.NewStackedDeliveries,
                     temp.NewWorkingHours,
                     temp.NewShiftStatus,
                     hasNewProblem,
@@ -781,12 +796,14 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
             (oldData.AcceptedOrders != newData.AcceptedOrders ||
              oldData.RejectedOrders != newData.RejectedOrders ||
              oldData.RealRejectedOrders != newData.RealRejectedOrders ||
+             oldData.StackedDeliveries != newData.StackedDeliveries ||  // ADD THIS
              Math.Abs(oldData.WorkingHours!.Value - newData.WorkingHours!.Value) > 0.01f);
 
         var ordersDiff = newData.AcceptedOrders!.Value - (oldData.AcceptedOrders ?? 0);
         var rejectionsDiff = newData.RealRejectedOrders!.Value - (oldData.RealRejectedOrders ?? 0);
         var hoursDiff = newData.WorkingHours!.Value - (oldData.WorkingHours ?? 0);
         var penaltyDiff = newData.PenaltyAmount!.Value - (oldData.PenaltyAmount ?? 0);
+        var stackedDeliveriesDiff = newData.StackedDeliveries!.Value - (oldData.StackedDeliveries ?? 0);
 
         var statusChange = oldData.ShiftStatus != null
             ? $"{oldData.ShiftStatus} → {newData.ShiftStatus}"
@@ -821,7 +838,8 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
             hoursDiff,
             statusChange,
             penaltyDiff,
-            recommendation
+            recommendation,
+            stackedDeliveriesDiff
         );
     }
 
@@ -872,7 +890,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
         int? WorkingId,
         int? AcceptedDailyOrders,
         int? RejectedDailyOrders,
-        int? RealRejectedDailyOrders,
+        int? StackedDeliveries,         // ADD THIS TO SIGNATURE
         float? WorkingHours,
         string? ErrorMessage) ParseExcelRowByName(IXLRow row, ExcelColumnMapping mapping, int rowNumber)
     {
@@ -890,15 +908,21 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
             if (!int.TryParse(rejectedCell.ToString(), out var rejectedOrders) || rejectedOrders < 0)
                 return (false, workingId, acceptedOrders, null, null, null, "Invalid Rejected Orders (must be >= 0)");
 
-            var realRejectedCell = row.Cell(mapping.RealRejectedOrdersColumn).Value;
-            if (!int.TryParse(realRejectedCell.ToString(), out var realRejectedOrders) || realRejectedOrders < 0)
-                return (false, workingId, acceptedOrders, rejectedOrders, null, null, "Invalid Real Rejected Orders (must be >= 0)");
+            var stackedCell = row.Cell(mapping.StackedDeliveriesColumn).Value;
+            if (!int.TryParse(stackedCell.ToString(), out var stackedDeliveries) || stackedDeliveries < 0)
+                return (false, workingId, acceptedOrders, rejectedOrders, null, null, "Invalid Stacked Deliveries");
 
             var hoursCell = row.Cell(mapping.WorkingHoursColumn).Value;
             if (!float.TryParse(hoursCell.ToString(), out var workingHours) || workingHours < 0 || workingHours > 24)
-                return (false, workingId, acceptedOrders, rejectedOrders, realRejectedOrders, null, "Invalid Working Hours (must be 0-24)");
+                return (false, workingId, acceptedOrders, rejectedOrders, stackedDeliveries, null, "Invalid Working Hours");
 
-            return (true, workingId, acceptedOrders, rejectedOrders, realRejectedOrders, workingHours, null);
+
+
+            //var hoursCell = row.Cell(mapping.WorkingHoursColumn).Value;
+            //if (!float.TryParse(hoursCell.ToString(), out var workingHours) || workingHours < 0 || workingHours > 24)
+            //    return (false, workingId, acceptedOrders, rejectedOrders, realRejectedOrders, null, "Invalid Working Hours (must be 0-24)");
+
+            return (true, workingId, acceptedOrders, rejectedOrders, stackedDeliveries, workingHours, null);
         }
         catch (Exception ex)
         {
@@ -924,7 +948,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
         mapping.WorkingIdColumn = FindColumn(headerCells, ExcelColumnConfig.WorkingIdColumns);
         mapping.AcceptedOrdersColumn = FindColumn(headerCells, ExcelColumnConfig.AcceptedOrdersColumns);
         mapping.RejectedOrdersColumn = FindColumn(headerCells, ExcelColumnConfig.RejectedOrdersColumns);
-        mapping.RealRejectedOrdersColumn = FindColumn(headerCells, ExcelColumnConfig.RealRejectedOrdersColumns);
+        mapping.StackedDeliveriesColumn = FindColumn(headerCells, ExcelColumnConfig.StackedDeliveriesColumns);
         mapping.WorkingHoursColumn = FindColumn(headerCells, ExcelColumnConfig.WorkingHoursColumns);
 
         var missingColumns = new List<string>();
@@ -935,8 +959,8 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
             missingColumns.Add($"AcceptedOrders (tried: {string.Join(", ", ExcelColumnConfig.AcceptedOrdersColumns)})");
         if (mapping.RejectedOrdersColumn == 0)
             missingColumns.Add($"RejectedOrders (tried: {string.Join(", ", ExcelColumnConfig.RejectedOrdersColumns)})");
-        if (mapping.RealRejectedOrdersColumn == 0)
-            missingColumns.Add($"RealRejectedOrders (tried: {string.Join(", ", ExcelColumnConfig.RealRejectedOrdersColumns)})");
+        if (mapping.StackedDeliveriesColumn == 0)
+            missingColumns.Add($"RealRejectedOrders (tried: {string.Join(", ", ExcelColumnConfig.StackedDeliveriesColumns)})");
         if (mapping.WorkingHoursColumn == 0)
             missingColumns.Add($"WorkingHours (tried: {string.Join(", ", ExcelColumnConfig.WorkingHoursColumns)})");
 
@@ -976,6 +1000,9 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
 
         try
         {
+            const int rejectionThreshold = 2; // Or from config
+            var realRejectedOrders = Math.Max(0, request.RejectedDailyOrders - rejectionThreshold);
+
             var (actualRiderId, originalWorkingId, isSubstitution) =
                 await GetActualRiderAsync(request.WorkingId, cancellationToken);
 
@@ -1015,10 +1042,11 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
                 ShiftDate = request.ShiftDate,
                 AcceptedDailyOrders = request.AcceptedDailyOrders,
                 RejectedDailyOrders = request.RejectedDailyOrders,
-                RealRejectedDailyOrders = request.RealRejectedDailyOrders,
                 WorkingHours = request.WorkingHours,
                 CompanyId = riderDetails.CompanyId,
                 ShiftStatus = shiftStatus.ToString(),
+                RealRejectedDailyOrders = realRejectedOrders,  
+                StackedDeliveries = request.StackedDeliveries,
                 CreatedAt = DateTime.UtcNow
             };
 
@@ -1033,6 +1061,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
                 shift.AcceptedDailyOrders,
                 shift.RejectedDailyOrders,
                 shift.RealRejectedDailyOrders,
+                shift.StackedDeliveries,
                 shift.WorkingHours,
                 shift.CompanyId,
                 riderDetails.Company.Name,
@@ -1193,11 +1222,17 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
             if (request.RejectedDailyOrders.HasValue)
                 shift.RejectedDailyOrders = request.RejectedDailyOrders.Value;
 
-            if (request.RealRejectedDailyOrders.HasValue)
-                shift.RealRejectedDailyOrders = request.RealRejectedDailyOrders.Value;
+            if (request.RejectedDailyOrders.HasValue)
+            {
+                const int rejectionThreshold = 2;
+                shift.RealRejectedDailyOrders = Math.Max(0, shift.RejectedDailyOrders - rejectionThreshold);
+            }
 
             if (request.WorkingHours.HasValue)
                 shift.WorkingHours = request.WorkingHours.Value;
+            if (request.StackedDeliveries.HasValue)
+                shift.StackedDeliveries = request.StackedDeliveries.Value;
+
 
             var newStatus = CalculateShiftStatus(
                 shift.AcceptedDailyOrders,
@@ -1287,6 +1322,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
             shift.AcceptedDailyOrders,
             shift.RejectedDailyOrders,
             shift.RealRejectedDailyOrders,
+            shift.StackedDeliveries,  // ADD THIS in appropriate position
             shift.WorkingHours,
             shift.CompanyId,
             shift.Rider?.Company?.Name ?? "Unknown", // Null-safe access
@@ -1481,10 +1517,14 @@ public static class ExcelColumnConfig
         { "Completed Deliveries", "Accepted_Orders", "Accepted Orders", "Accepted", "AcceptedDaily", "Accepted_Daily" };
 
     public static readonly string[] RejectedOrdersColumns =
-        { "RejectedOrders", "Rejected_Orders", "Rejected Orders", "Rejected", "RejectedDaily", "Rejected_Daily" };
+        { "Declined Deliveries", "Rejected_Orders", "Rejected Orders", "Rejected", "RejectedDaily", "Rejected_Daily" };
 
-    public static readonly string[] RealRejectedOrdersColumns =
-        { "RealRejectedOrders", "Real_Rejected_Orders", "Real Rejected Orders", "Real Rejected", "ActualRejected", "Actual_Rejected" };
+    //public static readonly string[] RealRejectedOrdersColumns =
+    //    { "RealRejectedOrders", "Real_Rejected_Orders", "Real Rejected Orders", "Real Rejected", "ActualRejected", "Actual_Rejected" };
+
+    public static readonly string[] StackedDeliveriesColumns =
+        { "Stacked Deliveries", "Stacked_Deliveries", "StackedDeliveries"};
+
 
     public static readonly string[] WorkingHoursColumns =
         { "Actual Working Hours", "Working_Hours", "Working Hours", "Hours", "TotalHours", "Total_Hours" };
@@ -1507,6 +1547,7 @@ public class ShiftDto
     public int AcceptedOrders { get; set; }
     public int RejectedOrders { get; set; }
     public int RealRejectedOrders { get; set; }
+    public int StackedDeliveries { get; set; }  // ADD THIS
     public float WorkingHours { get; set; }
     public string ShiftStatus { get; set; } = string.Empty;
     public DateTime CreatedAt { get; set; }
@@ -1554,7 +1595,7 @@ public class ExcelColumnMapping
     public int WorkingIdColumn { get; set; }
     public int AcceptedOrdersColumn { get; set; }
     public int RejectedOrdersColumn { get; set; }
-    public int RealRejectedOrdersColumn { get; set; }
+    public int StackedDeliveriesColumn { get; set; }
     public int WorkingHoursColumn { get; set; }
 }
 

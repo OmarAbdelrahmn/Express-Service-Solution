@@ -276,7 +276,9 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                 CompletedShifts: g.Count(s => s.ShiftStatus == ShiftStatus.Completed.ToString()),
                 TotalOrders: g.Sum(s => s.AcceptedDailyOrders + s.RejectedDailyOrders),
                 AcceptedOrders: g.Sum(s => s.AcceptedDailyOrders),
-                RejectedOrders: g.Sum(s => s.RejectedDailyOrders)
+                RejectedOrders: g.Sum(s => s.RejectedDailyOrders),
+                StackedDeliveries: g.Sum(s => s.StackedDeliveries) // ADD THIS
+
             ))
             .OrderBy(d => d.Date)
             .ToList();
@@ -297,13 +299,17 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
     {
         var totalAccepted = shifts.Sum(s => s.AcceptedDailyOrders);
         var totalRejected = shifts.Sum(s => s.RejectedDailyOrders);
+        var totalStacked = shifts.Sum(s => s.StackedDeliveries); // ADD THIS
         var totalRealRejected = shifts.Sum(s => s.RealRejectedDailyOrders);
         var totalOrders = totalAccepted + totalRejected;
 
         var acceptanceRate = totalOrders > 0 ? (decimal)totalAccepted / totalOrders * 100 : 0;
         var rejectionRate = totalOrders > 0 ? (decimal)totalRejected / totalOrders * 100 : 0;
+        var stackedRate = totalAccepted > 0 ? (decimal)totalStacked / totalAccepted * 100 : 0; // ADD THIS
+
 
         var avgOrdersPerShift = shifts.Count > 0 ? (decimal)totalAccepted / shifts.Count : 0;
+        var avgStackedPerShift = shifts.Count > 0 ? (decimal)totalStacked / shifts.Count : 0; // ADD THIS
 
         var problematicShifts = shifts.Count(s =>
             s.RealRejectedDailyOrders > CompanyShiftConfiguration.RejectionThreshold);
@@ -317,7 +323,11 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
             RejectionRate: rejectionRate,
             AverageOrdersPerShift: avgOrdersPerShift,
             ProblematicShiftsCount: problematicShifts,
-            TotalPenaltyAmount: shifts.Sum(s => CalculatePenalty(s))
+            TotalPenaltyAmount: shifts.Sum(s => CalculatePenalty(s)),
+                    TotalStackedDeliveries: totalStacked, // ADD THIS
+                    StackedDeliveryRate: stackedRate, // ADD THIS
+        AverageStackedPerShift: avgStackedPerShift // ADD THIS
+
         );
     }
 
@@ -1413,6 +1423,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                 .AsNoTracking()
                 .ToListAsync(cancellationToken);
 
+
             var substitutionDict = activeSubstitutions
                 .ToDictionary(s => s.ActualRiderId, s => s);
 
@@ -1450,6 +1461,11 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                 var totalHours = riderShifts.Sum(s => s.WorkingHours);
                 var totalShifts = riderShifts.Count;
 
+                var totalStacked = riderShifts.Sum(s => s.StackedDeliveries); // ADD THIS
+                var avgStackedPerShift = totalShifts > 0
+                ? (decimal)totalStacked / totalShifts
+                : 0; // ADD THIS
+
                 var completedShifts = riderShifts.Count(s => s.ShiftStatus == ShiftStatus.Completed.ToString());
                 var incompleteShifts = riderShifts.Count(s => s.ShiftStatus == ShiftStatus.Incomplete.ToString());
                 var failedShifts = riderShifts.Count(s => s.ShiftStatus == ShiftStatus.Failed.ToString());
@@ -1485,7 +1501,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                 // Generate achievements
                 var achievements = GenerateRiderAchievements(
                     totalAccepted, avgOrdersPerShift, completionRate,
-                    rejectionRate, totalShifts, performanceScore);
+                    rejectionRate, totalShifts, performanceScore, totalStacked,avgStackedPerShift);
 
                 // Check for active substitution
                 var hasSubstitution = substitutionDict.ContainsKey(rider.Id);
@@ -1511,6 +1527,8 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                     AverageOrdersPerShift: avgOrdersPerShift,
                     RejectionRate: rejectionRate,
                     PerformanceScore: performanceScore,
+                        TotalStackedDeliveries: totalStacked, // ADD THIS
+    AverageStackedPerShift: avgStackedPerShift,
                     TotalPenalty: totalPenalty,
                     ProblematicShiftsCount: problematicCount,
                     Rank: 0, // Will be assigned after sorting
@@ -1556,6 +1574,96 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
         }
     }
 
+
+
+    public async Task<Result<MonthlyStackedDeliveriesReport>> GetMonthlyStackedDeliveriesByWorkingIdAsync(
+    int workingId,
+    int year,
+    int month,
+    CancellationToken cancellationToken = default)
+    {
+        if (workingId <= 0)
+            return Result.Failure<MonthlyStackedDeliveriesReport>(
+                new Error("Invalid working ID", "invalid_input", 400));
+
+        if (month < 1 || month > 12)
+            return Result.Failure<MonthlyStackedDeliveriesReport>(
+                new Error("Month must be between 1 and 12", "invalid_input", 400));
+
+        var rider = await _dbcontext.RiderDetails
+            .Include(r => r.Employee)
+            .FirstOrDefaultAsync(r => r.WorkingId == workingId, cancellationToken);
+
+        if (rider == null)
+            return Result.Failure<MonthlyStackedDeliveriesReport>(
+                new Error($"Rider with WorkingId {workingId} not found", "not_found", 404));
+
+        var startDate = new DateOnly(year, month, 1);
+        var endDate = startDate.AddMonths(1).AddDays(-1);
+
+        var shifts = await _dbcontext.RiderShifts
+            .Where(s => s.RiderId == rider.Id &&
+                       s.ShiftDate >= startDate &&
+                       s.ShiftDate <= endDate)
+            .OrderBy(s => s.ShiftDate)
+            .ToListAsync(cancellationToken);
+
+        if (!shifts.Any())
+        {
+            return Result.Success(new MonthlyStackedDeliveriesReport(
+                RiderId: rider.Id,
+                RiderName: rider.Employee.NameAR,
+                WorkingId: workingId,
+                Year: year,
+                Month: month,
+                TotalStackedDeliveries: 0,
+                TotalShifts: 0,
+                AverageStackedPerShift: 0,
+                MaxStackedInDay: 0,
+                MaxStackedDate: null,
+                DailyBreakdown: new List<DailyStackedBreakdown>()
+            ));
+        }
+
+        var totalStacked = shifts.Sum(s => s.StackedDeliveries);
+        var totalShifts = shifts.Count;
+        var avgStackedPerShift = totalShifts > 0 ? (decimal)totalStacked / totalShifts : 0;
+
+        var maxStackedShift = shifts.OrderByDescending(s => s.StackedDeliveries).First();
+        var maxStacked = maxStackedShift.StackedDeliveries;
+        var maxStackedDate = maxStackedShift.ShiftDate;
+
+        var dailyBreakdown = shifts.Select(s =>
+        {
+            var totalOrders = s.AcceptedDailyOrders;
+            var stackedPercentage = totalOrders > 0
+                ? (decimal)s.StackedDeliveries / totalOrders * 100
+                : 0;
+
+            return new DailyStackedBreakdown(
+                Date: s.ShiftDate,
+                StackedDeliveries: s.StackedDeliveries,
+                AcceptedOrders: s.AcceptedDailyOrders,
+                StackedPercentage: stackedPercentage
+            );
+        }).ToList();
+
+        var report = new MonthlyStackedDeliveriesReport(
+            RiderId: rider.Id,
+            RiderName: rider.Employee.NameAR,
+            WorkingId: workingId,
+            Year: year,
+            Month: month,
+            TotalStackedDeliveries: totalStacked,
+            TotalShifts: totalShifts,
+            AverageStackedPerShift: avgStackedPerShift,
+            MaxStackedInDay: maxStacked,
+            MaxStackedDate: maxStackedDate,
+            DailyBreakdown: dailyBreakdown
+        );
+
+        return Result.Success(report);
+    }
 
     public async Task<Result<TopRidersReport>> GetTopRidersForMonthAsync(
         int year,
@@ -1724,7 +1832,8 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
         decimal completionRate,
         decimal rejectionRate,
         int totalShifts,
-        decimal performanceScore)
+        decimal performanceScore, int totalStacked, // ADD THIS PARAMETER
+    decimal avgStackedPerShift)
     {
         var achievements = new List<string>();
 
@@ -1735,6 +1844,13 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
             achievements.Add("⭐ 500+ Orders Milestone");
         else if (totalOrders >= 250)
             achievements.Add("✨ 250+ Orders Achievement");
+
+        if (totalStacked >= 500)
+            achievements.Add("📦 Stacking Master (500+)");
+        else if (totalStacked >= 250)
+            achievements.Add("📦 Stacking Expert (250+)");
+        else if (totalStacked >= 100)
+            achievements.Add("📦 Efficient Stacker (100+)");
 
         // Consistency achievements
         if (totalShifts >= 30 && completionRate >= 90m)
@@ -1893,10 +2009,15 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
             var companyAccepted = companyShifts.Sum(s => s.AcceptedDailyOrders);
             var companyPenalty = companyShifts.Sum(s => CalculatePenalty(s));
             var companyProblematic = companyShifts.Count(s => HasRejectionProblem(s));
+            var companyStacked = companyShifts.Sum(s => s.StackedDeliveries); // ADD THIS
 
             var performanceScore = companyExpected > 0
                 ? (decimal)companyAccepted / companyExpected * 100
                 : 0;
+
+            var avgStackedPerShift = companyWorkingDays > 0
+         ? (decimal)companyStacked / companyWorkingDays
+         : 0; // A
 
             breakdowns.Add(new CompanyPeriodBreakdown(
                 CompanyName: companyName,
@@ -1911,6 +2032,9 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                 TotalWorkingHours: companyShifts.Sum(s => s.WorkingHours),
                 ProblematicShiftsCount: companyProblematic,
                 PenaltyAmount: companyPenalty,
+                            TotalStackedDeliveries: companyStacked, // ADD THIS
+                            AverageStackedPerShift: avgStackedPerShift, // ADD THIS
+
                 PerformanceScore: performanceScore,
                 ExpectedOrders: companyExpected
             ));
