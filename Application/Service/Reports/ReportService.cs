@@ -30,29 +30,54 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                 return Result.Failure<ComprehensiveDashboard>(
                     new Error("End date must be after start date", "invalid_input", 400));
 
-            // Fetch all data in parallel
-            var companiesTask = GetCompaniesStatisticsAsync(effectiveStartDate, effectiveEndDate, cancellationToken);
-            var ridersTask = GetRidersStatisticsAsync(effectiveStartDate, effectiveEndDate, cancellationToken);
-            var shiftsTask = GetShiftsStatisticsAsync(effectiveStartDate, effectiveEndDate, cancellationToken);
-            var ordersTask = GetOrdersStatisticsAsync(effectiveStartDate, effectiveEndDate, cancellationToken);
-            var performanceTask = GetPerformanceMetricsAsync(effectiveStartDate, effectiveEndDate, cancellationToken);
-            var housingTask = GetHousingStatisticsAsync(effectiveStartDate, effectiveEndDate, cancellationToken);
-            var trendsTask = GetTrendsAnalysisAsync(effectiveStartDate, effectiveEndDate, cancellationToken);
+            // Load all necessary data ONCE to avoid multiple DB calls
+            var allCompanies = await _dbcontext.Companies
+                .AsNoTracking()
+                .ToListAsync(cancellationToken);
 
-            await Task.WhenAll(companiesTask, ridersTask, shiftsTask, ordersTask,
-                             performanceTask, housingTask, trendsTask);
+            var allRiders = await _dbcontext.RiderDetails
+                .Include(r => r.Employee)
+                .AsNoTracking()
+                .ToListAsync(cancellationToken);
+
+            var shifts = await _dbcontext.RiderShifts
+                .Include(s => s.Company)
+                .Include(s => s.Rider)
+                    .ThenInclude(r => r.Employee)
+                    .ThenInclude(e => e.Housing)
+                .Where(s => s.ShiftDate >= effectiveStartDate && s.ShiftDate <= effectiveEndDate)
+                .AsNoTracking()
+                .ToListAsync(cancellationToken);
+
+            var allHousings = await _dbcontext.Housings
+                .AsNoTracking()
+                .ToListAsync(cancellationToken);
+
+            var substitutions = await _dbcontext.Set<RiderShiftSubstitution>()
+                .Where(s => s.IsActive)
+                .AsNoTracking()
+                .ToListAsync(cancellationToken);
+
+            // Now process everything in memory - no more DB calls
+            var companies = GetCompaniesStatistics(allCompanies, shifts);
+            var riders = GetRidersStatistics(allRiders, shifts, substitutions);
+            var shiftsStats = GetShiftsStatistics(shifts, effectiveStartDate, effectiveEndDate);
+            var orders = GetOrdersStatistics(shifts);
+            var performance = GetPerformanceMetrics(shifts);
+            var housing = GetHousingStatistics(allHousings, shifts);
+            var trends = GetTrendsAnalysis(shifts, effectiveStartDate, effectiveEndDate);
 
             var dashboard = new ComprehensiveDashboard(
                 GeneratedAt: DateTime.UtcNow,
                 PeriodStart: effectiveStartDate,
                 PeriodEnd: effectiveEndDate,
-                Companies: companiesTask.Result,
-                Riders: ridersTask.Result,
-                Shifts: shiftsTask.Result,
-                Orders: ordersTask.Result,
-                Performance: performanceTask.Result,
-                Housing: housingTask.Result,
-                Trends: trendsTask.Result
+                Companies: companies,
+                Riders: riders,
+                Shifts: shiftsStats,
+                Orders: orders,
+                Performance: performance,
+                Housing: housing,
+                Trends: trends
             );
 
             return Result.Success(dashboard);
@@ -64,21 +89,10 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
         }
     }
 
-    private async Task<CompaniesStatistics> GetCompaniesStatisticsAsync(
-        DateOnly startDate,
-        DateOnly endDate,
-        CancellationToken cancellationToken)
+    private CompaniesStatistics GetCompaniesStatistics(
+        List<Company> allCompanies,
+        List<RiderShift> shifts)
     {
-        var allCompanies = await _dbcontext.Companies
-            .AsNoTracking()
-            .ToListAsync(cancellationToken);
-
-        var shifts = await _dbcontext.RiderShifts
-            .Include(s => s.Company)
-            .Where(s => s.ShiftDate >= startDate && s.ShiftDate <= endDate)
-            .AsNoTracking()
-            .ToListAsync(cancellationToken);
-
         var companyDetails = allCompanies.Select(company =>
         {
             var companyShifts = shifts.Where(s => s.Company.Id == company.Id).ToList();
@@ -120,28 +134,13 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
         );
     }
 
-    private async Task<RidersStatistics> GetRidersStatisticsAsync(
-        DateOnly startDate,
-        DateOnly endDate,
-        CancellationToken cancellationToken)
+    private RidersStatistics GetRidersStatistics(
+        List<RiderDetails> allRiders,
+        List<RiderShift> shifts,
+        List<RiderShiftSubstitution> substitutions)
     {
-        var allRiders = await _dbcontext.RiderDetails
-            .Include(r => r.Employee)
-            .AsNoTracking()
-            .ToListAsync(cancellationToken);
-
-        var shifts = await _dbcontext.RiderShifts
-            .Where(s => s.ShiftDate >= startDate && s.ShiftDate <= endDate)
-            .AsNoTracking()
-            .ToListAsync(cancellationToken);
-
         var activeRiderIds = shifts.Select(s => s.RiderId).Distinct().ToList();
         var activeRiders = allRiders.Where(r => activeRiderIds.Contains(r.Id)).ToList();
-
-        var substitutions = await _dbcontext.Set<RiderShiftSubstitution>()
-            .Where(s => s.IsActive)
-            .AsNoTracking()
-            .ToListAsync(cancellationToken);
 
         return new RidersStatistics(
             TotalRiders: allRiders.Count,
@@ -154,16 +153,11 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
         );
     }
 
-    private async Task<ShiftsStatistics> GetShiftsStatisticsAsync(
+    private ShiftsStatistics GetShiftsStatistics(
+        List<RiderShift> shifts,
         DateOnly startDate,
-        DateOnly endDate,
-        CancellationToken cancellationToken)
+        DateOnly endDate)
     {
-        var shifts = await _dbcontext.RiderShifts
-            .Where(s => s.ShiftDate >= startDate && s.ShiftDate <= endDate)
-            .AsNoTracking()
-            .ToListAsync(cancellationToken);
-
         var totalShifts = shifts.Count;
         var completedShifts = shifts.Count(s => s.ShiftStatus == ShiftStatus.Completed.ToString());
         var incompleteShifts = shifts.Count(s => s.ShiftStatus == ShiftStatus.Incomplete.ToString());
@@ -194,16 +188,8 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
         );
     }
 
-    private async Task<OrdersStatistics> GetOrdersStatisticsAsync(
-        DateOnly startDate,
-        DateOnly endDate,
-        CancellationToken cancellationToken)
+    private OrdersStatistics GetOrdersStatistics(List<RiderShift> shifts)
     {
-        var shifts = await _dbcontext.RiderShifts
-            .Where(s => s.ShiftDate >= startDate && s.ShiftDate <= endDate)
-            .AsNoTracking()
-            .ToListAsync(cancellationToken);
-
         var totalAccepted = shifts.Sum(s => s.AcceptedDailyOrders);
         var totalRejected = shifts.Sum(s => s.RejectedDailyOrders);
         var totalRealRejected = shifts.Sum(s => s.RealRejectedDailyOrders);
@@ -230,19 +216,8 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
         );
     }
 
-    private async Task<PerformanceMetrics> GetPerformanceMetricsAsync(
-        DateOnly startDate,
-        DateOnly endDate,
-        CancellationToken cancellationToken)
+    private PerformanceMetrics GetPerformanceMetrics(List<RiderShift> shifts)
     {
-        var shifts = await _dbcontext.RiderShifts
-            .Include(s => s.Company)
-            .Include(s => s.Rider)
-                .ThenInclude(r => r.Employee)
-            .Where(s => s.ShiftDate >= startDate && s.ShiftDate <= endDate)
-            .AsNoTracking()
-            .ToListAsync(cancellationToken);
-
         // Calculate overall performance score
         var companyGroups = shifts.GroupBy(s => s.Company.Name);
         var companyScores = new List<decimal>();
@@ -287,33 +262,23 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
             .Take(10)
             .ToList();
 
+        var totalDays = shifts.Select(s => s.ShiftDate).Distinct().Count();
+        var avgOrdersPerDay = totalDays > 0 ? (decimal)shifts.Sum(s => s.AcceptedDailyOrders) / totalDays : 0;
+
         return new PerformanceMetrics(
             OverallPerformanceScore: overallScore,
             TopPerformers: riderPerformances,
             AverageCompletionRate: shifts.Any()
                 ? (decimal)shifts.Count(s => s.ShiftStatus == ShiftStatus.Completed.ToString()) / shifts.Count * 100
                 : 0,
-            AverageOrdersPerDay: CalculateAverageOrdersPerDay(shifts, startDate, endDate)
+            AverageOrdersPerDay: avgOrdersPerDay
         );
     }
 
-    private async Task<HousingStatistics> GetHousingStatisticsAsync(
-        DateOnly startDate,
-        DateOnly endDate,
-        CancellationToken cancellationToken)
+    private HousingStatistics GetHousingStatistics(
+        List<Housing> allHousings,
+        List<RiderShift> shifts)
     {
-        var allHousings = await _dbcontext.Housings
-            .AsNoTracking()
-            .ToListAsync(cancellationToken);
-
-        var shifts = await _dbcontext.RiderShifts
-            .Include(s => s.Rider)
-                .ThenInclude(r => r.Employee)
-                .ThenInclude(e => e.Housing)
-            .Where(s => s.ShiftDate >= startDate && s.ShiftDate <= endDate)
-            .AsNoTracking()
-            .ToListAsync(cancellationToken);
-
         var validShifts = shifts
             .Where(s => s.Rider?.Employee?.Housing != null)
             .ToList();
@@ -347,16 +312,11 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
         );
     }
 
-    private async Task<TrendsAnalysis> GetTrendsAnalysisAsync(
+    private TrendsAnalysis GetTrendsAnalysis(
+        List<RiderShift> shifts,
         DateOnly startDate,
-        DateOnly endDate,
-        CancellationToken cancellationToken)
+        DateOnly endDate)
     {
-        var shifts = await _dbcontext.RiderShifts
-            .Where(s => s.ShiftDate >= startDate && s.ShiftDate <= endDate)
-            .AsNoTracking()
-            .ToListAsync(cancellationToken);
-
         // Weekly trends
         var weeklyData = shifts
             .GroupBy(s => GetWeekNumber(s.ShiftDate))
@@ -389,18 +349,19 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
         );
     }
 
+    //// Helper methods
+    private decimal CalculatePenalty(RiderShift shift)
+    {
+        var excessRejections = Math.Max(0,
+            shift.RealRejectedDailyOrders - CompanyShiftConfiguration.RejectionThreshold);
+        return excessRejections * CompanyShiftConfiguration.PenaltyPerExcessRejection;
+    }
+
     private decimal CalculateCompletionRate(List<RiderShift> shifts)
     {
         var total = shifts.Count;
         var completed = shifts.Count(s => s.ShiftStatus == ShiftStatus.Completed.ToString());
         return total > 0 ? (decimal)completed / total * 100 : 0;
-    }
-
-    private decimal CalculateAverageOrdersPerDay(List<RiderShift> shifts, DateOnly start, DateOnly end)
-    {
-        var totalDays = (end.ToDateTime(TimeOnly.MinValue) - start.ToDateTime(TimeOnly.MinValue)).Days + 1;
-        var totalOrders = shifts.Sum(s => s.AcceptedDailyOrders);
-        return totalDays > 0 ? (decimal)totalOrders / totalDays : 0;
     }
 
     private int GetWeekNumber(DateOnly date)
@@ -447,6 +408,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
     }
 
 
+   
 
 
     public async Task<Result<MonthlyRiderReport>> GetMonthlyReportByWorkingIdAsync(
@@ -1966,12 +1928,6 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
         return periods;
     }
 
-    private decimal CalculatePenalty(RiderShift shift)
-    {
-        var excessRejections = Math.Max(0,
-            shift.RealRejectedDailyOrders - CompanyShiftConfiguration.RejectionThreshold);
-        return excessRejections * CompanyShiftConfiguration.PenaltyPerExcessRejection;
-    }
 
     private bool HasRejectionProblem(RiderShift shift)
     {

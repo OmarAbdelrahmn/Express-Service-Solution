@@ -25,7 +25,6 @@ public class ReportController(IReportService service) : ControllerBase
 
 
 
-
     [HttpGet("monthly/{workingId:int}")]
     public async Task<IActionResult> GetMonthlyReportByWorkingIdAsync(
         [FromRoute] int workingId,
