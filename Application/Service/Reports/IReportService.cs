@@ -1,5 +1,6 @@
 ﻿using Application.Abstraction;
 using Application.Service.Riders;
+using static Application.Service.Reports.ReportService;
 
 namespace Application.Service.Reports;
 
@@ -462,7 +463,8 @@ public record ComprehensiveDashboard(
     OrdersStatistics Orders,
     PerformanceMetrics Performance,
     HousingStatistics Housing,
-    TrendsAnalysis Trends
+    TrendsAnalysis Trends,
+    VehicleStatistics Vehicle
 );
 
 public record CompaniesStatistics(

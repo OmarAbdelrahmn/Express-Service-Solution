@@ -5,7 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace Express_Service.Controllers;
 
-[Route("[controller]")]
+[Route("api/[controller]")]
 [ApiController]
 public class RiderController(IRiderService service) : ControllerBase
 {
@@ -20,7 +20,7 @@ public class RiderController(IRiderService service) : ControllerBase
             ? Ok(result.Value) : result.ToProblem();
     }
 
-    [HttpGet("id/{id}")]
+    [HttpGet("id/{id:int}")]
     public async Task<IActionResult> GetRiderById(int id)
     {
         var result = await service.Getbyid(id);
@@ -29,7 +29,7 @@ public class RiderController(IRiderService service) : ControllerBase
             ? Ok(result.Value) : result.ToProblem();
     }
 
-    [HttpGet("iqama/{iqamaNo}")]
+    [HttpGet("iqama/{iqamaNo:int}")]
     public async Task<IActionResult> GetRiderByIqama(int iqamaNo)
     {
         var result = await service.Get(iqamaNo);
@@ -47,7 +47,7 @@ public class RiderController(IRiderService service) : ControllerBase
             ? Ok(new Re("Rider Add Successfully")) : result.ToProblem();
     }
 
-    [HttpPut("{iqamaNo}")]
+    [HttpPut("{iqamaNo:int}")]
     public async Task<IActionResult> UpdateRider(int iqamaNo, [FromBody] URiderRequest request)
     {
         var result = await service.UpdateAsync(iqamaNo, request);
@@ -56,7 +56,7 @@ public class RiderController(IRiderService service) : ControllerBase
             ? Ok(result.Value) : result.ToProblem();
     }
 
-    [HttpDelete("{iqamaNo}")]
+    [HttpDelete("{iqamaNo:int}")]
     public async Task<IActionResult> DeleteRider(int iqamaNo)
     {
         var result = await service.DeleteAsync(iqamaNo);
@@ -74,7 +74,7 @@ public class RiderController(IRiderService service) : ControllerBase
             ? Ok(new Re("Working ID Changed Successfully")) : result.ToProblem();
     }
 
-    [HttpPost("change-employee/{iqamaNo}")]
+    [HttpPost("{iqamaNo:int}/add-employee")]
     public async Task<IActionResult> AddETOR(int iqamaNo, [FromBody] EMTOR request)
     {
         var result = await service.AddETOR(iqamaNo, request);

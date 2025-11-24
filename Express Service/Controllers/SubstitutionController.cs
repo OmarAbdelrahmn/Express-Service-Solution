@@ -4,7 +4,7 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace Express_Service.Controllers;
 
-[Route("[controller]")]
+[Route("api/[controller]")]
 [ApiController]
 public class SubstitutionController(IRiderSub service) : ControllerBase
 {
@@ -35,7 +35,7 @@ public class SubstitutionController(IRiderSub service) : ControllerBase
             ? Ok(result.Value)
             : result.ToProblem();
     }
-    [HttpGet("history/{RiderWorkingId}")]
+    [HttpGet("history/{RiderWorkingId:int}")]
     public async Task<IActionResult> GetHistory(int RiderWorkingId)
     {
         var result = await service.GetSubstitutionHistory(RiderWorkingId);
@@ -52,7 +52,7 @@ public class SubstitutionController(IRiderSub service) : ControllerBase
             : result.ToProblem();
     }
 
-    [HttpPut("{workingId}")]
+    [HttpPut("{workingId}/stop")]
     public async Task<IActionResult> StopSubstitution(int workingId)
     {
         var result = await service.StopSubstitutionByWorkingId(workingId);

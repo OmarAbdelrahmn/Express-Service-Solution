@@ -6,7 +6,7 @@ using Microsoft.AspNetCore.Mvc;
 
 
 namespace Express_Service.Controllers;
-[Route("me")]
+[Route("api/me")]
 [ApiController]
 //[Authorize]
 public class AccountController(IUserService service) : ControllerBase
@@ -34,7 +34,7 @@ public class AccountController(IUserService service) : ControllerBase
         return result.IsSuccess ? Ok(new Resu("profile Updated successfully")) : result.ToProblem();
     }
 
-    [HttpPut("change-passord")]
+    [HttpPut("change-password")]
     public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordRequest request)
     {
         var result = await service.ChangePassword(User.GetUserId()!, request);

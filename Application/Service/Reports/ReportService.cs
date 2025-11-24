@@ -22,7 +22,6 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
     {
         try
         {
-            // Set default date range if not provided (last 30 days)
             var effectiveEndDate = endDate ?? DateOnly.FromDateTime(DateTime.UtcNow);
             var effectiveStartDate = startDate ?? effectiveEndDate.AddDays(-30);
 
@@ -30,7 +29,6 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                 return Result.Failure<ComprehensiveDashboard>(
                     new Error("End date must be after start date", "invalid_input", 400));
 
-            // Load all necessary data ONCE to avoid multiple DB calls
             var allCompanies = await _dbcontext.Companies
                 .AsNoTracking()
                 .ToListAsync(cancellationToken);
@@ -58,6 +56,12 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                 .AsNoTracking()
                 .ToListAsync(cancellationToken);
 
+            var allVehicles = await _dbcontext.Vehicles
+            .Include(v => v.RiderDetails)
+            .Include(v => v.RiderVehicleStatuses)
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
+
             // Now process everything in memory - no more DB calls
             var companies = GetCompaniesStatistics(allCompanies, shifts);
             var riders = GetRidersStatistics(allRiders, shifts, substitutions);
@@ -66,6 +70,9 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
             var performance = GetPerformanceMetrics(shifts);
             var housing = GetHousingStatistics(allHousings, shifts);
             var trends = GetTrendsAnalysis(shifts, effectiveStartDate, effectiveEndDate);
+
+            var vehicles = GetVehicleStatistics(allVehicles, allRiders, effectiveStartDate, effectiveEndDate);
+
 
             var dashboard = new ComprehensiveDashboard(
                 GeneratedAt: DateTime.UtcNow,
@@ -77,7 +84,9 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                 Orders: orders,
                 Performance: performance,
                 Housing: housing,
-                Trends: trends
+                Trends: trends,
+                Vehicle: vehicles  
+
             );
 
             return Result.Success(dashboard);
@@ -88,7 +97,103 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                 new Error($"Error generating dashboard: {ex.Message}", "server_error", 500));
         }
     }
+    private VehicleStatistics GetVehicleStatistics(
+    List<Vehicle> vehicles,
+    List<RiderDetails> riders,
+    DateOnly startDate,
+    DateOnly endDate)
+    {
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
 
+        // Total vehicles count
+        var totalVehicles = vehicles.Count;
+
+        // Vehicles by type
+        var byType = vehicles
+            .GroupBy(v => v.VehicleType)
+            .Select(g => new VehicleTypeCount(g.Key, g.Count()))
+            .OrderByDescending(x => x.Count)
+            .ToList();
+
+        // Vehicles by manufacturer
+        var byManufacturer = vehicles
+            .Where(v => !string.IsNullOrEmpty(v.Manufacturer))
+            .GroupBy(v => v.Manufacturer)
+            .Select(g => new ManufacturerCount(g.Key, g.Count()))
+            .OrderByDescending(x => x.Count)
+            .ToList();
+
+        // License expiry analysis
+        var expiredLicenses = vehicles.Count(v => v.LicenseExpiryDate < today);
+        var expiringIn30Days = vehicles.Count(v =>
+            v.LicenseExpiryDate >= today &&
+            v.LicenseExpiryDate <= today.AddDays(30));
+        var expiringIn90Days = vehicles.Count(v =>
+            v.LicenseExpiryDate > today.AddDays(30) &&
+            v.LicenseExpiryDate <= today.AddDays(90));
+
+        // Assigned vs unassigned vehicles
+        var assignedVehicles = vehicles.Count(v => v.RiderDetails != null);
+        var unassignedVehicles = totalVehicles - assignedVehicles;
+
+        // Average vehicle age
+        var currentYear = DateTime.UtcNow.Year;
+        var averageAge = vehicles.Any()
+            ? vehicles.Average(v => currentYear - v.ManufactureYear)
+            : 0;
+
+        // Vehicles by location
+        var byLocation = vehicles
+            .Where(v => !string.IsNullOrEmpty(v.Location))
+            .GroupBy(v => v.Location)
+            .Select(g => new LocationCount(g.Key, g.Count()))
+            .OrderByDescending(x => x.Count)
+            .ToList();
+
+        // Vehicles with complete documentation
+        var withCompleteDocumentation = vehicles.Count(v =>
+            !string.IsNullOrEmpty(v.VehicleImagePath) &&
+            !string.IsNullOrEmpty(v.LicenseImagePath));
+
+        // Recent registrations (within the selected period)
+        var recentRegistrations = vehicles.Count(v =>
+            DateOnly.FromDateTime(v.CreatedAt) >= startDate &&
+            DateOnly.FromDateTime(v.CreatedAt) <= endDate);
+
+        return new VehicleStatistics(
+            TotalVehicles: totalVehicles,
+            AssignedVehicles: assignedVehicles,
+            UnassignedVehicles: unassignedVehicles,
+            ExpiredLicenses: expiredLicenses,
+            ExpiringIn30Days: expiringIn30Days,
+            ExpiringIn90Days: expiringIn90Days,
+            AverageVehicleAge: Math.Round(averageAge, 1),
+            WithCompleteDocumentation: withCompleteDocumentation,
+            RecentRegistrations: recentRegistrations,
+            ByType: byType,
+            ByManufacturer: byManufacturer,
+            ByLocation: byLocation
+        );
+    }
+
+    public record VehicleStatistics(
+        int TotalVehicles,
+        int AssignedVehicles,
+        int UnassignedVehicles,
+        int ExpiredLicenses,
+        int ExpiringIn30Days,
+        int ExpiringIn90Days,
+        double AverageVehicleAge,
+        int WithCompleteDocumentation,
+        int RecentRegistrations,
+        List<VehicleTypeCount> ByType,
+        List<ManufacturerCount> ByManufacturer,
+        List<LocationCount> ByLocation
+    );
+
+    public record VehicleTypeCount(string Type, int Count);
+    public record ManufacturerCount(string Manufacturer, int Count);
+    public record LocationCount(string Location, int Count);
     private CompaniesStatistics GetCompaniesStatistics(
         List<Company> allCompanies,
         List<RiderShift> shifts)

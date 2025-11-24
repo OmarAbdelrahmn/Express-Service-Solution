@@ -6,7 +6,7 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace Express_Service.Controllers;
 
-[Route("[controller]")]
+[Route("api/[controller]")]
 [ApiController]
 public class EmployeeController(IEmployeeService service) : ControllerBase
 {
@@ -22,7 +22,7 @@ public class EmployeeController(IEmployeeService service) : ControllerBase
             response.ToProblem();
     }
     
-    [HttpGet("{IqamaNo}")]
+    [HttpGet("{IqamaNo:int}")]
     public async Task<IActionResult> Get(int IqamaNo)
     {
         var response = await service.Get(IqamaNo);
@@ -41,7 +41,7 @@ public class EmployeeController(IEmployeeService service) : ControllerBase
             response.ToProblem();
     }
 
-    [HttpPut("{IqamaNo}")]
+    [HttpPut("{IqamaNo:int}")]
     public async Task<IActionResult> Update(int IqamaNo, [FromBody] UEmpolyeeRequest Request)
     {
         var response = await service.UpdateAsync(IqamaNo, Request);
@@ -51,7 +51,7 @@ public class EmployeeController(IEmployeeService service) : ControllerBase
     }
     
 
-    [HttpDelete("{IqamaNo}")]
+    [HttpDelete("{IqamaNo:int}")]
     public async Task<IActionResult> Delete(int IqamaNo)
     {
         var response = await service.DeleteAsync(IqamaNo);

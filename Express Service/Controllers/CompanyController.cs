@@ -6,9 +6,8 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace Express_Service.Controllers;
 
-[Route("[controller]")]
+[Route("api/[controller]")]
 [ApiController]
-//[Authorize(Roles = )]
 public class CompanyController(ICompanyService service) : ControllerBase
 {
     private readonly ICompanyService service = service;
@@ -40,7 +39,7 @@ public class CompanyController(ICompanyService service) : ControllerBase
             response.ToProblem();
     }
 
-    [HttpGet("")]
+    [HttpGet("employees")]
     public async Task<IActionResult> GetAllEmployee()
     {
         var response = await service.GetAllEmployee();

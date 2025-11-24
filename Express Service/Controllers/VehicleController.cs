@@ -1,199 +1,193 @@
 ﻿using Application.Contracts.Employees;
 using Application.Service.Empolyee;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Express_Service.Controllers;
 
-[Route("[controller]")]
+[Route("api/vehicles")]
 [ApiController]
-public class VehicleController(IVehicleService service) : ControllerBase
+public class VehicleController : ControllerBase
 {
-    private readonly IVehicleService service = service;
+    private readonly IVehicleService _service;
 
-    [HttpPost("Create")]
-    public async Task<IActionResult> Create(VehicleRequest request)
+    public VehicleController(IVehicleService service)
     {
-        var result = await service.CreateAsync(request);
-        
+        _service = service;
+    }
+
+    [HttpPost]
+    public async Task<IActionResult> Create([FromBody] VehicleRequest request)
+    {
+        var result = await _service.CreateAsync(request);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    [HttpPut("{plateNumber}")]
+    public async Task<IActionResult> Update([FromRoute] string plateNumber, [FromBody] UVehicleRequest request)
+    {
+        var result = await _service.UpdateAsync(plateNumber, request);
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
 
     [HttpDelete("{vehicleNumber}")]
-    public async Task<IActionResult> Delete(string vehicleNumber, CancellationToken cancellationToken)
+    public async Task<IActionResult> Delete([FromRoute] string vehicleNumber, CancellationToken cancellationToken)
     {
-        var result = await service.DeleteAsync(vehicleNumber, cancellationToken);
-        
-        return result.IsSuccess ? Ok(new Re("Deleted successfully")) : result.ToProblem();
-    }
-  
-    [HttpGet("chase/{vehicleNumber}")]
-    public async Task<IActionResult> Get(string vehicleNumber)
-    {
-        var result = await service.Get(vehicleNumber);
-        
-        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
-    }
-    
-    [HttpGet("serial/{Serial}")]
-    public async Task<IActionResult> Get1(int Serial)
-    {
-        var result = await service.GetSerial(Serial);
-        
-        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
-    }
-    
-    [HttpGet("plate/{plate}")]
-    public async Task<IActionResult> Get2(string plate)
-    {
-        var result = await service.Getplate(plate);
-        
-        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+        var result = await _service.DeleteAsync(vehicleNumber, cancellationToken);
+        return result.IsSuccess ? Ok(new ApiMessage("Deleted successfully")) : result.ToProblem();
     }
 
-    [HttpGet("")]
+    [HttpGet]
     public async Task<IActionResult> GetAll()
     {
-        var result = await service.GetAllEmployee();
-        
+        var result = await _service.GetAllEmployee();
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
 
-    [HttpPut("{PlateNumberA}")]
-    public async Task<IActionResult> Update(string PlateNumberA, UVehicleRequest request)
+    [HttpGet("chase/{vehicleNumber}")]
+    public async Task<IActionResult> GetByNumber([FromRoute] string vehicleNumber)
     {
-        var result = await service.UpdateAsync(PlateNumberA, request);
-        
+        var result = await _service.Get(vehicleNumber);
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
 
-
-    [HttpPost("take-vehicle")]
-    public async Task<IActionResult> TakeVehicle(int iqamaNo, string VehicleNumber, string reason)
+    [HttpGet("serial/{serial:int}")]
+    public async Task<IActionResult> GetBySerial([FromRoute] int serial)
     {
-        var result = await service.TakeVehicleAsync(iqamaNo, VehicleNumber, reason);
-        
-        return result.IsSuccess ? Ok(new Re("Vehicle taken successfully")) : result.ToProblem();
-    }
-
-    [HttpPost("return-vehicle")]
-    public async Task<IActionResult> ReturnVehicle(int iqamaNo, string VehicleNumber , string reason)
-    {
-        var result = await service.ReturnVehicleAsync(iqamaNo, VehicleNumber,reason);
-        
-        return result.IsSuccess ? Ok(new Re("Vehicle returned successfully")) : result.ToProblem();
-    }
-
-    [HttpGet("taken-vehicles")]
-    public async Task<IActionResult> GetTakenVehicles()
-    {
-        var result = await service.GetUnavailableVehiclesAsync();
-        
+        var result = await _service.GetSerial(serial);
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
 
-    [HttpGet("available-vehicles")]
+    [HttpGet("plate/{plate}")]
+    public async Task<IActionResult> GetByPlate([FromRoute] string plate)
+    {
+        var result = await _service.Getplate(plate);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    [HttpGet("available")]
     public async Task<IActionResult> GetAvailableVehicles()
     {
-        var result = await service.GetAvailableVehiclesAsync();
-        
+        var result = await _service.GetAvailableVehiclesAsync();
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
 
-    //[HttpGet("vehicle-history/{PlateNumberA}")]
-    //public async Task<IActionResult> GetVehicleHistory(string PlateNumberA)
-    //{
-    //    var result = await service.GetVehicleHistoryAsync(PlateNumberA);
-        
-    //    return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
-    //}
-    
-    [HttpGet("vehicle-history/{PlateNumberA}")]
-    public async Task<IActionResult> GetVehicleHistory2(string PlateNumberA)
+    [HttpGet("taken")]
+    public async Task<IActionResult> GetTakenVehicles()
     {
-        var result = await service.GetVehicleHistoryAsync1(PlateNumberA);
-        
+        var result = await _service.GetUnavailableVehiclesAsync();
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
 
-    [HttpGet("is-available/{PlateNumberA}")]
-    public async Task<IActionResult> GetEmployeeVehicles(string PlateNumberA)
+    [HttpGet("vehicle-history/{plate}")]
+    public async Task<IActionResult> GetVehicleHistory([FromRoute] string plate)
     {
-        var result = await service.IsVehicleAvailableAsync(PlateNumberA);
-        
-        return result.IsSuccess ? Ok(new Re("this vehicle is available")) : result.ToProblem();
+        var result = await _service.GetVehicleHistoryAsync1(plate);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
-    
-    [HttpPut("change-location/{PlateNumberA}")]
-    public async Task<IActionResult> ChangeVehicleLocation(string PlateNumberA, string NewLocation)
+
+    [HttpGet("is-available/{plate}")]
+    public async Task<IActionResult> IsVehicleAvailable([FromRoute] string plate)
     {
-        var result = await service.ChangeLocation(PlateNumberA, NewLocation);
-        
-        return result.IsSuccess ? Ok(new Re("Vehicle location updated successfully")) : result.ToProblem();
+        var result = await _service.IsVehicleAvailableAsync(plate);
+        return result.IsSuccess ? Ok(new ApiMessage("This vehicle is available")) : result.ToProblem();
+    }
+
+    [HttpPost("take")]
+    public async Task<IActionResult> TakeVehicle(
+        [FromQuery] int iqamaNo,
+        [FromQuery] string vehicleNumber,
+        [FromQuery] string reason)
+    {
+        var result = await _service.TakeVehicleAsync(iqamaNo, vehicleNumber, reason);
+        return result.IsSuccess ? Ok(new ApiMessage("Vehicle taken successfully")) : result.ToProblem();
+    }
+
+    [HttpPost("return")]
+    public async Task<IActionResult> ReturnVehicle(
+        [FromQuery] int iqamaNo,
+        [FromQuery] string vehicleNumber,
+        [FromQuery] string reason)
+    {
+        var result = await _service.ReturnVehicleAsync(iqamaNo, vehicleNumber, reason);
+        return result.IsSuccess ? Ok(new ApiMessage("Vehicle returned successfully")) : result.ToProblem();
+    }
+
+    [HttpPut("change-location/{plate}")]
+    public async Task<IActionResult> ChangeVehicleLocation(
+        [FromRoute] string plate,
+        [FromQuery] string newLocation)
+    {
+        var result = await _service.ChangeLocation(plate, newLocation);
+        return result.IsSuccess ? Ok(new ApiMessage("Vehicle location updated successfully")) : result.ToProblem();
     }
 
     [HttpPost("report-problem")]
-    public async Task<IActionResult> ReportVehicleProblem(int RideriqamaNo, string PlateNumberA, string Reason)
+    public async Task<IActionResult> ReportProblem(
+        [FromQuery] int riderIqamaNo,
+        [FromQuery] string plate,
+        [FromQuery] string reason)
     {
-        var result = await service.ReportProblemAsync(RideriqamaNo, PlateNumberA, Reason);
-        
-        return result.IsSuccess ? Ok(new Re("Problem reported successfully")) : result.ToProblem();
+        var result = await _service.ReportProblemAsync(riderIqamaNo, plate, reason);
+        return result.IsSuccess ? Ok(new ApiMessage("Problem reported successfully")) : result.ToProblem();
     }
 
     [HttpPost("fix-problem")]
-    public async Task<IActionResult> FixVehicleProblem(string PlateNumberA, string Reason)
+    public async Task<IActionResult> FixProblem(
+        [FromQuery] string plate,
+        [FromQuery] string reason)
     {
-        var result = await service.FixVehicleProblemAsync(PlateNumberA, Reason);
-        
-        return result.IsSuccess ? Ok(new Re("Problem fixed successfully")) : result.ToProblem();
+        var result = await _service.FixVehicleProblemAsync(plate, reason);
+        return result.IsSuccess ? Ok(new ApiMessage("Problem fixed successfully")) : result.ToProblem();
     }
 
-    [HttpGet("all-vehicles-with-riders")]
-    public async Task<IActionResult> GetAllVehiclesWithRidersAsync()
+    [HttpPost("stolen")]
+    public async Task<IActionResult> ReportStolen(
+        [FromQuery] string plate,
+        [FromQuery] int? reportedByIqamaNo,
+        [FromQuery] string? reason)
     {
-        var result = await service.GetAllVehiclesWithRidersAsync();
-        
-        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+        var result = await _service.ReportVehicleStolenAsync(plate, reportedByIqamaNo, reason);
+        return result.IsSuccess ? Ok(new ApiMessage("Report done successfully")) : result.ToProblem();
     }
 
-    [HttpGet("vehicle-with-rider/{PlateNumberA}")]
-    public async Task<IActionResult> GetVehicleWithRider(string PlateNumberA)
-    {
-        var result = await service.GetVehicleWithRiderByVehicleNumberAsync(PlateNumberA);
-
-        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
-    }
-
-    [HttpPost("stole-report")]
-    public async Task<IActionResult> reportstolenvehicle(string PlateNumberA, int? reportedByIqamaNo, string? reason)
-    {
-        var result = await service.ReportVehicleStolenAsync(PlateNumberA , reportedByIqamaNo , reason);
-
-        return result.IsSuccess ? Ok(new Re("Report done successfully")) : result.ToProblem();
-    }
-    
     [HttpPost("break-up")]
-    public async Task<IActionResult> Breakthevehicleup(string PlateNumberA, string reason)
+    public async Task<IActionResult> MarkBroken(
+        [FromQuery] string plate,
+        [FromQuery] string reason)
     {
-        var result = await service.MarkVehicleAsBreakUpAsync(PlateNumberA , reason);
-
-        return result.IsSuccess ? Ok(new Re("done successfully")) : result.ToProblem();
+        var result = await _service.MarkVehicleAsBreakUpAsync(plate, reason);
+        return result.IsSuccess ? Ok(new ApiMessage("Done successfully")) : result.ToProblem();
     }
 
     [HttpPut("recover-stolen")]
-    public async Task<IActionResult> recoveryStolen(string PlateNumberA, string reason)
+    public async Task<IActionResult> RecoverStolen(
+        [FromQuery] string plate,
+        [FromQuery] string reason)
     {
-        var result = await service.RecoverStolenVehicleAsync(PlateNumberA, reason);
-
-        return result.IsSuccess ? Ok(new Re("done successfully")) : result.ToProblem();
+        var result = await _service.RecoverStolenVehicleAsync(plate, reason);
+        return result.IsSuccess ? Ok(new ApiMessage("Done successfully")) : result.ToProblem();
     }
 
-    [HttpGet("group-by-status")]
-    public async Task<IActionResult> GetVehiclesGroupedByStatusAsync()
+    [HttpGet("with-riders")]
+    public async Task<IActionResult> GetAllVehiclesWithRiders()
     {
-        var result = await service.GetVehiclesGroupedByStatusAsync();
-
+        var result = await _service.GetAllVehiclesWithRidersAsync();
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
 
+    [HttpGet("with-rider/{plate}")]
+    public async Task<IActionResult> GetVehicleWithRider([FromRoute] string plate)
+    {
+        var result = await _service.GetVehicleWithRiderByVehicleNumberAsync(plate);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    [HttpGet("group-by-status")]
+    public async Task<IActionResult> GetVehiclesGroupedByStatus()
+    {
+        var result = await _service.GetVehiclesGroupedByStatusAsync();
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
 }
+
+public record ApiMessage(string Message);

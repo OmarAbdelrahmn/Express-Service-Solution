@@ -6,7 +6,7 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace Express_Service.Controllers;
 
-[Route("[controller]")]
+[Route("api/[controller]")]
 [ApiController]
 public class AuthController(IAuthService service) : ControllerBase
 {
@@ -22,7 +22,7 @@ public class AuthController(IAuthService service) : ControllerBase
             response.ToProblem();
     }
 
-    [HttpPost("admin-register")]
+    [HttpPost("register/admin")]
     public async Task<IActionResult> AdminRegister([FromBody] RegisterRequest request)
     {
         var response = await service.AdminRegisterAsync(request);
@@ -32,7 +32,7 @@ public class AuthController(IAuthService service) : ControllerBase
             response.ToProblem();
     }
     
-    [HttpPost("master-register")]
+    [HttpPost("register/master")]
     public async Task<IActionResult> MasterRegister([FromBody] RegisterRequest request)
     {
         var response = await service.MasterRegisterAsync(request);

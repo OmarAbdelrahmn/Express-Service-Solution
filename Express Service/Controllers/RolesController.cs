@@ -6,7 +6,7 @@ using Microsoft.AspNetCore.Mvc;
 
 
 namespace SurvayBasket.API.Controllers;
-[Route("[controller]")]
+[Route("api/[controller]")]
 [ApiController]
 public class RolesController(IRoleService roleService) : ControllerBase
 {
@@ -34,7 +34,7 @@ public class RolesController(IRoleService roleService) : ControllerBase
     }
 
 
-    [HttpPut("toggle-status/{RoleName}")]
+    [HttpPut("RoleName/toggle-status")]
     public async Task<IActionResult> ToggleStatus(string RoleName)
     {
         var response = await roleService.ToggleStatusAsync(RoleName);

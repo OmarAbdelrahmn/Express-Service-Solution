@@ -5,7 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace Express_Service.Controllers;
 
-[Route("[controller]")]
+[Route("api/[controller]")]
 [ApiController]
 public class HousingController(IHousingService service , IEmployeeService service1) : ControllerBase
 {
@@ -13,8 +13,8 @@ public class HousingController(IHousingService service , IEmployeeService servic
     private readonly IEmployeeService service1 = service1;
 
 
-    [HttpPut("{IqamaNo}/{HousingName}")]
-    public async Task<IActionResult> Update(int IqamaNo, string HousingName)
+    [HttpPut("{IqamaNo}/add/{HousingName}")]
+    public async Task<IActionResult> add(int IqamaNo, string HousingName)
     {
         var response = await service1.AddEmployeeToHousing(IqamaNo, HousingName);
         return response.IsSuccess ?
@@ -22,7 +22,7 @@ public class HousingController(IHousingService service , IEmployeeService servic
             response.ToProblem();
     }
 
-    [HttpPut("{IqamaNo}/{oldHousingName}-{NewHousingName}")]
+    [HttpPut("{IqamaNo}/change/{oldHousingName}/{NewHousingName}")]
     public async Task<IActionResult> Update(int IqamaNo, string oldHousingName, string NewHousingName)
     {
         var response = await service1.ChangeEmployeeToHousing(IqamaNo, oldHousingName, NewHousingName);
@@ -49,7 +49,7 @@ public class HousingController(IHousingService service , IEmployeeService servic
             response.ToProblem();
     }
 
-    [HttpGet("{ManagerIqamaNo}/manager")]
+    [HttpGet("manager/{ManagerIqamaNo}")]
     public async Task<IActionResult> GetWithManagerIqama(int ManagerIqamaNo)
     {
         var response = await service.GetWithManagerIqama(ManagerIqamaNo);
@@ -59,7 +59,7 @@ public class HousingController(IHousingService service , IEmployeeService servic
     }
 
     [HttpPost("")]
-    public async Task<IActionResult> Create(HousingRequest request)
+    public async Task<IActionResult> Create([FromBody]HousingRequest request)
     {
         var response = await service.CreateAsync(request);
         return response.IsSuccess ?
@@ -77,7 +77,7 @@ public class HousingController(IHousingService service , IEmployeeService servic
     }
 
     [HttpPut("{Name}")]
-    public async Task<IActionResult> Update(string Name, HousingRequest request)
+    public async Task<IActionResult> Update(string Name,[FromBody] HousingRequest request)
     {
         var response = await service.UpdateAsync(Name, request);
         return response.IsSuccess ?

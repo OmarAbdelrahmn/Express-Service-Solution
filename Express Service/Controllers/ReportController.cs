@@ -5,7 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace Express_Service.Controllers;
 
-[Route("[controller]")]
+[Route("api/[controller]")]
 [ApiController]
 public class ReportController(IReportService service) : ControllerBase
 {
@@ -13,7 +13,7 @@ public class ReportController(IReportService service) : ControllerBase
 
 
     [HttpGet("")]
-    public async Task<IActionResult> getall(DateOnly? startDate = null,
+    public async Task<IActionResult> GetDashboard(DateOnly? startDate = null,
       DateOnly? endDate = null)
     {
         var result = await service.GetComprehensiveDashboardAsync(startDate, endDate);
@@ -86,11 +86,11 @@ public class ReportController(IReportService service) : ControllerBase
             : result.ToProblem();
     }
 
-    [HttpGet("{workingId:int}/{startDate}-{endDate}")]
+    [HttpGet("riders/{workingId:int}/renge")]
     public async Task<IActionResult> GetCustomDateRangeReportByWorkingIdAsync(
         [FromRoute] int workingId,
-        [FromRoute] DateOnly startDate,
-        [FromRoute] DateOnly endDate,
+        [FromQuery] DateOnly startDate,
+        [FromQuery] DateOnly endDate,
         CancellationToken cancellationToken = default)
     {
         var result = await service.GetCustomDateRangeReportByWorkingIdAsync(
@@ -103,10 +103,10 @@ public class ReportController(IReportService service) : ControllerBase
             : result.ToProblem();
     }
 
-    [HttpGet("all/{startDate}-{endDate}")]
+    [HttpGet("all/range")]
     public async Task<IActionResult> GetAllRidersCustomDateRangeReportAsync(
-        [FromRoute] DateOnly startDate,
-        [FromRoute] DateOnly endDate,
+        [FromQuery] DateOnly startDate,
+        [FromQuery] DateOnly endDate,
         CancellationToken cancellationToken = default)
     {
         var result = await service.GetAllRidersCustomDateRangeReportAsync(
@@ -117,6 +117,7 @@ public class ReportController(IReportService service) : ControllerBase
             ? Ok(result.Value)
             : result.ToProblem();
     }
+
     [HttpGet("company-performance")]
     public async Task<IActionResult> GetCompanyPerformanceReportAsync(
         [FromQuery] string companyName,
@@ -169,7 +170,7 @@ public class ReportController(IReportService service) : ControllerBase
             : result.ToProblem();
     }
 
-    [HttpGet("riders")]
+    [HttpGet("riders/compare-periods")]
     public async Task<IActionResult> CompareAllRidersPeriodsAsync(
         DateOnly period1Start,
         DateOnly period1End,
@@ -188,7 +189,7 @@ public class ReportController(IReportService service) : ControllerBase
             : result.ToProblem();
     }
 
-    [HttpGet("compare-rider-periods/{workingId:int}")]
+    [HttpGet("riders/compare/{workingId:int}")]
     public async Task<IActionResult> CompareRiderPeriodsAsync(
         [FromRoute] int workingId,
         [FromQuery] DateOnly period1Start,
@@ -209,13 +210,13 @@ public class ReportController(IReportService service) : ControllerBase
             : result.ToProblem();
     }
 
-    [HttpGet("compare-rider-monthly/{workingId}/{year1:int}/{month1:int}/{Year2}/{month2}")]
+    [HttpGet("riders/compare-monthly/{workingId:int}")]
     public async Task<IActionResult> CompareRidersMonthlyAsync(
         [FromRoute] int workingId,
-        [FromRoute] int year1,
-        [FromRoute] int month1,
-        [FromRoute] int Year2,
-        [FromRoute] int month2,
+        [FromQuery] int year1,
+        [FromQuery] int month1,
+        [FromQuery] int Year2,
+        [FromQuery] int month2,
         CancellationToken cancellationToken = default)
     {
         var result = await service.CompareRiderMonthsAsync(
@@ -230,11 +231,11 @@ public class ReportController(IReportService service) : ControllerBase
             : result.ToProblem();
     }
     
-    [HttpGet("compare-rider-yearly/{workingId}/{year1:int}/{Year2}")]
+    [HttpGet("riders/compare-yearly/{workingId:int}")]
     public async Task<IActionResult> CompareRiderYearlyAsync(
         [FromRoute] int workingId,
-        [FromRoute] int year1,
-        [FromRoute] int Year2,
+        [FromQuery] int year1,
+        [FromQuery] int Year2,
         CancellationToken cancellationToken = default)
     {
         var result = await service.CompareRiderYearsAsync(
@@ -247,7 +248,7 @@ public class ReportController(IReportService service) : ControllerBase
             : result.ToProblem();
     }
 
-    [HttpGet("compare-housing")]
+    [HttpGet("housing/compare")]
     public async Task<IActionResult> CompareHousingCompaniesAsync(
         [FromQuery] DateOnly startDate,
         [FromQuery] DateOnly endDate,
@@ -266,7 +267,7 @@ public class ReportController(IReportService service) : ControllerBase
             : result.ToProblem();
     }
 
-    [HttpGet("housing")]
+    [HttpGet("housing/riders")]
     public  async Task<IActionResult> GetRidersForHousingAsync(string housingName,
         DateOnly startDate,
         DateOnly endDate)
@@ -278,7 +279,7 @@ public class ReportController(IReportService service) : ControllerBase
             : result.ToProblem();
     }
 
-    [HttpGet("housing-compare")]
+    [HttpGet("housing/riders-compare")]
     public async Task<IActionResult> CompareHousingRidersAsync(
         [FromQuery] string housingName,
         [FromQuery] DateOnly period1Start,
@@ -299,7 +300,7 @@ public class ReportController(IReportService service) : ControllerBase
             : result.ToProblem();
     }
 
-    [HttpGet("top-riders-yearly")]
+    [HttpGet("top-riders/yearly")]
     public async Task<IActionResult> GetTopRidersForYearAsync(int year,
         int topCount = 10)
     {
@@ -311,7 +312,7 @@ public class ReportController(IReportService service) : ControllerBase
     }
     
     
-    [HttpGet("top-riders-monthly")]
+    [HttpGet("top-riders/monthly")]
     public async Task<IActionResult> GetTopRidersFormonthAsync(int year, int month,
 
         int topCount = 10)
@@ -323,7 +324,7 @@ public class ReportController(IReportService service) : ControllerBase
             result.ToProblem();
     }
 
-    [HttpGet("top-riders-company")]
+    [HttpGet("top-riders/company")]
     public async Task<IActionResult> GetTopRidersPerCompanyAsync(DateOnly Start , DateOnly End)
     {
         var result = await service.GetTopRidersPerCompanyAsync(Start , End);
