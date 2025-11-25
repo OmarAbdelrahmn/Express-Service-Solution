@@ -32,8 +32,8 @@ public class TempRiderShiftComparison
     public DateTime UploadedAt { get; set; }
     public bool IsResolved { get; set; }
 
-    public RiderDetails Rider { get; set; } = null!;
-    public Company Company { get; set; } = null!;
+    public RiderDetails? Rider { get; set; } = null!;
+    public Company? Company { get; set; } = null!;
 }
 
 
@@ -87,9 +87,9 @@ public record ResolveComparisonsRequest(
 
 public enum ResolutionChoice
 {
-    KeepOld,      // Keep existing database data
-    UseNew,       // Replace with new Excel data
-    KeepBoth      // Keep old, add new as separate entry (optional)
+    KeepOld = 1,      // Keep existing database data
+    UseNew = 2,       // Replace with new Excel data
+    KeepBoth = 3     // Keep old, add new as separate entry (optional)
 }
 
 public record ResolutionResult(

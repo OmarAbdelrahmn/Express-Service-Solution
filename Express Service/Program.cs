@@ -1,4 +1,5 @@
 using Express_Service;
+using Microsoft.Build.Tasks;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -10,6 +11,7 @@ builder.Services.AddOpenApi();
 
 builder.Services.AddDependencies(builder.Configuration);
 
+builder.Services.AddHealthChecks();
 
 var app = builder.Build();
 
@@ -25,5 +27,7 @@ app.UseHttpsRedirection();
 app.UseAuthorization();
 
 app.MapControllers();
+
+app.MapHealthChecks("health");
 
 app.Run();

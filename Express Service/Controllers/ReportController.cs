@@ -334,5 +334,17 @@ public class ReportController(IReportService service) : ControllerBase
             result.ToProblem();
     }
 
-   
+    [HttpDelete("stacked/{WorkingId}")]
+    public async Task<IActionResult> GetMonthlyStackedDeliveriesByWorkingIdAsync(int WorkingId,
+        [FromQuery]   int year,
+        [FromQuery]  int month,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await service.GetMonthlyStackedDeliveriesByWorkingIdAsync(WorkingId,year,month,cancellationToken);
+        return result.IsSuccess
+            ? NoContent()
+            : result.ToProblem();
+    }
+
+
 }
