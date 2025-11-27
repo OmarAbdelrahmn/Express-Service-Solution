@@ -1,4 +1,5 @@
 ﻿using Application.Service;
+using Application.Service.Empolyee;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
@@ -6,9 +7,10 @@ namespace Express_Service.Controllers;
 
 [Route("api/[controller]")]
 [ApiController]
-public class TempController(ITemp service) : ControllerBase
+public class TempController(ITemp service , IEmployeeService service1) : ControllerBase
 {
     private readonly ITemp service = service;
+    private readonly IEmployeeService service1 = service1;
 
     [HttpGet("employee")]
     public async Task<IActionResult> GetTempData()
@@ -34,5 +36,41 @@ public class TempController(ITemp service) : ControllerBase
         using var stream = excelFile.OpenReadStream();
         var result = await service.UploadEmployeeExcelAsync(stream,"omar");
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    [HttpPost("employee-request-enable/{iqamaNo:int}")]
+    public async Task<IActionResult> RequestEnableEmployee(int iqamaNo, string Reason, string RequestedBy)
+    {
+        var response = await service1.RequestEnableEmployeeAsync(iqamaNo, Reason, RequestedBy);
+        return response.IsSuccess ?
+            Ok(new Re("Enable request submitted successfully.")) :
+            response.ToProblem();
+    }
+
+    [HttpDelete("employee-request-disable/{iqamaNo:int}")]
+    public async Task<IActionResult> RequestDisableEmployee(int iqamaNo, string Reason, string RequestedBy)
+    {
+        var response = await service1.RequestDisableEmployeeAsync(iqamaNo, Reason, RequestedBy);
+        return response.IsSuccess ?
+            Ok(new Re("Disable request submitted successfully.")) :
+            response.ToProblem();
+    }
+
+    [HttpGet("employee-pending-status-changes")]
+    public async Task<IActionResult> GetPendingStatusChanges()
+    {
+        var response = await service1.GetPendingStatusChangesAsync();
+        return response.IsSuccess ?
+            Ok(response.Value) :
+            response.ToProblem();
+    }
+
+    [HttpPost("employee-resolve-status-changes")]
+    public async Task<IActionResult> ResolveStatusChanges([FromBody] EBulkResolutionRequest request)
+    {
+        var response = await service1.ResolveStatusChangesAsync(request);
+        return response.IsSuccess ?
+            Ok(new Re("done ....")) :
+            response.ToProblem();
     }
 }

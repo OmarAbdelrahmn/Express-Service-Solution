@@ -1,4 +1,5 @@
 ﻿using Application.Contracts.Employees;
+using Application.Service;
 using Application.Service.Empolyee;
 using Azure;
 using Microsoft.AspNetCore.Http;
@@ -88,6 +89,8 @@ public class EmployeeController(IEmployeeService service) : ControllerBase
 
         return Ok(result);
     }
+
+    
 
 }
 

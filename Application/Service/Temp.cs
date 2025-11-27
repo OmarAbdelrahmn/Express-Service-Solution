@@ -602,6 +602,12 @@ public record BulkResolutionRequest(
     string Resolution, // "Approved" or "Rejected"
     string ResolvedBy
 );
+public record EBulkResolutionRequest(
+    int IqamaNo,
+    string Resolution, // "Approved" or "Rejected"
+    string ResolvedBy,
+    string AdminNot
+);
 
 // Response record for bulk resolution
 public record BulkResolutionResponse(

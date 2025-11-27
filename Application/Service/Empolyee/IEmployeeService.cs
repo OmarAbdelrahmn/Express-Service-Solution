@@ -21,6 +21,11 @@ public interface IEmployeeService
     Task<Result<PagedList<EmpolyeeResponse>>> Filter2(EmployeeFilter2 filter);
     Task<List<EmpolyeeResponse>> SmartSearch(string keyword);
 
+    Task<Result> RequestEnableEmployeeAsync(int iqamaNo, string reason, string requestedBy);
+    Task<Result> RequestDisableEmployeeAsync(int iqamaNo, string reason, string requestedBy);
+    Task<Result<IEnumerable<TempEmployeeStatusChangeResponse>>> GetPendingStatusChangesAsync();
+    Task<Result> ResolveStatusChangesAsync(EBulkResolutionRequest request);
+
 
 }
 public record EmployeeFilter(

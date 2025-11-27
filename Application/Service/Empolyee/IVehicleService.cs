@@ -35,6 +35,14 @@ public interface IVehicleService
     Task<Result> RecoverStolenVehicleAsync(string vehicleNumber, string recoveryDetails);
     Task<Result<GroupedVehicleStatusResponse>> GetVehiclesGroupedByStatusAsync();
 
+
+
+    Task<Result> RequestTakeVehicleAsync(int riderIqamaNo, string plateNumber, string reason, string requestedBy);
+    Task<Result> RequestReturnVehicleAsync(int riderIqamaNo, string plateNumber, string reason, string requestedBy);
+    Task<Result> RequestReportProblemAsync(int riderIqamaNo, string plateNumber, string reason, string requestedBy);
+    Task<Result<IEnumerable<TempVehicleOperationResponse>>> GetPendingOperationsAsync();
+    Task<Result> ResolveOperationAsync(VehicleResolutionRequest request);
+
 }
 
 
