@@ -1203,31 +1203,31 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
     }
 
 
-    public async Task<Result> RequestTakeVehicleAsync(int riderIqamaNo, string plateNumber, string reason, string requestedBy)
+    public async Task<Result> RequestTakeVehicleAsync(VehicleResolutionRequest request,string reason ="work")
     {
         try
         {
             var rider = await dbcontext.RiderDetails
                 .Include(r => r.Employee)
-                .FirstOrDefaultAsync(r => r.EmployeeIqamaNo == riderIqamaNo);
+                .FirstOrDefaultAsync(r => r.EmployeeIqamaNo == request.RiderIqamaNo);
 
             if (rider == null)
                 return Result.Failure(new Error("NoRider", "Rider not found", 404));
 
             var vehicle = await dbcontext.Vehicles
-                .FirstOrDefaultAsync(v => v.PlateNumberA == plateNumber);
+                .FirstOrDefaultAsync(v => v.PlateNumberA == request.Plate);
 
             if (vehicle == null)
                 return Result.Failure(new Error("NoVehicle", "Vehicle not found", 404));
 
-            var validation = await ValidateTakeOperation(riderIqamaNo, vehicle.VehicleNumber);
+            var validation = await ValidateTakeOperation(request.RiderIqamaNo, vehicle.VehicleNumber);
 
             if (!validation.IsValid)
                 return Result.Failure(new Error("ValidationFailed",
                     string.Join(", ", validation.Errors), 400));
 
             var existingRequest = await dbcontext.TempVehicleOperations
-                .AnyAsync(t => t.RiderIqamaNo == riderIqamaNo &&
+                .AnyAsync(t => t.RiderIqamaNo == request.RiderIqamaNo &&
                               !t.IsResolved &&
                               t.VehicleStatusType == VehicleStatusType.Taken);
 
@@ -1237,13 +1237,13 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
 
             var operation = new TempVehicleOperation
             {
-                RiderIqamaNo = riderIqamaNo,
-                VehiclePlateNumber = plateNumber,
+                RiderIqamaNo = request.RiderIqamaNo,
+                VehiclePlateNumber = request.Plate,
                 VehicleNumber = vehicle.VehicleNumber,
                 VehicleStatusType = VehicleStatusType.Taken,
                 Reason = reason,
                 RequestedAt = DateTime.Now,
-                RequestedBy = requestedBy,
+                RequestedBy = request.ResolvedBy,
                 IsResolved = false
             };
 
@@ -1258,33 +1258,30 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
                 new Error("RequestError", $"Failed to request take vehicle: {ex.Message}", 500));
         }
     }
-
-    public async Task<Result> RequestReturnVehicleAsync(int riderIqamaNo, string plateNumber, string reason, string requestedBy)
+    public async Task<Result> RequestReturnVehicleAsync(VehicleResolutionRequest request , string reason = "leave the work")
     {
         try
         {
             var rider = await dbcontext.RiderDetails
                 .Include(r => r.Employee)
-                .FirstOrDefaultAsync(r => r.EmployeeIqamaNo == riderIqamaNo);
+                .FirstOrDefaultAsync(r => r.EmployeeIqamaNo == request.RiderIqamaNo);
 
             if (rider == null)
                 return Result.Failure(new Error("NoRider", "Rider not found", 404));
 
             var vehicle = await dbcontext.Vehicles
-                .FirstOrDefaultAsync(v => v.PlateNumberA == plateNumber);
+                .FirstOrDefaultAsync(v => v.PlateNumberA == request.Plate);
 
             if (vehicle == null)
                 return Result.Failure(new Error("NoVehicle", "Vehicle not found", 404));
 
-            // Validation
-            var validation = await ValidateReturnOperation(riderIqamaNo, vehicle.VehicleNumber);
+            var validation = await ValidateReturnOperation(request.RiderIqamaNo, vehicle.VehicleNumber);
             if (!validation.IsValid)
                 return Result.Failure(new Error("ValidationFailed",
                     string.Join(", ", validation.Errors), 400));
 
-            // Check if there's already a pending request
             var existingRequest = await dbcontext.TempVehicleOperations
-                .AnyAsync(t => t.RiderIqamaNo == riderIqamaNo &&
+                .AnyAsync(t => t.RiderIqamaNo == request.RiderIqamaNo &&
                               !t.IsResolved &&
                               t.VehicleStatusType == VehicleStatusType.Returned);
 
@@ -1294,13 +1291,13 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
 
             var operation = new TempVehicleOperation
             {
-                RiderIqamaNo = riderIqamaNo,
-                VehiclePlateNumber = plateNumber,
+                RiderIqamaNo = request.RiderIqamaNo,
+                VehiclePlateNumber = request.Plate,
                 VehicleNumber = vehicle.VehicleNumber,
                 VehicleStatusType = VehicleStatusType.Returned,
                 Reason = reason,
                 RequestedAt = DateTime.Now,
-                RequestedBy = requestedBy,
+                RequestedBy = request.ResolvedBy,
                 IsResolved = false
             };
 
@@ -1315,39 +1312,38 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
                 new Error("RequestError", $"Failed to request return vehicle: {ex.Message}", 500));
         }
     }
-
-    public async Task<Result> RequestReportProblemAsync(int riderIqamaNo, string plateNumber, string reason, string requestedBy)
+    public async Task<Result> RequestReportProblemAsync(VehicleResolutionRequest request , string reason = "problem at vehicle")
     {
         try
         {
             var rider = await dbcontext.RiderDetails
                 .Include(r => r.Employee)
-                .FirstOrDefaultAsync(r => r.EmployeeIqamaNo == riderIqamaNo);
+                .FirstOrDefaultAsync(r => r.EmployeeIqamaNo == request.RiderIqamaNo);
 
             if (rider == null)
                 return Result.Failure(new Error("NoRider", "Rider not found", 404));
 
             var vehicle = await dbcontext.Vehicles
-                .FirstOrDefaultAsync(v => v.PlateNumberA == plateNumber);
+                .FirstOrDefaultAsync(v => v.PlateNumberA == request.Plate);
 
             if (vehicle == null)
                 return Result.Failure(new Error("NoVehicle", "Vehicle not found", 404));
 
             // Validation
-            var validation = await ValidateReportProblemOperation(riderIqamaNo, vehicle.VehicleNumber);
+            var validation = await ValidateReportProblemOperation(request.RiderIqamaNo, vehicle.VehicleNumber);
             if (!validation.IsValid)
                 return Result.Failure(new Error("ValidationFailed",
                     string.Join(", ", validation.Errors), 400));
 
             var operation = new TempVehicleOperation
             {
-                RiderIqamaNo = riderIqamaNo,
-                VehiclePlateNumber = plateNumber,
+                RiderIqamaNo = request.RiderIqamaNo,
+                VehiclePlateNumber = request.Plate,
                 VehicleNumber = vehicle.VehicleNumber,
                 VehicleStatusType = VehicleStatusType.Problem,
                 Reason = reason,
                 RequestedAt = DateTime.Now,
-                RequestedBy = requestedBy,
+                RequestedBy = request.ResolvedBy,
                 IsResolved = false
             };
 
@@ -1362,7 +1358,6 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
                 new Error("RequestError", $"Failed to request report problem: {ex.Message}", 500));
         }
     }
-
     public async Task<Result<IEnumerable<TempVehicleOperationResponse>>> GetPendingOperationsAsync()
     {
         try
@@ -1391,9 +1386,7 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
                 new Error("GetPendingError", $"Failed to get pending operations: {ex.Message}", 500));
         }
     }
-
-
-    public async Task<Result> ResolveOperationAsync(VehicleResolutionRequest request)
+    public async Task<Result> ResolveOperationAsync(VehicleResolutionRequest request,string? note)
     {
         using var transaction = await dbcontext.Database.BeginTransactionAsync();
         try
@@ -1431,7 +1424,7 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
                 operation.Resolution = request.Resolution;
                 operation.ResolvedBy = request.ResolvedBy;
                 operation.ResolvedAt = DateTime.Now;
-                operation.AdminNotes = request.AdminNotes;
+                operation.AdminNotes = note;
             }
             catch (Exception ex)
             {
@@ -1451,6 +1444,8 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
                 new Error("ResolveError", $"Failed to resolve operation: {ex.Message}", 500));
         }
     }
+
+
 
     private async Task<VehicleOperationValidation> ValidateTakeOperation(int riderIqamaNo, string vehicleNumber)
     {
@@ -1493,7 +1488,6 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
             Warnings: warnings
         );
     }
-
     private async Task<VehicleOperationValidation> ValidateReturnOperation(int riderIqamaNo, string vehicleNumber)
     {
         var errors = new List<string>();
@@ -1520,7 +1514,6 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
             Warnings: warnings
         );
     }
-
     private async Task<VehicleOperationValidation> ValidateReportProblemOperation(int riderIqamaNo, string vehicleNumber)
     {
         var errors = new List<string>();
@@ -1547,7 +1540,6 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
             Warnings: warnings
         );
     }
-
     private async Task<VehicleOperationValidation> ValidateOperation(TempVehicleOperation operation)
     {
         return operation.VehicleStatusType switch
@@ -1558,7 +1550,6 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
             _ => new VehicleOperationValidation(false, new List<string> { "Unknown operation type" }, new List<string>())
         };
     }
-
     private async Task<Result> ExecuteOperation(TempVehicleOperation operation)
     {
         try
@@ -1580,7 +1571,6 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
             return Result.Failure(new Error("ExecuteError", $"Failed to execute operation: {ex.Message}", 500));
         }
     }
-
     private async Task<Result> ExecuteTakeOperation(TempVehicleOperation operation)
     {
         var rider = await dbcontext.RiderDetails
@@ -1603,7 +1593,6 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
         await dbcontext.SaveChangesAsync();
         return Result.Success();
     }
-
     private async Task<Result> ExecuteReturnOperation(TempVehicleOperation operation)
     {
         var rider = await dbcontext.RiderDetails
@@ -1636,7 +1625,6 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
         await dbcontext.SaveChangesAsync();
         return Result.Success();
     }
-
     private async Task<Result> ExecuteReportProblemOperation(TempVehicleOperation operation)
     {
         var rider = await dbcontext.RiderDetails
@@ -1721,23 +1709,19 @@ public record VehicleOperationValidation(
     List<string> Warnings
 );
 
+
 // Request DTOs
-public record BulkResolutionRequest(
-    List<int> Ids,
+public record VBulkResolutionRequest(
     string Resolution, // "Approved" or "Rejected"
     string ResolvedBy,
     string? AdminNotes
 );
-
-
 public record VehicleResolutionRequest(
     int RiderIqamaNo,
     string Resolution, // "Approved" or "Rejected"
     string ResolvedBy,
-    string? AdminNotes
+    string Plate
 );
-
-
 public record BulkResolutionResponse(
     int TotalProcessed,
     int SuccessCount,

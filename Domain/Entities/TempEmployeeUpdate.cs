@@ -79,7 +79,7 @@ public class TempVehicleOperation
     public string VehiclePlateNumber { get; set; } = string.Empty;
     public string VehicleNumber { get; set; } = string.Empty;
     public VehicleStatusType VehicleStatusType { get; set; }
-    public string Reason { get; set; } = string.Empty;
+    public string? Reason { get; set; } = string.Empty;
     public DateTime RequestedAt { get; set; } = DateTime.Now;
     public string RequestedBy { get; set; } = string.Empty;
 

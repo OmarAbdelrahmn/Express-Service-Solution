@@ -37,11 +37,11 @@ public interface IVehicleService
 
 
 
-    Task<Result> RequestTakeVehicleAsync(int riderIqamaNo, string plateNumber, string reason, string requestedBy);
-    Task<Result> RequestReturnVehicleAsync(int riderIqamaNo, string plateNumber, string reason, string requestedBy);
-    Task<Result> RequestReportProblemAsync(int riderIqamaNo, string plateNumber, string reason, string requestedBy);
+    Task<Result> RequestTakeVehicleAsync(VehicleResolutionRequest request , string reason = "work");
+    Task<Result> RequestReturnVehicleAsync(VehicleResolutionRequest request, string reason = "leave the work");
+    Task<Result> RequestReportProblemAsync(VehicleResolutionRequest request, string reason = "problem at vehicle");
     Task<Result<IEnumerable<TempVehicleOperationResponse>>> GetPendingOperationsAsync();
-    Task<Result> ResolveOperationAsync(VehicleResolutionRequest request);
+    Task<Result> ResolveOperationAsync(VehicleResolutionRequest request , string? note);
 
 }
 

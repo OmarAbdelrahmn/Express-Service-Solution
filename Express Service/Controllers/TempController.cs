@@ -7,10 +7,11 @@ namespace Express_Service.Controllers;
 
 [Route("api/[controller]")]
 [ApiController]
-public class TempController(ITemp service , IEmployeeService service1) : ControllerBase
+public class TempController(ITemp service , IEmployeeService service1 , IVehicleService service2) : ControllerBase
 {
     private readonly ITemp service = service;
     private readonly IEmployeeService service1 = service1;
+    private readonly IVehicleService service2 = service2;
 
     [HttpGet("employee")]
     public async Task<IActionResult> GetTempData()
@@ -73,4 +74,54 @@ public class TempController(ITemp service , IEmployeeService service1) : Control
             Ok(new Re("done ....")) :
             response.ToProblem();
     }
+
+    [HttpPost("vehicle-request-return")]
+    public async Task<IActionResult> Vehicleretrunrequest(VehicleResolutionRequest request, string reason = "leave the work")
+    {
+        var response = await service2.RequestReturnVehicleAsync(request,reason);
+        return response.IsSuccess ?
+            Ok(new Re("done ....")) :
+            response.ToProblem();
+    }
+    
+    
+    [HttpPost("vehicle-request-take")]
+    public async Task<IActionResult> VehicleTakerequest(VehicleResolutionRequest request, string reason = "work")
+    {
+        var response = await service2.RequestTakeVehicleAsync(request,reason);
+        return response.IsSuccess ?
+            Ok(new Re("done ....")) :
+            response.ToProblem();
+    }
+
+
+    [HttpPost("vehicle-request-problem")]
+    public async Task<IActionResult> Vehicleproblemrequest(VehicleResolutionRequest request, string reason = "problem at vichle")
+    {
+        var response = await service2.RequestReportProblemAsync(request,reason);
+        return response.IsSuccess ?
+            Ok(new Re("done ....")) :
+            response.ToProblem();
+    }
+
+    [HttpGet("vehicles")]
+    public async Task<IActionResult> getv()
+    {
+        var response = await service2.GetPendingOperationsAsync();
+        return response.IsSuccess ?
+            Ok(response.Value) :
+            response.ToProblem();
+    }
+    
+    
+    [HttpGet("vehicle-resolve")]
+    public async Task<IActionResult> resolvev(VehicleResolutionRequest request, string? note)
+    {
+        var response = await service2.ResolveOperationAsync(request,note);
+        return response.IsSuccess ?
+            Ok(new Re("done....")) :
+            response.ToProblem();
+    }
+
+
 }
