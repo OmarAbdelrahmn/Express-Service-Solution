@@ -76,10 +76,10 @@ public class HousingController(IHousingService service , IEmployeeService servic
             response.ToProblem();
     }
 
-    [HttpPut("{Name}")]
-    public async Task<IActionResult> Update(string Name,[FromBody] HousingRequest request)
+    [HttpPut("")]
+    public async Task<IActionResult> Update([FromBody] HousingRequest request)
     {
-        var response = await service.UpdateAsync(Name, request);
+        var response = await service.UpdateAsync(request);
         return response.IsSuccess ?
             Ok(response.Value) :
             response.ToProblem();

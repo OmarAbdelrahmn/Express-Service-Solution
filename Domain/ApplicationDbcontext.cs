@@ -29,6 +29,9 @@ public class ApplicationDbcontext(DbContextOptions<ApplicationDbcontext> options
     public required DbSet<RiderCompanyHistory> RiderCompanyHistory { get; set; }
     public required DbSet<RiderVehicleStatus> RiderVehicleStatus { get; set; }
     public required DbSet<TempRiderShiftComparison> TempRiderShiftComparisons { get; set; }
+    public required DbSet<TempEmployeeUpdate> TempEmployeeUpdates { get; set; }
+    public required DbSet<TempEmployeeStatusChange> TempEmployeeStatusChanges { get; set; }
+    public required DbSet<TempVehicleOperation> TempVehicleOperations { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -57,6 +60,81 @@ public class ApplicationDbcontext(DbContextOptions<ApplicationDbcontext> options
         .HasForeignKey(r => r.VehicleNumber)
         .HasPrincipalKey(v => v.VehicleNumber);
 
+        modelBuilder.Entity<TempEmployeeUpdate>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+
+            entity.HasOne(e => e.Employee)
+                .WithMany()
+                .HasForeignKey(e => e.IqamaNo)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasIndex(e => e.IqamaNo);
+            entity.HasIndex(e => e.IsResolved);
+            entity.HasIndex(e => e.UploadedAt);
+        });
+
+        // TempEmployeeStatusChange configuration
+        modelBuilder.Entity<TempEmployeeStatusChange>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+
+            entity.HasOne(e => e.Employee)
+                .WithMany()
+                .HasForeignKey(e => e.EmployeeIqamaNo)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.Property(e => e.Action)
+                .IsRequired()
+                .HasMaxLength(20);
+
+            entity.Property(e => e.Reason)
+                .IsRequired()
+                .HasMaxLength(500);
+
+            entity.Property(e => e.RequestedBy)
+                .IsRequired()
+                .HasMaxLength(100);
+
+            entity.HasIndex(e => e.EmployeeIqamaNo);
+            entity.HasIndex(e => e.IsResolved);
+            entity.HasIndex(e => e.RequestedAt);
+        });
+
+        // TempVehicleOperation configuration
+        modelBuilder.Entity<TempVehicleOperation>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+
+            entity.HasOne(e => e.Rider)
+                .WithMany()
+                .HasForeignKey(e => e.RiderIqamaNo)
+                .HasPrincipalKey(r => r.EmployeeIqamaNo)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.Vehicle)
+                .WithMany()
+                .HasForeignKey(e => e.VehicleNumber)
+                .HasPrincipalKey(v => v.VehicleNumber)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.Property(e => e.VehiclePlateNumber)
+                .IsRequired()
+                .HasMaxLength(20);
+
+            entity.Property(e => e.Reason)
+                .IsRequired()
+                .HasMaxLength(500);
+
+            entity.Property(e => e.RequestedBy)
+                .IsRequired()
+                .HasMaxLength(100);
+
+            entity.HasIndex(e => e.RiderIqamaNo);
+            entity.HasIndex(e => e.VehicleNumber);
+            entity.HasIndex(e => e.IsResolved);
+            entity.HasIndex(e => e.RequestedAt);
+        });
         //modelBuilder.Entity<EmployeeDocuments>()
         //.HasOne(ed => ed.Employee)
         //.WithOne(r => r.EmployeeDocuments)

@@ -2,6 +2,7 @@
 using Application.Auth;
 using Application.Authentication;
 using Application.Roles;
+using Application.Service;
 using Application.Service.Empolyee;
 using Application.Service.Reports;
 using Application.Service.Riders;
@@ -44,6 +45,7 @@ public static class ApplicationDependencies
         Services.AddScoped<IRiderSub, RiderSub>();
         Services.AddScoped<IRiderShiftService, RiderShiftService>();
         Services.AddScoped<IReportService, ReportService>();
+        Services.AddScoped<ITemp, Temp>();
 
 
         Services.AddAuth(configuration)
@@ -148,9 +150,10 @@ public static class ApplicationDependencies
         {
             options.AddDefaultPolicy(builder =>
                 builder
-                        .AllowAnyOrigin()
+                        .WithOrigins("http://localhost:3000")
                         .AllowAnyMethod()
-                        .AllowAnyHeader());
+                        .AllowAnyHeader()
+                        .AllowCredentials());
         });
         return Services;
     }

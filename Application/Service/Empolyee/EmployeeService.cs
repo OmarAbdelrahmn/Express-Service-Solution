@@ -40,6 +40,7 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
        emp.PassportNo!,
        emp.PassportEnd ?? default,
        emp.Sponsor,
+       emp.SponsorNo,
        emp.JobTitle,
        emp.NameAR,
        emp.NameEN,
@@ -62,7 +63,7 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
         var isexist = await dbcontext
             .Employees
             .AsNoTracking()
-            .Where(c=>c.RiderDetails == null)
+            .Where(c => c.RiderDetails == null)
             .Include(e => e.Housing)
             .ToListAsync();
 
@@ -71,25 +72,26 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
                 new Error("No Employees Found", "no employees", 400)
             );
 
-            var res = isexist.Select(emp => new EmpolyeeResponse(
-           emp.IqamaNo,
-           emp.IqamaEndM,
-           emp.IqamaEndH,
-           emp.PassportNo!,
-           emp.PassportEnd ?? default,
-           emp.Sponsor,
-           emp.JobTitle,
-           emp.NameAR,
-           emp.NameEN,
-           emp.Country,
-           emp.Phone,
-           emp.DateOfBirth,
-           emp.Status,
-           emp.IBAN!,
-           emp.INKSA,
-           emp.CreatedAt,
-           emp.Housing?.Name   // safe
-                )).ToList();
+        var res = isexist.Select(emp => new EmpolyeeResponse(
+       emp.IqamaNo,
+       emp.IqamaEndM,
+       emp.IqamaEndH,
+       emp.PassportNo!,
+       emp.PassportEnd ?? default,
+       emp.Sponsor,
+       emp.SponsorNo,
+       emp.JobTitle,
+       emp.NameAR,
+       emp.NameEN,
+       emp.Country,
+       emp.Phone,
+       emp.DateOfBirth,
+       emp.Status,
+       emp.IBAN!,
+       emp.INKSA,
+       emp.CreatedAt,
+       emp.Housing?.Name   // safe
+            )).ToList();
 
 
         return Result.Success<IEnumerable<EmpolyeeResponse>>(res);
@@ -138,45 +140,48 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
 
 
         if (request.IqamaEndM.HasValue)
-                employee.IqamaEndM = request.IqamaEndM.Value;
+            employee.IqamaEndM = request.IqamaEndM.Value;
         if (request.IqamaEndH.HasValue)
-                employee.IqamaEndH = request.IqamaEndH.Value;
+            employee.IqamaEndH = request.IqamaEndH.Value;
 
-            if (request.PassportNo is not null)
-                employee.PassportNo = request.PassportNo;
+        if (request.PassportNo is not null)
+            employee.PassportNo = request.PassportNo;
 
-            if (request.PassportEnd.HasValue)
-                employee.PassportEnd = request.PassportEnd;
+        if (request.PassportEnd.HasValue)
+            employee.PassportEnd = request.PassportEnd;
 
-            if (request.Sponsor is not null)
-                employee.Sponsor = request.Sponsor;
+        if (request.Sponsor is not null)
+            employee.Sponsor = request.Sponsor;
 
-            if (request.JobTitle is not null)
-                employee.JobTitle = request.JobTitle;
+        if (request.SponserNo.HasValue)
+            employee.SponsorNo = request.SponserNo.Value;
 
-            if (request.NameAR is not null)
-                employee.NameAR = request.NameAR;
+        if (request.JobTitle is not null)
+            employee.JobTitle = request.JobTitle;
 
-            if (request.NameEN is not null)
-                employee.NameEN = request.NameEN;
+        if (request.NameAR is not null)
+            employee.NameAR = request.NameAR;
 
-            if (request.Country is not null)
-                employee.Country = request.Country;
+        if (request.NameEN is not null)
+            employee.NameEN = request.NameEN;
 
-            if (request.Phone is not null)
-                employee.Phone = request.Phone;
+        if (request.Country is not null)
+            employee.Country = request.Country;
 
-            if (request.DateOfBirth.HasValue)
-                employee.DateOfBirth = request.DateOfBirth.Value;
+        if (request.Phone is not null)
+            employee.Phone = request.Phone;
 
-            if (request.Status is not null)
-                employee.Status = request.Status;
+        if (request.DateOfBirth.HasValue)
+            employee.DateOfBirth = request.DateOfBirth.Value;
 
-            if (request.IBAN is not null)
-                employee.IBAN = request.IBAN;
-           
+        if (request.Status is not null)
+            employee.Status = request.Status;
+
+        if (request.IBAN is not null)
+            employee.IBAN = request.IBAN;
+
         if (request.INKSA is not null)
-                employee.INKSA = request.INKSA.Value;
+            employee.INKSA = request.INKSA.Value;
 
 
         await dbcontext.SaveChangesAsync();
@@ -186,7 +191,7 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
         return Result.Success(response);
     }
 
-    public async Task<Result> AddEmployeeToHousing(int IqamaNo , string HousingName)
+    public async Task<Result> AddEmployeeToHousing(int IqamaNo, string HousingName)
     {
         var isexist = await dbcontext
             .Employees
@@ -198,14 +203,14 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
         if (isexist is null)
             return Result.Failure<EmpolyeeResponse>(error: new Error("No Employee Found", "no employee found with this Iqama", 400));
 
-        if(isexist.HousingId is not null)
+        if (isexist.HousingId is not null)
             return Result.Failure<EmpolyeeResponse>(error: new Error("AlreadyIn", "This Employee is already In housing if you want to change the housing go to change housing page", 400));
 
 
         var housingId = await dbcontext
             .Housings
-            .Where(c=>c.Name ==  HousingName)
-            .Select(c=>c.Id)
+            .Where(c => c.Name == HousingName)
+            .Select(c => c.Id)
             .SingleOrDefaultAsync();
 
         if (housingId == 0)
@@ -214,7 +219,7 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
 
         isexist.HousingId = housingId;
 
-         dbcontext.Update(isexist);
+        dbcontext.Update(isexist);
         await dbcontext.SaveChangesAsync();
 
         var response = MapToResponse(isexist);
@@ -244,7 +249,7 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
             .Where(c => c.Name == oldHousingName)
             .Select(c => c.Id)
             .SingleOrDefaultAsync();
-        
+
         var newhousingId = await dbcontext
             .Housings
             .Where(c => c.Name == NewHousingName)
@@ -277,6 +282,9 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
 
         if (!string.IsNullOrWhiteSpace(filter.Sponsor))
             query = query.Where(e => e.Sponsor.Contains(filter.Sponsor));
+
+        if (filter.SponsorNo.HasValue)
+            query = query.Where(e => e.SponsorNo == filter.SponsorNo.Value);
 
         if (filter.PassportEnd is not null)
             query = query.Where(e => e.PassportEnd == filter.PassportEnd);
@@ -311,6 +319,7 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
            emp.PassportNo!,
            emp.PassportEnd ?? default,
            emp.Sponsor,
+           emp.SponsorNo,
            emp.JobTitle,
            emp.NameAR,
            emp.NameEN,
@@ -347,19 +356,23 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
             IBAN: employee.IBAN,
             CreatedAt: employee.CreatedAt,
             INKSA: employee.INKSA,
-            HousingAddress: employee.Housing?.Name
+            HousingAddress: employee.Housing?.Name,
+            SponserNo: employee.SponsorNo
         );
     }
 
     public async Task<Result<PagedList<EmpolyeeResponse>>> Filter2(EmployeeFilter2 filter)
     {
-    
+
         var query = dbcontext.Employees
             .Include(e => e.Housing)
             .AsQueryable();
 
         if (filter.Sponsor?.Any() == true)
             query = query.Where(e => filter.Sponsor!.Contains(e.Sponsor));
+
+        if (filter.SponsorNo?.ToString().Any() == true)
+            query = query.Where(e => filter.SponsorNo!.ToString().Contains(e.SponsorNo.ToString()));
 
         if (filter.JobTitle?.Any() == true)
             query = query.Where(e => filter.JobTitle!.Contains(e.JobTitle));
@@ -399,6 +412,9 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
                 "Sponsor" => descending ? query.OrderByDescending(e => e.Sponsor)
                                              : query.OrderBy(e => e.Sponsor),
 
+                "SponsorNo" => descending ? query.OrderByDescending(e => e.SponsorNo)
+                                             : query.OrderBy(e => e.SponsorNo),
+
                 "JobTitle" => descending ? query.OrderByDescending(e => e.JobTitle)
                                              : query.OrderBy(e => e.JobTitle),
 
@@ -406,7 +422,7 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
             };
         }
 
-        
+
         int skip = (filter.Page - 1) * filter.PageSize;
 
         var totalCount = await query.CountAsync();
@@ -421,6 +437,7 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
                    emp.PassportNo!,
                    emp.PassportEnd ?? default,
                    emp.Sponsor,
+                   emp.SponsorNo,
                    emp.JobTitle,
                    emp.NameAR,
                    emp.NameEN,
@@ -441,7 +458,7 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
 
     public async Task<List<EmpolyeeResponse>> SmartSearch(string keyword)
     {
-    
+
         keyword = keyword.ToLower();
 
         var query = dbcontext.Employees
@@ -451,6 +468,7 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
                 e.NameEN.ToLower().Contains(keyword) ||
                 e.Country.ToLower().Contains(keyword) ||
                 e.Sponsor.ToLower().Contains(keyword) ||
+                e.SponsorNo.ToString().Contains(keyword) ||
                 e.JobTitle.ToLower().Contains(keyword)
             );
 
@@ -462,6 +480,7 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
            emp.PassportNo!,
            emp.PassportEnd ?? default,
            emp.Sponsor,
+           emp.SponsorNo,
            emp.JobTitle,
            emp.NameAR,
            emp.NameEN,
@@ -477,4 +496,3 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
     }
 
 }
-
