@@ -140,6 +140,12 @@ public class ApplicationDbcontext(DbContextOptions<ApplicationDbcontext> options
         //.WithOne(r => r.EmployeeDocuments)
         //.HasForeignKey(ed => ed.EmployeeIqamaNo);
 
+        modelBuilder.Entity<Employees>()
+        .Property(x => x.DateOfBirth)
+        .HasConversion(
+            v => v.ToDateTime(TimeOnly.MinValue),
+            v => DateOnly.FromDateTime(v)
+        );
 
         base.OnModelCreating(modelBuilder);
 

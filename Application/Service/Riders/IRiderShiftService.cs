@@ -182,6 +182,7 @@ public record MonthlyBreakdown(
 );
 public record DateRangeReport(
     int RiderId,
+    int IqamaNo,
     string RiderName,
     int WorkingId,  
     DateOnly StartDate,

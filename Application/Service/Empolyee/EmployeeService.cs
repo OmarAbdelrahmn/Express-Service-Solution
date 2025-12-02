@@ -39,8 +39,8 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
        emp.IqamaEndH,
        emp.PassportNo!,
        emp.PassportEnd ?? default,
-       emp.Sponsor,
        emp.SponsorNo,
+       emp.Sponsor,
        emp.JobTitle,
        emp.NameAR,
        emp.NameEN,
@@ -50,8 +50,7 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
        emp.Status,
        emp.IBAN!,
        emp.INKSA,
-       emp.CreatedAt,
-       emp.Housing?.Name   // safe
+       emp.CreatedAt
             )).ToList();
 
 
@@ -78,8 +77,8 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
        emp.IqamaEndH,
        emp.PassportNo!,
        emp.PassportEnd ?? default,
-       emp.Sponsor,
        emp.SponsorNo,
+       emp.Sponsor,
        emp.JobTitle,
        emp.NameAR,
        emp.NameEN,
@@ -89,8 +88,7 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
        emp.Status,
        emp.IBAN!,
        emp.INKSA,
-       emp.CreatedAt,
-       emp.Housing?.Name   // safe
+       emp.CreatedAt
             )).ToList();
 
 
@@ -318,8 +316,8 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
            emp.IqamaEndH,
            emp.PassportNo!,
            emp.PassportEnd ?? default,
-           emp.Sponsor,
            emp.SponsorNo,
+           emp.Sponsor,
            emp.JobTitle,
            emp.NameAR,
            emp.NameEN,
@@ -329,8 +327,7 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
            emp.Status,
            emp.IBAN!,
            emp.INKSA,
-           emp.CreatedAt,
-           emp.Housing.Name ?? null  // safe
+           emp.CreatedAt
                 )).ToListAsync();
 
 
@@ -356,8 +353,7 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
             IBAN: employee.IBAN,
             CreatedAt: employee.CreatedAt,
             INKSA: employee.INKSA,
-            HousingAddress: employee.Housing?.Name,
-            SponserNo: employee.SponsorNo
+            SponsorNo: employee.SponsorNo
         );
     }
 
@@ -436,8 +432,8 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
                    emp.IqamaEndH,
                    emp.PassportNo!,
                    emp.PassportEnd ?? default,
+                     emp.SponsorNo,
                    emp.Sponsor,
-                   emp.SponsorNo,
                    emp.JobTitle,
                    emp.NameAR,
                    emp.NameEN,
@@ -447,8 +443,7 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
                    emp.Status,
                    emp.IBAN!,
                    emp.INKSA,
-                   emp.CreatedAt,
-                   emp.Housing.Name ?? null  // safe
+                   emp.CreatedAt
                         )).ToListAsync();
 
         return Result.Success(
@@ -479,8 +474,8 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
            emp.IqamaEndH,
            emp.PassportNo!,
            emp.PassportEnd ?? default,
+                  emp.SponsorNo,
            emp.Sponsor,
-           emp.SponsorNo,
            emp.JobTitle,
            emp.NameAR,
            emp.NameEN,
@@ -490,8 +485,7 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
            emp.Status,
            emp.IBAN!,
            emp.INKSA,
-           emp.CreatedAt,
-           emp.Housing.Name ?? null  // safe
+           emp.CreatedAt
                 )).ToListAsync();
     }
 

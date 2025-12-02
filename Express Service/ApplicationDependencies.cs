@@ -90,7 +90,10 @@ public static class ApplicationDependencies
             throw new InvalidOperationException("Connection string is not found in the configuration file");
 
         Services.AddDbContext<ApplicationDbcontext>(options =>
-            options.UseSqlServer(ConnectionString));
+    options.UseSqlServer(
+        c.GetConnectionString("DefaultConnection")
+    ));
+
 
         return Services;
     }

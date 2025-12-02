@@ -785,7 +785,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
         if (!shifts.Any())
         {
             return Result.Success(CreateEmptyDateRangeReport(
-                rider.Id, rider.Employee.NameAR, workingId, startDate, endDate));
+                rider.Id,rider.EmployeeIqamaNo, rider.Employee.NameAR, workingId, startDate, endDate));
         }
 
         var workingIdHistory = DetectWorkingIdChanges(shifts);
@@ -804,6 +804,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
 
         var report = new DateRangeReport(
             RiderId: rider.Id,
+            IqamaNo: rider.EmployeeIqamaNo,
             RiderName: rider.Employee.NameAR,
             WorkingId: workingId,
             StartDate: startDate,
@@ -3075,10 +3076,11 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
     }
 
     private DateRangeReport CreateEmptyDateRangeReport(
-        int riderId, string riderName, int workingId, DateOnly startDate, DateOnly endDate)
+        int riderId,int IqamaNo, string riderName, int workingId, DateOnly startDate, DateOnly endDate)
     {
         return new DateRangeReport(
             RiderId: riderId,
+            IqamaNo: IqamaNo,
             RiderName: riderName,
             WorkingId: workingId,
             StartDate: startDate,

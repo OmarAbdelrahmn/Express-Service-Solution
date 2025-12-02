@@ -52,7 +52,7 @@ public class RiderService(ApplicationDbcontext dbcontext) : IRiderService
        emp.IBAN!,
        emp.INKSA,
        emp.CreatedAt,
-       emp.Housing?.Name,
+       emp.Housing?.Name ?? "none",
        emp.RiderDetails.WorkingId!,
          emp.IqamaNo,
             emp.RiderDetails.TshirtSize!,
@@ -132,6 +132,7 @@ public class RiderService(ApplicationDbcontext dbcontext) : IRiderService
                 PassportNo = Request.PassportNo,
                 PassportEnd = Request.PassportEnd,
                 Sponsor = Request.Sponsor,
+                SponsorNo = Request.SponsorNo,
                 JobTitle = Request.JobTitle,
                 NameAR = Request.NameAR,
                 NameEN = Request.NameEN,
@@ -241,6 +242,9 @@ public class RiderService(ApplicationDbcontext dbcontext) : IRiderService
 
             if (request.Sponsor is not null)
                 employee.Sponsor = request.Sponsor;
+            
+            if (request.SponsorNo is not null)
+                employee.SponsorNo = request.SponsorNo ?? 0;
 
             if (request.JobTitle is not null)
                 employee.JobTitle = request.JobTitle;
@@ -314,7 +318,8 @@ public class RiderService(ApplicationDbcontext dbcontext) : IRiderService
                 e.Country.ToLower().Contains(keyword) ||
                 e.Sponsor.ToLower().Contains(keyword) ||
                 e.JobTitle.ToLower().Contains(keyword) ||
-                e.IBAN.ToLower().Contains(keyword)
+                e.IBAN.ToLower().Contains(keyword) ||
+                e.SponsorNo.ToString().ToLower().Contains(keyword)
             )
             .Select(emp => new RiderResponse(
                 emp.IqamaNo,

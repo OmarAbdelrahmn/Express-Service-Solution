@@ -21,7 +21,7 @@ public class TempEmployeeUpdate
     public string? OldNameEN { get; set; }
     public string? OldCountry { get; set; }
     public string? OldPhone { get; set; }
-    public DateTime? OldDateOfBirth { get; set; }
+    public DateOnly? OldDateOfBirth { get; set; }
     public string? OldStatus { get; set; }
     public string? OldIBAN { get; set; }
     public bool? OldINKSA { get; set; }
@@ -38,7 +38,7 @@ public class TempEmployeeUpdate
     public string? NewNameEN { get; set; }
     public string? NewCountry { get; set; }
     public string? NewPhone { get; set; }
-    public DateTime? NewDateOfBirth { get; set; }
+    public DateOnly? NewDateOfBirth { get; set; }
     public string? NewStatus { get; set; }
     public string? NewIBAN { get; set; }
     public bool? NewINKSA { get; set; }

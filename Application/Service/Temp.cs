@@ -58,7 +58,7 @@ public class Temp(ApplicationDbcontext dbcontext) : ITemp
                 var newNameEN = GetStringValue(worksheet, row, columnMapping, "NameEN");
                 var newCountry = GetStringValue(worksheet, row, columnMapping, "Country");
                 var newPhone = GetStringValue(worksheet, row, columnMapping, "Phone");
-                var newDateOfBirth = GetDateTimeValue(worksheet, row, columnMapping, "DateOfBirth");
+                var newDateOfBirth = GetDateOnlyValue(worksheet, row, columnMapping, "DateOfBirth");
                 var newStatus = GetStringValue(worksheet, row, columnMapping, "Status");
                 var newIBAN = GetStringValue(worksheet, row, columnMapping, "IBAN");
                 var newINKSA = GetBoolValue(worksheet, row, columnMapping, "INKSA");
@@ -478,20 +478,25 @@ public class Temp(ApplicationDbcontext dbcontext) : ITemp
         return null;
     }
 
-    private DateTime? GetDateTimeValue(IXLWorksheet ws, int row, Dictionary<string, int> mapping, string columnName)
+    private DateOnly? GetDateOnlyValue(IXLWorksheet ws, int row, Dictionary<string, int> mapping, string columnName)
     {
-        if (!mapping.ContainsKey(columnName)) return null;
+        if (!mapping.ContainsKey(columnName))
+            return null;
+
         var cell = ws.Cell(row, mapping[columnName]);
 
+        // Try to get the cell value as DateTime
         if (cell.TryGetValue(out DateTime dt))
-            return dt;
+            return DateOnly.FromDateTime(dt);
 
+        // Fallback: parse the string manually
         var value = cell.Value.ToString();
         if (!string.IsNullOrWhiteSpace(value) && DateTime.TryParse(value, out var dateTime))
-            return dateTime;
+            return DateOnly.FromDateTime(dateTime);
 
         return null;
     }
+
 
     private bool? GetBoolValue(IXLWorksheet ws, int row, Dictionary<string, int> mapping, string columnName)
     {

@@ -18,7 +18,7 @@ public class Employees
     public string NameEN { get; set; } = string.Empty;
     public string Country { get; set; } = string.Empty;
     public string Phone { get; set; } = string.Empty;
-    public DateTime DateOfBirth { get; set; }
+    public DateOnly DateOfBirth { get; set; }
     public string Status { get; set; } = "enable";
     public string? IBAN { get; set; } = string.Empty;
     public DateTime CreatedAt { get; set; } = DateTime.Now;
