@@ -245,7 +245,14 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
         List<RiderShiftSubstitution> substitutions)
     {
         var activeRiderIds = shifts.Select(s => s.RiderId).Distinct().ToList();
-        var activeRiders = allRiders.Where(r => activeRiderIds.Contains(r.Id)).ToList();
+        var activeRiders = dbcontext
+                   .Employees
+                   .AsNoTracking()
+                   .Where(r => r.RiderDetails != null && r.Status.ToLower() == "enable")
+                   .Include(e => e.Housing)
+                   .Include(e => e.RiderDetails)
+                   .ToList();
+
 
         return new RidersStatistics(
             TotalRiders: allRiders.Count,
@@ -955,28 +962,128 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
     }
 
 
-    public Task<Result<RiderPeriodComparison>> CompareRiderPeriodsAsync(
-        int workingId,
+    public async Task<Result<RiderPeriodComparison>> CompareRiderPeriodsAsync(
+    int workingId,
+    DateOnly period1Start,
+    DateOnly period1End,
+    DateOnly period2Start,
+    DateOnly period2End,
+    CancellationToken cancellationToken = default)
+    {
+        if (workingId <= 0)
+            return Result.Failure<RiderPeriodComparison>(
+                new Error("Invalid working ID", "invalid_input", 400));
+
+        if (period1End < period1Start)
+            return Result.Failure<RiderPeriodComparison>(
+                new Error("Period 1: End date must be after start date", "invalid_input", 400));
+
+        if (period2End < period2Start)
+            return Result.Failure<RiderPeriodComparison>(
+                new Error("Period 2: End date must be after start date", "invalid_input", 400));
+
+        var rider = await _dbcontext.RiderDetails
+            .Include(r => r.Employee)
+            .FirstOrDefaultAsync(r => r.WorkingId == workingId, cancellationToken);
+
+        if (rider == null)
+            return Result.Failure<RiderPeriodComparison>(
+                new Error($"Rider with WorkingId {workingId} not found", "not_found", 404));
+
+        // Get shifts for both periods
+        var period1Shifts = await _dbcontext.RiderShifts
+            .Include(s => s.Company)
+            .Include(s => s.Rider)
+                .ThenInclude(r => r.Employee)
+            .Where(s => s.RiderId == rider.Id &&
+                       s.ShiftDate >= period1Start &&
+                       s.ShiftDate <= period1End)
+            .ToListAsync(cancellationToken);
+
+        var period2Shifts = await _dbcontext.RiderShifts
+            .Include(s => s.Company)
+            .Include(s => s.Rider)
+                .ThenInclude(r => r.Employee)
+            .Where(s => s.RiderId == rider.Id &&
+                       s.ShiftDate >= period2Start &&
+                       s.ShiftDate <= period2End)
+            .ToListAsync(cancellationToken);
+
+        // Build period summaries
+        var period1Summary = BuildPeriodSummary(period1Start, period1End, period1Shifts);
+        var period2Summary = BuildPeriodSummary(period2Start, period2End, period2Shifts);
+
+        // Calculate comparison metrics
+        var comparisonMetrics = CalculateComparisonMetrics(period1Summary, period2Summary);
+
+        // Generate verdict
+        var verdict = GeneratePerformanceVerdict(period1Summary, period2Summary, comparisonMetrics);
+
+        // Generate insights and recommendations
+        var insights = GenerateComparisonInsights(period1Summary, period2Summary, comparisonMetrics);
+        var recommendations = GenerateRecommendations(period2Summary, comparisonMetrics, verdict);
+
+        var comparison = new RiderPeriodComparison(
+            RiderId: rider.Id,
+            RiderName: rider.Employee.NameAR,
+            WorkingId: workingId,
+            Period1: period1Summary,
+            Period2: period2Summary,
+            Comparison: comparisonMetrics,
+            Verdict: verdict,
+            KeyInsights: insights,
+            Recommendations: recommendations
+        );
+
+        return Result.Success(comparison);
+    }
+
+    public async Task<Result<IEnumerable<RiderPeriodComparison>>> CompareAllRidersPeriodsAsync(
         DateOnly period1Start,
         DateOnly period1End,
         DateOnly period2Start,
         DateOnly period2End,
         CancellationToken cancellationToken = default)
     {
-        throw new NotImplementedException("Period comparison feature is not yet implemented");
+        if (period1End < period1Start)
+            return Result.Failure<IEnumerable<RiderPeriodComparison>>(
+                new Error("Period 1: End date must be after start date", "invalid_input", 400));
+
+        if (period2End < period2Start)
+            return Result.Failure<IEnumerable<RiderPeriodComparison>>(
+                new Error("Period 2: End date must be after start date", "invalid_input", 400));
+
+        var allRiders = await _dbcontext.RiderDetails
+            .Where(r => r.WorkingId.HasValue && r.WorkingId > 0)
+            .ToListAsync(cancellationToken);
+
+        var comparisons = new List<RiderPeriodComparison>();
+
+        foreach (var rider in allRiders)
+        {
+            var result = await CompareRiderPeriodsAsync(
+                rider.WorkingId!.Value,
+                period1Start,
+                period1End,
+                period2Start,
+                period2End,
+                cancellationToken);
+
+            if (result.IsSuccess)
+            {
+                comparisons.Add(result.Value);
+            }
+        }
+
+        // Sort by overall improvement
+        var sortedComparisons = comparisons
+            .OrderByDescending(c => c.Verdict.ImprovementScore)
+            .ToList();
+
+        return Result.Success<IEnumerable<RiderPeriodComparison>>(sortedComparisons);
     }
 
-    public Task<Result<IEnumerable<RiderPeriodComparison>>> CompareAllRidersPeriodsAsync(
-        DateOnly period1Start,
-        DateOnly period1End,
-        DateOnly period2Start,
-        DateOnly period2End,
-        CancellationToken cancellationToken = default)
-    {
-        throw new NotImplementedException("Period comparison feature is not yet implemented");
-    }
-
-    public Task<Result<CompanyPeriodComparison>> CompareCompanyPeriodsAsync(
+    public async Task<Result<CompanyPeriodComparison>> CompareCompanyPeriodsAsync(
         string companyName,
         DateOnly period1Start,
         DateOnly period1End,
@@ -984,10 +1091,87 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
         DateOnly period2End,
         CancellationToken cancellationToken = default)
     {
-        throw new NotImplementedException("Period comparison feature is not yet implemented");
-    }
+        if (string.IsNullOrWhiteSpace(companyName))
+            return Result.Failure<CompanyPeriodComparison>(
+                new Error("Company name is required", "invalid_input", 400));
 
-    public Task<Result<RiderPeriodComparison>> CompareRiderMonthsAsync(
+        if (period1End < period1Start)
+            return Result.Failure<CompanyPeriodComparison>(
+                new Error("Period 1: End date must be after start date", "invalid_input", 400));
+
+        if (period2End < period2Start)
+            return Result.Failure<CompanyPeriodComparison>(
+                new Error("Period 2: End date must be after start date", "invalid_input", 400));
+
+        var company = await _dbcontext.Companies
+            .FirstOrDefaultAsync(c => c.Name == companyName, cancellationToken);
+
+        if (company == null)
+            return Result.Failure<CompanyPeriodComparison>(
+                new Error($"Company '{companyName}' not found", "not_found", 404));
+
+        // Get shifts for both periods
+        var period1Shifts = await _dbcontext.RiderShifts
+            .Include(s => s.Rider)
+                .ThenInclude(r => r.Employee)
+            .Include(s => s.Company)
+            .Where(s => s.Company.Name == companyName &&
+                       s.ShiftDate >= period1Start &&
+                       s.ShiftDate <= period1End)
+            .ToListAsync(cancellationToken);
+
+        var period2Shifts = await _dbcontext.RiderShifts
+            .Include(s => s.Rider)
+                .ThenInclude(r => r.Employee)
+            .Include(s => s.Company)
+            .Where(s => s.Company.Name == companyName &&
+                       s.ShiftDate >= period2Start &&
+                       s.ShiftDate <= period2End)
+            .ToListAsync(cancellationToken);
+
+        if (!period1Shifts.Any() && !period2Shifts.Any())
+            return Result.Failure<CompanyPeriodComparison>(
+                new Error($"No shifts found for company '{companyName}' in either period", "no_data", 404));
+
+        // Build period summaries
+        var period1Summary = BuildPeriodSummary(period1Start, period1End, period1Shifts);
+        var period2Summary = BuildPeriodSummary(period2Start, period2End, period2Shifts);
+
+        // Calculate comparison metrics
+        var comparisonMetrics = CalculateComparisonMetrics(period1Summary, period2Summary);
+
+        // Get rider comparisons for top improved and declined
+        var riderComparisons = await GetRiderComparisonsForCompany(
+            companyName, period1Start, period1End, period2Start, period2End, cancellationToken);
+
+        var topImproved = riderComparisons
+            .Where(r => r.Verdict.ImprovementScore > 0)
+            .OrderByDescending(r => r.Verdict.ImprovementScore)
+            .Take(5)
+            .ToList();
+
+        var topDeclined = riderComparisons
+            .Where(r => r.Verdict.ImprovementScore < 0)
+            .OrderBy(r => r.Verdict.ImprovementScore)
+            .Take(5)
+            .ToList();
+
+        var overallTrend = DetermineOverallTrend(comparisonMetrics, riderComparisons);
+
+        var comparison = new CompanyPeriodComparison(
+            CompanyName: companyName,
+            Period1: period1Summary,
+            Period2: period2Summary,
+            Comparison: comparisonMetrics,
+            TopImprovedRiders: topImproved,
+            TopDeclinedRiders: topDeclined,
+            OverallTrend: overallTrend
+        );
+
+        return Result.Success(comparison);
+    }
+        
+    public async Task<Result<RiderPeriodComparison>> CompareRiderMonthsAsync(
         int workingId,
         int year1,
         int month1,
@@ -995,17 +1179,559 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
         int month2,
         CancellationToken cancellationToken = default)
     {
-        throw new NotImplementedException("Period comparison feature is not yet implemented");
+        if (month1 < 1 || month1 > 12)
+            return Result.Failure<RiderPeriodComparison>(
+                new Error("Month 1 must be between 1 and 12", "invalid_input", 400));
+
+        if (month2 < 1 || month2 > 12)
+            return Result.Failure<RiderPeriodComparison>(
+                new Error("Month 2 must be between 1 and 12", "invalid_input", 400));
+
+        var period1Start = new DateOnly(year1, month1, 1);
+        var period1End = period1Start.AddMonths(1).AddDays(-1);
+
+        var period2Start = new DateOnly(year2, month2, 1);
+        var period2End = period2Start.AddMonths(1).AddDays(-1);
+
+        return await CompareRiderPeriodsAsync(
+            workingId,
+            period1Start,
+            period1End,
+            period2Start,
+            period2End,
+            cancellationToken);
     }
 
-    public Task<Result<RiderPeriodComparison>> CompareRiderYearsAsync(
+    public async Task<Result<RiderPeriodComparison>> CompareRiderYearsAsync(
         int workingId,
         int year1,
         int year2,
         CancellationToken cancellationToken = default)
     {
-        throw new NotImplementedException("Period comparison feature is not yet implemented");
+        if (workingId <= 0)
+            return Result.Failure<RiderPeriodComparison>(
+                new Error("Invalid working ID", "invalid_input", 400));
+
+        var period1Start = new DateOnly(year1, 1, 1);
+        var period1End = new DateOnly(year1, 12, 31);
+
+        var period2Start = new DateOnly(year2, 1, 1);
+        var period2End = new DateOnly(year2, 12, 31);
+
+        return await CompareRiderPeriodsAsync(
+            workingId,
+            period1Start,
+            period1End,
+            period2Start,
+            period2End,
+            cancellationToken);
     }
+    
+    
+    
+    
+    
+    private string DetermineOverallTrend(
+    ComparisonMetrics companyMetrics,
+    List<RiderPeriodComparison> riderComparisons)
+    {
+        if (!riderComparisons.Any())
+            return "➡️ No Data Available";
+
+        var totalRiders = riderComparisons.Count;
+        var improvingRiders = 0;
+        var decliningRiders = 0;
+        var stableRiders = 0;
+
+        // Analyze company-level metrics
+        var companyImprovements = 0;
+        var companyDeclines = 0;
+
+        if (companyMetrics.OrdersChangePercent > 5) companyImprovements++;
+        else if (companyMetrics.OrdersChangePercent < -5) companyDeclines++;
+
+        if (companyMetrics.CompletionRateChangePercent > 3) companyImprovements++;
+        else if (companyMetrics.CompletionRateChangePercent < -3) companyDeclines++;
+
+        if (companyMetrics.PerformanceScoreChangePercent > 5) companyImprovements++;
+        else if (companyMetrics.PerformanceScoreChangePercent < -5) companyDeclines++;
+
+        if (companyMetrics.ProblematicShiftsChangePercent < -10) companyImprovements++;
+        else if (companyMetrics.ProblematicShiftsChangePercent > 10) companyDeclines++;
+
+        // Analyze individual rider performance
+        foreach (var rider in riderComparisons)
+        {
+            switch (rider.Verdict.OverallResult)
+            {
+                case ComparisonResult.Better:
+                    improvingRiders++;
+                    break;
+                case ComparisonResult.Worse:
+                    decliningRiders++;
+                    break;
+                default:
+                    stableRiders++;
+                    break;
+            }
+        }
+
+        // Calculate percentages
+        var improvingPercent = (decimal)improvingRiders / totalRiders * 100;
+        var decliningPercent = (decimal)decliningRiders / totalRiders * 100;
+        var stablePercent = (decimal)stableRiders / totalRiders * 100;
+
+        // Determine company-level trend
+        string companyTrend;
+        if (companyImprovements > companyDeclines + 1)
+            companyTrend = "strong improvement";
+        else if (companyImprovements > companyDeclines)
+            companyTrend = "improving";
+        else if (companyDeclines > companyImprovements + 1)
+            companyTrend = "declining";
+        else if (companyDeclines > companyImprovements)
+            companyTrend = "needs attention";
+        else
+            companyTrend = "stable";
+
+        // Combine company and rider trends for final verdict
+        if (companyImprovements > companyDeclines && improvingPercent >= 60)
+            return $"📈 Strong Overall Improvement - Company metrics {companyTrend}, {improvingPercent:F0}% of riders improving ({improvingRiders}/{totalRiders})";
+
+        if (companyImprovements > companyDeclines && improvingPercent >= 40)
+            return $"✅ Positive Trend - Company {companyTrend}, majority of riders improving ({improvingRiders}/{totalRiders})";
+
+        if (companyDeclines > companyImprovements && decliningPercent >= 60)
+            return $"📉 Significant Decline - Company metrics {companyTrend}, {decliningPercent:F0}% of riders declining ({decliningRiders}/{totalRiders})";
+
+        if (companyDeclines > companyImprovements && decliningPercent >= 40)
+            return $"⚠️ Needs Attention - Company {companyTrend}, {decliningPercent:F0}% of riders declining ({decliningRiders}/{totalRiders})";
+
+        if (improvingPercent >= 50)
+            return $"✅ Generally Improving - Company {companyTrend}, {improvingPercent:F0}% improving vs {decliningPercent:F0}% declining";
+
+        if (decliningPercent >= 50)
+            return $"⚠️ Concerning Trend - Company {companyTrend}, {decliningPercent:F0}% declining vs {improvingPercent:F0}% improving";
+
+        if (stablePercent >= 50)
+            return $"➡️ Stable Performance - Company {companyTrend}, {stablePercent:F0}% of riders maintaining performance";
+
+        return $"🔄 Mixed Results - Company {companyTrend}, riders split: {improvingPercent:F0}% improving, {decliningPercent:F0}% declining, {stablePercent:F0}% stable";
+    }
+    private PeriodSummary BuildPeriodSummary(
+        DateOnly startDate,
+        DateOnly endDate,
+        List<RiderShift> shifts)
+    {
+        var totalDays = endDate.DayNumber - startDate.DayNumber + 1;
+        var workingDays = shifts.Count;
+        var completedShifts = shifts.Count(s => s.ShiftStatus == ShiftStatus.Completed.ToString());
+        var incompleteShifts = shifts.Count(s => s.ShiftStatus == ShiftStatus.Incomplete.ToString());
+        var failedShifts = shifts.Count(s => s.ShiftStatus == ShiftStatus.Failed.ToString());
+        var absentShifts = totalDays - workingDays;
+
+        var totalAccepted = shifts.Sum(s => s.AcceptedDailyOrders);
+        var totalRejected = shifts.Sum(s => s.RejectedDailyOrders);
+        var totalRealRejected = shifts.Sum(s => s.RealRejectedDailyOrders);
+        var totalStacked = shifts.Sum(s => s.StackedDeliveries);
+        var totalHours = shifts.Sum(s => s.WorkingHours);
+
+        var problematicCount = shifts.Count(s => HasRejectionProblem(s));
+        var totalPenalty = shifts.Sum(s => CalculatePenalty(s));
+
+        var avgOrdersPerDay = workingDays > 0 ? (decimal)totalAccepted / workingDays : 0;
+        var avgStackedPerDay = workingDays > 0 ? (decimal)totalStacked / workingDays : 0;
+        var completionRate = workingDays > 0 ? (decimal)completedShifts / workingDays * 100 : 0;
+
+        // Calculate performance score
+        var companyBreakdowns = CalculateCompanyBreakdowns(shifts);
+        var performanceScore = companyBreakdowns.Any() && workingDays > 0
+            ? companyBreakdowns.Sum(cb => cb.PerformanceScore * cb.WorkingDays) / workingDays
+            : 0;
+
+        return new PeriodSummary(
+            StartDate: startDate,
+            EndDate: endDate,
+            TotalDays: totalDays,
+            WorkingDays: workingDays,
+            CompletedShifts: completedShifts,
+            IncompleteShifts: incompleteShifts,
+            FailedShifts: failedShifts,
+            AbsentShifts: absentShifts,
+            TotalAcceptedOrders: totalAccepted,
+            TotalRejectedOrders: totalRejected,
+            TotalRealRejectedOrders: totalRealRejected,
+            TotalStackedDeliveries: totalStacked,
+            TotalWorkingHours: totalHours,
+            ProblematicShiftsCount: problematicCount,
+            TotalPenaltyAmount: totalPenalty,
+            AverageStackedPerDay: avgStackedPerDay,
+            AverageOrdersPerDay: avgOrdersPerDay,
+            CompletionRate: completionRate,
+            PerformanceScore: performanceScore,
+            CompanyBreakdowns: companyBreakdowns
+        );
+    }
+
+    private ComparisonMetrics CalculateComparisonMetrics(
+        PeriodSummary period1,
+        PeriodSummary period2)
+    {
+        return new ComparisonMetrics(
+            WorkingDaysDifference: period2.WorkingDays - period1.WorkingDays,
+            WorkingDaysChangePercent: CalculatePercentChange(period1.WorkingDays, period2.WorkingDays),
+            OrdersDifference: period2.TotalAcceptedOrders - period1.TotalAcceptedOrders,
+            OrdersChangePercent: CalculatePercentChange(period1.TotalAcceptedOrders, period2.TotalAcceptedOrders),
+            AverageOrdersPerDayDifference: period2.AverageOrdersPerDay - period1.AverageOrdersPerDay,
+            AverageOrdersPerDayChangePercent: CalculatePercentChange(period1.AverageOrdersPerDay, period2.AverageOrdersPerDay),
+            CompletionRateDifference: period2.CompletionRate - period1.CompletionRate,
+            CompletionRateChangePercent: CalculatePercentChange(period1.CompletionRate, period2.CompletionRate),
+            PerformanceScoreDifference: period2.PerformanceScore - period1.PerformanceScore,
+            PerformanceScoreChangePercent: CalculatePercentChange(period1.PerformanceScore, period2.PerformanceScore),
+            WorkingHoursDifference: period2.TotalWorkingHours - period1.TotalWorkingHours,
+            WorkingHoursChangePercent: CalculatePercentChange((decimal)period1.TotalWorkingHours, (decimal)period2.TotalWorkingHours),
+            PenaltyDifference: period2.TotalPenaltyAmount - period1.TotalPenaltyAmount,
+            PenaltyChangePercent: CalculatePercentChange(period1.TotalPenaltyAmount, period2.TotalPenaltyAmount),
+            ProblematicShiftsDifference: period2.ProblematicShiftsCount - period1.ProblematicShiftsCount,
+            ProblematicShiftsChangePercent: CalculatePercentChange(period1.ProblematicShiftsCount, period2.ProblematicShiftsCount),
+            RejectionRateDifference: CalculateRejectionRate(period2) - CalculateRejectionRate(period1),
+            RejectionRateChangePercent: CalculatePercentChange(CalculateRejectionRate(period1), CalculateRejectionRate(period2))
+        );
+    }
+
+    private decimal CalculateRejectionRate(PeriodSummary period)
+    {
+        var totalOrders = period.TotalAcceptedOrders + period.TotalRejectedOrders;
+        return totalOrders > 0 ? (decimal)period.TotalRejectedOrders / totalOrders * 100 : 0;
+    }
+
+    private PeriodPerformanceVerdict GeneratePerformanceVerdict(
+        PeriodSummary period1,
+        PeriodSummary period2,
+        ComparisonMetrics metrics)
+    {
+        var improvements = new List<MetricChange>();
+        var declines = new List<MetricChange>();
+
+        // Analyze each metric
+        AnalyzeMetricChange(
+            "Performance Score",
+            period1.PerformanceScore, period2.PerformanceScore,
+            metrics.PerformanceScoreChangePercent,
+            improvements, declines, isHigherBetter: true);
+
+        AnalyzeMetricChange(
+            "Completion Rate",
+            period1.CompletionRate, period2.CompletionRate,
+            metrics.CompletionRateChangePercent,
+            improvements, declines, isHigherBetter: true);
+
+        AnalyzeMetricChange(
+            "Average Orders/Day",
+            period1.AverageOrdersPerDay, period2.AverageOrdersPerDay,
+            metrics.AverageOrdersPerDayChangePercent,
+            improvements, declines, isHigherBetter: true);
+
+        AnalyzeMetricChange(
+            "Rejection Rate",
+            CalculateRejectionRate(period1), CalculateRejectionRate(period2),
+            metrics.RejectionRateChangePercent,
+            improvements, declines, isHigherBetter: false);
+
+        AnalyzeMetricChange(
+            "Penalties",
+            period1.TotalPenaltyAmount, period2.TotalPenaltyAmount,
+            metrics.PenaltyChangePercent,
+            improvements, declines, isHigherBetter: false);
+
+        AnalyzeMetricChange(
+            "Problematic Shifts",
+            period1.ProblematicShiftsCount, period2.ProblematicShiftsCount,
+            metrics.ProblematicShiftsChangePercent,
+            improvements, declines, isHigherBetter: false);
+
+        // Calculate improvement score
+        var improvementScore = CalculateImprovementScore(improvements, declines);
+
+        // Determine overall result
+        var overallResult = DetermineOverallResult(improvementScore, improvements.Count, declines.Count);
+
+        // Generate summary
+        var summary = GenerateVerdictSummary(overallResult, improvementScore, improvements, declines);
+
+        return new PeriodPerformanceVerdict(
+            OverallResult: overallResult,
+            Summary: summary,
+            ImprovementScore: improvementScore,
+            TopImprovements: improvements.OrderByDescending(i => Math.Abs(i.ChangePercent)).Take(3).ToList(),
+            TopDeclines: declines.OrderByDescending(d => Math.Abs(d.ChangePercent)).Take(3).ToList()
+        );
+    }
+
+    private void AnalyzeMetricChange(
+        string metricName,
+        decimal oldValue,
+        decimal newValue,
+        decimal changePercent,
+        List<MetricChange> improvements,
+        List<MetricChange> declines,
+        bool isHigherBetter)
+    {
+        if (Math.Abs(changePercent) < 1) return; // Ignore negligible changes
+
+        var direction = newValue > oldValue ? TrendDirection.Up :
+                        newValue < oldValue ? TrendDirection.Down :
+                        TrendDirection.Stable;
+
+        var isImprovement = (isHigherBetter && direction == TrendDirection.Up) ||
+                            (!isHigherBetter && direction == TrendDirection.Down);
+
+        var change = new MetricChange(
+            MetricName: metricName,
+            OldValue: FormatMetricValue(oldValue, metricName),
+            NewValue: FormatMetricValue(newValue, metricName),
+            ChangePercent: changePercent,
+            Direction: direction
+        );
+
+        if (isImprovement)
+            improvements.Add(change);
+        else if (direction != TrendDirection.Stable)
+            declines.Add(change);
+    }
+
+    private string FormatMetricValue(decimal value, string metricName)
+    {
+        if (metricName.Contains("Rate") || metricName.Contains("Score"))
+            return $"{value:F1}%";
+        if (metricName.Contains("Penalties"))
+            return $"{value:F2} SAR";
+        return $"{value:F1}";
+    }
+
+    private decimal CalculateImprovementScore(
+        List<MetricChange> improvements,
+        List<MetricChange> declines)
+    {
+        var improvementWeight = improvements.Sum(i => Math.Abs(i.ChangePercent));
+        var declineWeight = declines.Sum(d => Math.Abs(d.ChangePercent));
+
+        if (improvementWeight + declineWeight == 0)
+            return 0;
+
+        return ((improvementWeight - declineWeight) / (improvementWeight + declineWeight)) * 100;
+    }
+
+    private ComparisonResult DetermineOverallResult(
+        decimal improvementScore,
+        int improvementCount,
+        int declineCount)
+    {
+        if (Math.Abs(improvementScore) < 10 && Math.Abs(improvementCount - declineCount) <= 1)
+            return ComparisonResult.Same;
+
+        if (improvementCount > 0 && declineCount > 0)
+            return improvementScore > 20 ? ComparisonResult.Better :
+                   improvementScore < -20 ? ComparisonResult.Worse :
+                   ComparisonResult.Mixed;
+
+        return improvementScore > 0 ? ComparisonResult.Better : ComparisonResult.Worse;
+    }
+
+    private string GenerateVerdictSummary(
+        ComparisonResult result,
+        decimal improvementScore,
+        List<MetricChange> improvements,
+        List<MetricChange> declines)
+    {
+        return result switch
+        {
+            ComparisonResult.Better =>
+                $"Performance improved significantly with an improvement score of {improvementScore:F1}. " +
+                $"{improvements.Count} metrics showed positive changes.",
+
+            ComparisonResult.Worse =>
+                $"Performance declined with an improvement score of {improvementScore:F1}. " +
+                $"{declines.Count} metrics showed negative changes.",
+
+            ComparisonResult.Mixed =>
+                $"Performance showed mixed results (score: {improvementScore:F1}). " +
+                $"{improvements.Count} improvements vs {declines.Count} declines.",
+
+            ComparisonResult.Same =>
+                $"Performance remained relatively stable with minimal changes (score: {improvementScore:F1}).",
+
+            _ => "Unable to determine performance trend."
+        };
+    }
+
+    private List<string> GenerateComparisonInsights(
+        PeriodSummary period1,
+        PeriodSummary period2,
+        ComparisonMetrics metrics)
+    {
+        var insights = new List<string>();
+
+        // Working days insight
+        if (Math.Abs(metrics.WorkingDaysChangePercent) >= 20)
+        {
+            var direction = metrics.WorkingDaysDifference > 0 ? "increased" : "decreased";
+            insights.Add($"📅 Working days {direction} by {Math.Abs(metrics.WorkingDaysChangePercent):F1}% " +
+                        $"({period1.WorkingDays} → {period2.WorkingDays})");
+        }
+
+        // Orders insight
+        if (Math.Abs(metrics.AverageOrdersPerDayChangePercent) >= 10)
+        {
+            var emoji = metrics.AverageOrdersPerDayDifference > 0 ? "📈" : "📉";
+            insights.Add($"{emoji} Daily average orders changed by {metrics.AverageOrdersPerDayChangePercent:F1}% " +
+                        $"({period1.AverageOrdersPerDay:F1} → {period2.AverageOrdersPerDay:F1})");
+        }
+
+        // Completion rate insight
+        if (Math.Abs(metrics.CompletionRateDifference) >= 5)
+        {
+            var emoji = metrics.CompletionRateDifference > 0 ? "✅" : "⚠️";
+            insights.Add($"{emoji} Completion rate changed by {metrics.CompletionRateDifference:F1} percentage points " +
+                        $"({period1.CompletionRate:F1}% → {period2.CompletionRate:F1}%)");
+        }
+
+        // Performance score insight
+        if (Math.Abs(metrics.PerformanceScoreDifference) >= 5)
+        {
+            var emoji = metrics.PerformanceScoreDifference > 0 ? "🌟" : "📊";
+            insights.Add($"{emoji} Performance score {(metrics.PerformanceScoreDifference > 0 ? "improved" : "declined")} " +
+                        $"by {Math.Abs(metrics.PerformanceScoreDifference):F1} points");
+        }
+
+        // Penalty insight
+        if (metrics.PenaltyDifference != 0)
+        {
+            var emoji = metrics.PenaltyDifference < 0 ? "💰" : "⚠️";
+            var change = metrics.PenaltyDifference < 0 ? "reduced" : "increased";
+            insights.Add($"{emoji} Penalties {change} by {Math.Abs(metrics.PenaltyDifference):F2} SAR");
+        }
+
+        // Problematic shifts insight
+        if (metrics.ProblematicShiftsDifference != 0)
+        {
+            var emoji = metrics.ProblematicShiftsDifference < 0 ? "✨" : "🔴";
+            insights.Add($"{emoji} Problematic shifts changed from {period1.ProblematicShiftsCount} to {period2.ProblematicShiftsCount}");
+        }
+
+        if (!insights.Any())
+            insights.Add("📊 Performance metrics remained relatively stable between periods");
+
+        return insights;
+    }
+
+    private List<string> GenerateRecommendations(
+        PeriodSummary period2,
+        ComparisonMetrics metrics,
+        PeriodPerformanceVerdict verdict)
+    {
+        var recommendations = new List<string>();
+
+        // Based on completion rate
+        if (period2.CompletionRate < 85)
+        {
+            recommendations.Add("🎯 Focus on improving shift completion rate - currently below target");
+        }
+
+        // Based on rejection rate
+        var rejectionRate = CalculateRejectionRate(period2);
+        if (rejectionRate > 15)
+        {
+            recommendations.Add("⚠️ High rejection rate detected - review order acceptance strategy");
+        }
+
+        // Based on penalties
+        if (period2.TotalPenaltyAmount > 100)
+        {
+            recommendations.Add("💰 Reduce penalty costs by minimizing excess rejections");
+        }
+
+        // Based on performance score
+        if (period2.PerformanceScore < 75)
+        {
+            recommendations.Add("📈 Performance score needs improvement - aim for 85% or higher");
+        }
+
+        // Based on trends
+        if (metrics.CompletionRateChangePercent < -5)
+        {
+            recommendations.Add("🔄 Completion rate declining - investigate causes of incomplete shifts");
+        }
+
+        if (metrics.AverageOrdersPerDayChangePercent < -10)
+        {
+            recommendations.Add("📊 Daily order average declining - consider productivity improvements");
+        }
+
+        // Positive reinforcement
+        if (verdict.OverallResult == ComparisonResult.Better)
+        {
+            recommendations.Add("⭐ Maintain current positive trend and consistency");
+        }
+
+        // If no issues, encourage continued excellence
+        if (!recommendations.Any())
+        {
+            recommendations.Add("✅ Maintain excellent performance and consistency");
+        }
+
+        return recommendations;
+    }
+
+    private async Task<List<RiderPeriodComparison>> GetRiderComparisonsForCompany(
+        string companyName,
+        DateOnly period1Start,
+        DateOnly period1End,
+        DateOnly period2Start,
+        DateOnly period2End,
+        CancellationToken cancellationToken)
+    {
+        // Get all riders who worked for this company in either period
+        var riderIds = await _dbcontext.RiderShifts
+            .Where(s => s.Company.Name == companyName &&
+                       ((s.ShiftDate >= period1Start && s.ShiftDate <= period1End) ||
+                        (s.ShiftDate >= period2Start && s.ShiftDate <= period2End)))
+            .Select(s => s.Rider.WorkingId)
+            .Distinct()
+            .Where(wid => wid.HasValue && wid.Value > 0)
+            .ToListAsync(cancellationToken);
+
+        var comparisons = new List<RiderPeriodComparison>();
+
+        foreach (var workingId in riderIds)
+        {
+            if (!workingId.HasValue) continue;
+
+            var result = await CompareRiderPeriodsAsync(
+                workingId.Value,
+                period1Start,
+                period1End,
+                period2Start,
+                period2End,
+                cancellationToken);
+
+            if (result.IsSuccess)
+            {
+                // Filter to only include shifts from this company
+                var comparison = result.Value;
+                var hasCompanyData = comparison.Period1.CompanyBreakdowns.Any(c => c.CompanyName == companyName) ||
+                                   comparison.Period2.CompanyBreakdowns.Any(c => c.CompanyName == companyName);
+
+                if (hasCompanyData)
+                {
+                    comparisons.Add(comparison);
+                }
+            }
+        }
+
+        return comparisons;
+    }
+
 
 
     public async Task<Result<List<HousingPeriodComparison>>> CompareHousingPeriodsAsync(
@@ -1660,6 +2386,101 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
             MaxStackedInDay: maxStacked,
             MaxStackedDate: maxStackedDate,
             DailyBreakdown: dailyBreakdown
+        );
+
+        return Result.Success(report);
+    }
+
+    public async Task<Result<AllRidersStackedDeliveriesReport>> GetAllRidersStackedDeliveriesAsync(
+    DateOnly startDate,
+    DateOnly endDate,
+    CancellationToken cancellationToken = default)
+    {
+        if (startDate > endDate)
+            return Result.Failure<AllRidersStackedDeliveriesReport>(
+                new Error("Start date must be before or equal to end date", "invalid_input", 400));
+
+        // Get all riders with their shifts in the date range
+        var ridersWithShifts = await _dbcontext.RiderDetails
+            .Include(r => r.Employee)
+            .Where(r => r.RiderShifts.Any(s => s.ShiftDate >= startDate && s.ShiftDate <= endDate))
+            .Select(r => new
+            {
+                Rider = r,
+                Shifts = r.RiderShifts
+                    .Where(s => s.ShiftDate >= startDate && s.ShiftDate <= endDate)
+                    .OrderBy(s => s.ShiftDate)
+                    .ToList()
+            })
+            .ToListAsync(cancellationToken);
+
+        if (!ridersWithShifts.Any())
+        {
+            return Result.Success(new AllRidersStackedDeliveriesReport(
+                StartDate: startDate,
+                EndDate: endDate,
+                TotalRiders: 0,
+                TotalStackedDeliveries: 0,
+                TotalShifts: 0,
+                AverageStackedPerRider: 0,
+                RiderSummaries: new List<RiderStackedSummary>()
+            ));
+        }
+
+        var riderSummaries = new List<RiderStackedSummary>();
+        var grandTotalStacked = 0;
+        var grandTotalShifts = 0;
+
+        foreach (var item in ridersWithShifts)
+        {
+            var shifts = item.Shifts;
+            var totalStacked = shifts.Sum(s => s.StackedDeliveries);
+            var totalShifts = shifts.Count;
+            var totalAcceptedOrders = shifts.Sum(s => s.AcceptedDailyOrders);
+
+            var avgStackedPerShift = totalShifts > 0 ? (decimal)totalStacked / totalShifts : 0;
+
+            var maxStackedShift = shifts.OrderByDescending(s => s.StackedDeliveries).FirstOrDefault();
+            var maxStacked = maxStackedShift?.StackedDeliveries ?? 0;
+            var maxStackedDate = maxStackedShift?.ShiftDate;
+
+            var stackedPercentage = totalAcceptedOrders > 0
+                ? (decimal)totalStacked / totalAcceptedOrders * 100
+                : 0;
+
+            riderSummaries.Add(new RiderStackedSummary(
+                RiderId: item.Rider.Id,
+                RiderName: item.Rider.Employee.NameAR,
+                WorkingId: item.Rider.WorkingId ?? 0,
+                TotalStackedDeliveries: totalStacked,
+                TotalShifts: totalShifts,
+                AverageStackedPerShift: avgStackedPerShift,
+                MaxStackedInDay: maxStacked,
+                MaxStackedDate: maxStackedDate,
+                TotalStackedPercentage: stackedPercentage
+            ));
+
+            grandTotalStacked += totalStacked;
+            grandTotalShifts += totalShifts;
+        }
+
+        // Sort by total stacked deliveries descending
+        riderSummaries = riderSummaries
+            .OrderByDescending(r => r.TotalStackedDeliveries)
+            .ToList();
+
+        var avgStackedPerRider = riderSummaries.Count > 0
+            ? (decimal)grandTotalStacked / riderSummaries.Count
+            : 0;
+
+        var report = new AllRidersStackedDeliveriesReport(
+            StartDate: startDate,
+            EndDate: endDate,
+            TotalRiders: riderSummaries.Count,
+            TotalStackedDeliveries: grandTotalStacked,
+            TotalShifts: grandTotalShifts,
+            AverageStackedPerRider: avgStackedPerRider,
+            RiderSummaries: riderSummaries
         );
 
         return Result.Success(report);

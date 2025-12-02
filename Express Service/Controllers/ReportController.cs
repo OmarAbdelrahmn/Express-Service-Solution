@@ -334,7 +334,7 @@ public class ReportController(IReportService service) : ControllerBase
             result.ToProblem();
     }
 
-    [HttpDelete("stacked/{WorkingId}")]
+    [HttpGet("stacked/{WorkingId}")]
     public async Task<IActionResult> GetMonthlyStackedDeliveriesByWorkingIdAsync(int WorkingId,
         [FromQuery]   int year,
         [FromQuery]  int month,
@@ -342,7 +342,36 @@ public class ReportController(IReportService service) : ControllerBase
     {
         var result = await service.GetMonthlyStackedDeliveriesByWorkingIdAsync(WorkingId,year,month,cancellationToken);
         return result.IsSuccess
-            ? NoContent()
+            ? Ok(result.Value)
+            : result.ToProblem();
+    }
+    
+    
+    [HttpGet("stacked")]
+    public async Task<IActionResult> GetStackedDeliveriesByWorkingIdAsync(
+        [FromQuery] DateOnly startDate,
+        [FromQuery]DateOnly endDate,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await service.GetAllRidersStackedDeliveriesAsync(startDate,endDate,cancellationToken);
+        return result.IsSuccess
+            ? Ok(result.Value)
+            : result.ToProblem();
+    }
+    
+
+    [HttpGet("housing")]
+    public async Task<IActionResult> GetHousingReportAsync(
+        [FromQuery] DateOnly startDate,
+        [FromQuery] DateOnly endDate,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await service.GetHousingAnalysisForPeriodAsync(
+            startDate,
+            endDate,
+            cancellationToken);
+        return result.IsSuccess
+            ? Ok(result.Value)
             : result.ToProblem();
     }
 

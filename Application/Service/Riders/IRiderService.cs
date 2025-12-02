@@ -10,6 +10,7 @@ namespace Application.Service.Riders;
 public interface IRiderService
 {
     Task<Result<IEnumerable<RiderResponse>>> GetAllEmployee();
+    Task<Result<IEnumerable<RiderResponse>>> GetAllEmployeeNO();
     Task<Result<IEnumerable<RiderResponse>>> Get(int IqamaNo);
     Task<Result<RiderResponse>> Getbyid(int Id);
     Task<Result> CreateAsync(RiderRequest Request);

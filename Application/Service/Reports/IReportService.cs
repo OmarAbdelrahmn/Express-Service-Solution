@@ -140,6 +140,10 @@ public interface IReportService
        int month,
        CancellationToken cancellationToken = default);
 
+    Task<Result<AllRidersStackedDeliveriesReport>> GetAllRidersStackedDeliveriesAsync(
+        DateOnly startDate,
+        DateOnly endDate,
+        CancellationToken cancellationToken = default);
 
     Task<Result<TopRidersReport>> GetTopRidersForMonthAsync(
         int year,
@@ -610,6 +614,28 @@ public record TrendsAnalysis(
     decimal OrdersGrowthRate,
     decimal ShiftsGrowthRate,
     string PerformanceTrend
+);
+
+public record AllRidersStackedDeliveriesReport(
+    DateOnly StartDate,
+    DateOnly EndDate,
+    int TotalRiders,
+    int TotalStackedDeliveries,
+    int TotalShifts,
+    decimal AverageStackedPerRider,
+    List<RiderStackedSummary> RiderSummaries
+);
+
+public record RiderStackedSummary(
+    int RiderId,
+    string RiderName,
+    int WorkingId,
+    int TotalStackedDeliveries,
+    int TotalShifts,
+    decimal AverageStackedPerShift,
+    int MaxStackedInDay,
+    DateOnly? MaxStackedDate,
+    decimal TotalStackedPercentage
 );
 
 public record WeeklyTrend(

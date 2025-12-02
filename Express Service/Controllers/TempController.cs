@@ -13,21 +13,21 @@ public class TempController(ITemp service , IEmployeeService service1 , IVehicle
     private readonly IEmployeeService service1 = service1;
     private readonly IVehicleService service2 = service2;
 
-    [HttpGet("employee")]
+    [HttpGet("employees")]
     public async Task<IActionResult> GetTempData()
     {
         var result = await service.GetPendingUpdatesAsync();
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
 
-    [HttpPut("employee")]
+    [HttpPut("employees")]
     public async Task<IActionResult> ResolveTempData([FromBody] BulkResolutionRequest request)
     {
         var result = await service.ResolveUpdatesAsync(request);
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
 
-    [HttpPost("employee")]
+    [HttpPost("import-employees")]
     public async Task<IActionResult> CreateTempData(IFormFile excelFile)
     {
         if (excelFile == null || excelFile.Length == 0)
@@ -48,7 +48,7 @@ public class TempController(ITemp service , IEmployeeService service1 , IVehicle
             response.ToProblem();
     }
 
-    [HttpDelete("employee-request-disable/{iqamaNo:int}")]
+    [HttpPut("employee-request-disable/{iqamaNo:int}")]
     public async Task<IActionResult> RequestDisableEmployee(int iqamaNo, string Reason, string RequestedBy)
     {
         var response = await service1.RequestDisableEmployeeAsync(iqamaNo, Reason, RequestedBy);
@@ -76,7 +76,7 @@ public class TempController(ITemp service , IEmployeeService service1 , IVehicle
     }
 
     [HttpPost("vehicle-request-return")]
-    public async Task<IActionResult> Vehicleretrunrequest(VehicleResolutionRequest request, string reason = "leave the work")
+    public async Task<IActionResult> Vehicleretrunrequest(SVehicleResolutionRequest request, string reason = "leave the work")
     {
         var response = await service2.RequestReturnVehicleAsync(request,reason);
         return response.IsSuccess ?
@@ -86,7 +86,7 @@ public class TempController(ITemp service , IEmployeeService service1 , IVehicle
     
     
     [HttpPost("vehicle-request-take")]
-    public async Task<IActionResult> VehicleTakerequest(VehicleResolutionRequest request, string reason = "work")
+    public async Task<IActionResult> VehicleTakerequest(SVehicleResolutionRequest request, string reason = "work")
     {
         var response = await service2.RequestTakeVehicleAsync(request,reason);
         return response.IsSuccess ?
@@ -96,7 +96,7 @@ public class TempController(ITemp service , IEmployeeService service1 , IVehicle
 
 
     [HttpPost("vehicle-request-problem")]
-    public async Task<IActionResult> Vehicleproblemrequest(VehicleResolutionRequest request, string reason = "problem at vichle")
+    public async Task<IActionResult> Vehicleproblemrequest(SVehicleResolutionRequest request, string reason = "problem at vichle")
     {
         var response = await service2.RequestReportProblemAsync(request,reason);
         return response.IsSuccess ?
@@ -114,7 +114,7 @@ public class TempController(ITemp service , IEmployeeService service1 , IVehicle
     }
     
     
-    [HttpGet("vehicle-resolve")]
+    [HttpPut("vehicle-resolve")]
     public async Task<IActionResult> resolvev(VehicleResolutionRequest request, string? note)
     {
         var response = await service2.ResolveOperationAsync(request,note);

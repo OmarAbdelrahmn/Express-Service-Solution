@@ -841,28 +841,26 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
 
     private static string CalculateShiftStatus(int acceptedOrders, string companyName)
     {
-        var thresholds = new Dictionary<string, (int Poor, int Average, int Good, int Excellent)>
+        var thresholds = new Dictionary<string, (int Failed, int Incomplete, int Completed)>
     {
-        { "Jahez", (15, 25, 35, 45) },
-        { "HungerStation", (12, 20, 30, 40) },
-        { "Careem", (10, 18, 28, 38) },
-        { "Marsool", (8, 15, 25, 35) }
+        { "Keta", (8, 12, 16) },
+        { "Hunger", (8, 12, 16) },
+        { "Toyou", (8, 12, 16) },
+        { "Amazon", (8, 12, 16) }
     };
 
-        var (poor, average, good, excellent) = thresholds.ContainsKey(companyName)
+        var (failed, incomplete, completed) = thresholds.ContainsKey(companyName)
             ? thresholds[companyName]
-            : (10, 20, 30, 40);
+            : (10, 15, 20); // القيم الافتراضية
 
-        if (acceptedOrders >= excellent)
-            return "Excellent";
-        else if (acceptedOrders >= good)
-            return "Good";
-        else if (acceptedOrders >= average)
-            return "Average";
-        else if (acceptedOrders >= poor)
-            return "Poor";
+        if (acceptedOrders >= completed)
+            return ShiftStatus.Completed.ToString();
+        else if (acceptedOrders >= incomplete)
+            return ShiftStatus.Incomplete.ToString();
+        else if (acceptedOrders >= failed)
+            return ShiftStatus.Average.ToString();
         else
-            return "VeryPoor";
+            return ShiftStatus.Failed.ToString();
     }
 
     private static (bool hasRejectionProblem, decimal penaltyAmount) CalculateRejectionPenalty(int realRejections)
@@ -884,7 +882,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
         int? WorkingId,
         int? AcceptedDailyOrders,
         int? RejectedDailyOrders,
-        int? StackedDeliveries,         // ADD THIS TO SIGNATURE
+        int? StackedDeliveries,         
         float? WorkingHours,
         string? ErrorMessage) ParseExcelRowByName(IXLRow row, ExcelColumnMapping mapping, int rowNumber)
     {

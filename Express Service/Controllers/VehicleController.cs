@@ -70,6 +70,24 @@ public class VehicleController : ControllerBase
         var result = await _service.GetAvailableVehiclesAsync();
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
+    [HttpGet("stolen")]
+    public async Task<IActionResult> GetAvaieVehicles()
+    {
+        var result = await _service.GetStolenVehiclesAsync();
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+    [HttpGet("problem")]
+    public async Task<IActionResult> GetAVehicles()
+    {
+        var result = await _service.GetProblemVehiclesAsync();
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+    [HttpGet("breakup")]
+    public async Task<IActionResult> GetAvableVehicles()
+    {
+        var result = await _service.GetBreackupVehiclesAsync();
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
 
     [HttpGet("taken")]
     public async Task<IActionResult> GetTakenVehicles()

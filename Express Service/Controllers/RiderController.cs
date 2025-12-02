@@ -19,6 +19,15 @@ public class RiderController(IRiderService service) : ControllerBase
         return result.IsSuccess
             ? Ok(result.Value) : result.ToProblem();
     }
+    
+    [HttpGet("inactive")]
+    public async Task<IActionResult> GetAlRiders()
+    {
+        var result = await service.GetAllEmployeeNO();
+        
+        return result.IsSuccess
+            ? Ok(result.Value) : result.ToProblem();
+    }
 
     [HttpGet("id/{id:int}")]
     public async Task<IActionResult> GetRiderById(int id)

@@ -31,7 +31,7 @@ public class RiderService(ApplicationDbcontext dbcontext) : IRiderService
            .ToListAsync();
 
         if (isexist is null)
-            return Result.Failure<IEnumerable<RiderResponse>>(error: new Error("No Employee Found", "no employee found with this Iqama", 400));
+            return Result.Failure<IEnumerable<RiderResponse>>(error: new Error("No rider Found", "no rider found with this Iqama", 400));
 
 
         var res = isexist.Select(emp => new RiderResponse(
@@ -76,7 +76,7 @@ public class RiderService(ApplicationDbcontext dbcontext) : IRiderService
 
         if (isexist.Count == 0)
             return Result.Failure<IEnumerable<RiderResponse>>(
-                new Error("No Employees Found", "no employees", 400)
+                new Error("No rider Found", "no rider", 400)
             );
 
         var res = isexist.Select(emp => new RiderResponse(
@@ -116,7 +116,7 @@ public class RiderService(ApplicationDbcontext dbcontext) : IRiderService
         {
             var isexist = dbcontext.RiderDetails.Any(x => x.EmployeeIqamaNo == Request.IqamaNo);
             if (isexist)
-                return Result.Failure(error: new Error("Employee exists", "Employee already exists with this Iqama", 400));
+                return Result.Failure(error: new Error("rider exists", "rider already exists with this Iqama", 400));
 
             var Company = await dbcontext.Companies.FirstOrDefaultAsync(c => c.Name == Request.CompanyName);
 
@@ -173,7 +173,7 @@ public class RiderService(ApplicationDbcontext dbcontext) : IRiderService
             var isexist = await dbcontext.Employees.FindAsync(IqamaNo, cancellationToken);
 
             if (isexist is null)
-                return Result.Failure<EmpolyeeResponse>(error: new Error("No Employee Found", "no employee found with this Iqama", 400));
+                return Result.Failure<EmpolyeeResponse>(error: new Error("No rider Found", "no rider found with this Iqama", 400));
 
             var Done = isexist.Adapt<DeletedEmployees>();
 
@@ -219,7 +219,7 @@ public class RiderService(ApplicationDbcontext dbcontext) : IRiderService
         .FirstOrDefaultAsync(e => e.IqamaNo == IqamaNo && e.RiderDetails != null);
 
             if (employee is null)
-                return Result.Failure<RiderResponse>(error: new Error("No Employee Found", "no employee found with this Iqama", 400));
+                return Result.Failure<RiderResponse>(error: new Error("No rider Found", "no rider found with this Iqama", 400));
 
             var riderDetails = employee.RiderDetails;
 
@@ -441,7 +441,7 @@ public class RiderService(ApplicationDbcontext dbcontext) : IRiderService
             .FirstOrDefaultAsync(e => e.IqamaNo == Id && e.RiderDetails != null);
 
         if (rider is null)
-            return Result.Failure<RiderResponse>(error: new Error("No Employee Found", "no employee found with this Iqama", 400));
+            return Result.Failure<RiderResponse>(error: new Error("No rider Found", "no rider found with this Iqama", 400));
 
         var response = new RiderResponse(
             rider.IqamaNo,
@@ -469,6 +469,52 @@ public class RiderService(ApplicationDbcontext dbcontext) : IRiderService
             rider.RiderDetails.Company.Name
             );
         return Result.Success(response);
+    }
+
+    public async Task<Result<IEnumerable<RiderResponse>>> GetAllEmployeeNO()
+    {
+        var isexist = await dbcontext
+            .Employees
+            .AsNoTracking()
+            .Where(r => r.RiderDetails != null && r.RiderDetails.VehicleNumber == null && r.Status == "disable")
+            .Include(e => e.Housing)
+            .Include(e => e.RiderDetails)
+                .ThenInclude(rd => rd.Company)
+            .ToListAsync();
+
+        if (isexist.Count == 0)
+            return Result.Failure<IEnumerable<RiderResponse>>(
+                new Error("No rider Found", "no rider", 400)
+            );
+
+        var res = isexist.Select(emp => new RiderResponse(
+       emp.IqamaNo,
+       emp.IqamaEndM,
+       emp.IqamaEndH,
+       emp.PassportNo!,
+       emp.PassportEnd ?? default,
+       emp.Sponsor,
+       emp.SponsorNo,
+       emp.JobTitle,
+       emp.NameAR,
+       emp.NameEN,
+       emp.Country,
+       emp.Phone,
+       emp.DateOfBirth,
+       emp.Status,
+       emp.IBAN!,
+       emp.INKSA,
+       emp.CreatedAt,
+       emp.Housing?.Name,
+       emp.RiderDetails.WorkingId!,
+         emp.IqamaNo,
+            emp.RiderDetails.TshirtSize!,
+            emp.RiderDetails.LicenseNumber!,
+            emp.RiderDetails.Company.Name
+            )).ToList();
+
+
+        return Result.Success<IEnumerable<RiderResponse>>(res);
     }
 }
 

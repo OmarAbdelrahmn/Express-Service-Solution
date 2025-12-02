@@ -26,6 +26,9 @@ public interface IVehicleService
     Task<Result<IEnumerable<RiderVehicleStatus>>> GetVehicleHistoryAsync(string vehicleId);
     Task<Result> FixVehicleProblemAsync(string vehicleNumber, string reason);
     Task<Result<IEnumerable<Vehicle>>> GetAvailableVehiclesAsync();
+    Task<Result<IEnumerable<Vehicle>>> GetStolenVehiclesAsync();
+    Task<Result<IEnumerable<Vehicle>>> GetBreackupVehiclesAsync();
+    Task<Result<IEnumerable<Vehicle>>> GetProblemVehiclesAsync();
     Task<Result> ReportVehicleStolenAsync(string vehicleNumber, int? reportedByIqamaNo, string? reason);
     Task<Result<IEnumerable<VehicleHistoryDto>>> GetVehicleHistoryAsync1(string vehicleNumber);
     Task<Result<IEnumerable<VehicleWithRiderDto>>> GetAllVehiclesWithRidersAsync();
@@ -37,9 +40,9 @@ public interface IVehicleService
 
 
 
-    Task<Result> RequestTakeVehicleAsync(VehicleResolutionRequest request , string reason = "work");
-    Task<Result> RequestReturnVehicleAsync(VehicleResolutionRequest request, string reason = "leave the work");
-    Task<Result> RequestReportProblemAsync(VehicleResolutionRequest request, string reason = "problem at vehicle");
+    Task<Result> RequestTakeVehicleAsync(SVehicleResolutionRequest request , string reason = "work");
+    Task<Result> RequestReturnVehicleAsync(SVehicleResolutionRequest request, string reason = "leave the work");
+    Task<Result> RequestReportProblemAsync(SVehicleResolutionRequest request, string reason = "problem at vehicle");
     Task<Result<IEnumerable<TempVehicleOperationResponse>>> GetPendingOperationsAsync();
     Task<Result> ResolveOperationAsync(VehicleResolutionRequest request , string? note);
 

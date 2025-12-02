@@ -114,10 +114,15 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
         {
 
             var rider = await dbcontext.RiderDetails
+                .Include(r => r.Employee)
             .FirstOrDefaultAsync(x => x.EmployeeIqamaNo == iqamaNo);
 
             if (rider == null)
                 return Result.Failure(new Error("NoRider", "No rider found with this Iqama", 400));
+
+
+            if(rider.Employee.Status != "enable")
+                return Result.Failure(new Error("RiderDisabled", "Rider is disabled and cannot take a vehicle", 403));
 
             if (!string.IsNullOrEmpty(rider.VehicleNumber))
                 return Result.Failure(new Error("HasVehicle",
@@ -1203,7 +1208,7 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
     }
 
 
-    public async Task<Result> RequestTakeVehicleAsync(VehicleResolutionRequest request,string reason ="work")
+    public async Task<Result> RequestTakeVehicleAsync(SVehicleResolutionRequest request,string reason ="work")
     {
         try
         {
@@ -1211,14 +1216,17 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
                 .Include(r => r.Employee)
                 .FirstOrDefaultAsync(r => r.EmployeeIqamaNo == request.RiderIqamaNo);
 
-            if (rider == null)
-                return Result.Failure(new Error("NoRider", "Rider not found", 404));
+            if (rider is null)
+                return Result.Failure(new Error("NoRider found" , "Rider not found", 404));
+
+            if (rider.Employee.Status != "enable")
+                return Result.Failure(new Error("RiderDisabled", "Rider is disabled and cannot take a vehicle", 403));
 
             var vehicle = await dbcontext.Vehicles
                 .FirstOrDefaultAsync(v => v.PlateNumberA == request.Plate);
 
             if (vehicle == null)
-                return Result.Failure(new Error("NoVehicle", "Vehicle not found", 404));
+                return Result.Failure(new Error("NoVehicle found", "Vehicle not found", 404));
 
             var validation = await ValidateTakeOperation(request.RiderIqamaNo, vehicle.VehicleNumber);
 
@@ -1258,7 +1266,7 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
                 new Error("RequestError", $"Failed to request take vehicle: {ex.Message}", 500));
         }
     }
-    public async Task<Result> RequestReturnVehicleAsync(VehicleResolutionRequest request , string reason = "leave the work")
+    public async Task<Result> RequestReturnVehicleAsync(SVehicleResolutionRequest request , string reason = "leave the work")
     {
         try
         {
@@ -1266,7 +1274,7 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
                 .Include(r => r.Employee)
                 .FirstOrDefaultAsync(r => r.EmployeeIqamaNo == request.RiderIqamaNo);
 
-            if (rider == null)
+            if (rider is null)
                 return Result.Failure(new Error("NoRider", "Rider not found", 404));
 
             var vehicle = await dbcontext.Vehicles
@@ -1312,7 +1320,7 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
                 new Error("RequestError", $"Failed to request return vehicle: {ex.Message}", 500));
         }
     }
-    public async Task<Result> RequestReportProblemAsync(VehicleResolutionRequest request , string reason = "problem at vehicle")
+    public async Task<Result> RequestReportProblemAsync(SVehicleResolutionRequest request , string reason = "problem at vehicle")
     {
         try
         {
@@ -1681,7 +1689,86 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
         );
     }
 
+    public async Task<Result<IEnumerable<Vehicle>>> GetStolenVehiclesAsync()
+    {
+        try
+        {
+            var unavailableVehicles = await dbcontext.RiderVehicleStatus
+                .Where(s => s.IsActive &&
+                           (
+                            s.StatusType == VehicleStatusType.Stolen ))
+                .Select(s => s.VehicleNumber)
+                .Distinct()
+                .ToListAsync();
 
+            var availableVehicles = await dbcontext.Vehicles
+                .Where(v => unavailableVehicles.Contains(v.VehicleNumber))
+                .OrderBy(v => v.VehicleNumber)
+                .ToListAsync();
+
+            return Result.Success<IEnumerable<Vehicle>>(availableVehicles);
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<IEnumerable<Vehicle>>(
+                new Error("GetAvailableError",
+                    $"Failed to retrieve available vehicles: {ex.Message}", 500));
+        }
+    }
+
+    public async Task<Result<IEnumerable<Vehicle>>> GetBreackupVehiclesAsync()
+    {
+        try
+        {
+            var unavailableVehicles = await dbcontext.RiderVehicleStatus
+                .Where(s => s.IsActive &&
+                           (
+                            s.StatusType == VehicleStatusType.BreakUp))
+                .Select(s => s.VehicleNumber)
+                .Distinct()
+                .ToListAsync();
+
+            var availableVehicles = await dbcontext.Vehicles
+                .Where(v => unavailableVehicles.Contains(v.VehicleNumber))
+                .OrderBy(v => v.VehicleNumber)
+                .ToListAsync();
+
+            return Result.Success<IEnumerable<Vehicle>>(availableVehicles);
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<IEnumerable<Vehicle>>(
+                new Error("GetAvailableError",
+                    $"Failed to retrieve available vehicles: {ex.Message}", 500));
+        }
+    }
+
+    public async Task<Result<IEnumerable<Vehicle>>> GetProblemVehiclesAsync()
+    {
+        try
+        {
+            var unavailableVehicles = await dbcontext.RiderVehicleStatus
+                .Where(s => s.IsActive &&
+                           (
+                            s.StatusType == VehicleStatusType.Problem))
+                .Select(s => s.VehicleNumber)
+                .Distinct()
+                .ToListAsync();
+
+            var availableVehicles = await dbcontext.Vehicles
+                .Where(v => unavailableVehicles.Contains(v.VehicleNumber))
+                .OrderBy(v => v.VehicleNumber)
+                .ToListAsync();
+
+            return Result.Success<IEnumerable<Vehicle>>(availableVehicles);
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<IEnumerable<Vehicle>>(
+                new Error("GetAvailableError",
+                    $"Failed to retrieve available vehicles: {ex.Message}", 500));
+        }
+    }
 }
 
 // Response DTOs
@@ -1722,6 +1809,12 @@ public record VehicleResolutionRequest(
     string ResolvedBy,
     string Plate
 );
+public record SVehicleResolutionRequest
+{
+    public int RiderIqamaNo { get; init; }
+    public string ResolvedBy { get; init; }
+    public string Plate { get; init; }
+}
 public record BulkResolutionResponse(
     int TotalProcessed,
     int SuccessCount,
