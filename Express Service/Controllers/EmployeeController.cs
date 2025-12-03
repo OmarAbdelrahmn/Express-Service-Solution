@@ -90,8 +90,15 @@ public class EmployeeController(IEmployeeService service) : ControllerBase
         return Ok(result);
     }
 
-    
 
+    [HttpGet("deleted")]
+    public async Task<IActionResult> GetDeletedEmployees()
+    {
+        var response = await service.GetAlldeletedEmployee();
+        return response.IsSuccess ?
+            Ok(response.Value) :
+            response.ToProblem();
+    }
 }
 
 public record Re(string massege);

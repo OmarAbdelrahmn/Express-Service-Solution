@@ -24,7 +24,7 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
         var isexist = await dbcontext
             .Employees
             .AsNoTracking()
-            .Where(e => e.IqamaNo.ToString().StartsWith(IqamaNo.ToString()))
+            .Where(e => e.IqamaNo.ToString().StartsWith(IqamaNo.ToString()) && e.RiderDetails == null)
             .Include(e => e.Housing)
             .ToListAsync();
 
@@ -113,16 +113,16 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
 
     public async Task<Result> DeleteAsync(int IqamaNo, CancellationToken cancellationToken = default)
     {
-        var isexist = await dbcontext.Employees.FindAsync(IqamaNo, cancellationToken);
+        var employee = await dbcontext.Employees.Where(c => c.IqamaNo == IqamaNo && c.RiderDetails == null).FirstOrDefaultAsync();
 
-        if (isexist is null)
+        if (employee is null)
             return Result.Failure<EmpolyeeResponse>(error: new Error("No Employee Found", "no employee found with this Iqama", 400));
 
-        var Done = isexist.Adapt<DeletedEmployees>();
+        var Done = employee.Adapt<DeletedEmployees>();
 
         await dbcontext.DeletedEmployees.AddAsync(Done, cancellationToken);
 
-        dbcontext.Employees.Remove(isexist);
+        dbcontext.Employees.Remove(employee);
 
         dbcontext.SaveChanges();
 
@@ -131,7 +131,7 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
 
     public async Task<Result<EmpolyeeResponse>> UpdateAsync(int IqamaNo, UEmpolyeeRequest request)
     {
-        var employee = await dbcontext.Employees.Where(c => c.IqamaNo == IqamaNo).Include(c => c.Housing).FirstOrDefaultAsync();
+        var employee = await dbcontext.Employees.Where(c => c.IqamaNo == IqamaNo && c.RiderDetails == null).Include(c => c.Housing).FirstOrDefaultAsync();
 
         if (employee is null)
             return Result.Failure<EmpolyeeResponse>(error: new Error("No Employee Found", "no employee found with this Iqama", 400));
@@ -269,6 +269,7 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
     public async Task<Result<IEnumerable<EmpolyeeResponse>>> Filter(EmployeeFilter filter)
     {
         var query = dbcontext.Employees
+            .Where(e => e.RiderDetails == null)
             .Include(e => e.Housing)
             .AsQueryable();
 
@@ -361,6 +362,7 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
     {
 
         var query = dbcontext.Employees
+            .Where(e => e.RiderDetails == null)
             .Include(e => e.Housing)
             .AsQueryable();
 
@@ -456,7 +458,7 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
 
         keyword = keyword.ToLower();
 
-        var query = dbcontext.Employees
+        var query = dbcontext.Employees.Where(e => e.RiderDetails == null)
             .Include(e => e.Housing)
             .Where(e =>
                 e.NameAR.ToLower().Contains(keyword) ||
@@ -690,9 +692,20 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
         );
     }
 
+    public async Task<Result<IEnumerable<DeletedEmployees>>> GetAlldeletedEmployee()
+    {
+        var employees = await dbcontext.DeletedEmployees.AsNoTracking().ToListAsync();
 
+        if (employees.Count == 0)
+            return Result.Failure<IEnumerable<DeletedEmployees>>(
+                new Error("No Deleted Employees Found", "no deleted employees", 400)
+            );
 
+        return Result.Success<IEnumerable<DeletedEmployees>>(employees);
+    }
 }
+
+
 
 public record TempEmployeeStatusChangeResponse(
     int Id,

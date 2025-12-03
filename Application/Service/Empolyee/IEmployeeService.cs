@@ -2,6 +2,7 @@
 using Application.Contracts.Employees;
 using Application.Contracts.Roles;
 using Application.Contracts.Users;
+using Domain.Entities;
 using System;
 using System.Collections.Generic;
 using System.Text;
@@ -11,6 +12,7 @@ namespace Application.Service.Empolyee;
 public interface IEmployeeService
 {
     Task<Result<IEnumerable<EmpolyeeResponse>>>GetAllEmployee();
+    Task<Result<IEnumerable<DeletedEmployees>>>GetAlldeletedEmployee();
     Task<Result<IEnumerable<EmpolyeeResponse>>>Get(int IqamaNo);
     Task<Result<EmpolyeeResponse>> CreateAsync(EmpolyeeRequest Request);
     Task<Result<EmpolyeeResponse>> UpdateAsync(int IqamaNo, UEmpolyeeRequest Request);
