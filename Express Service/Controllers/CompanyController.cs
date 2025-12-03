@@ -39,7 +39,7 @@ public class CompanyController(ICompanyService service) : ControllerBase
             response.ToProblem();
     }
 
-    [HttpGet("employees")]
+    [HttpGet("")]
     public async Task<IActionResult> GetAllEmployee()
     {
         var response = await service.GetAllEmployee();

@@ -139,7 +139,9 @@ public class ApplicationDbcontext(DbContextOptions<ApplicationDbcontext> options
         //.HasOne(ed => ed.Employee)
         //.WithOne(r => r.EmployeeDocuments)
         //.HasForeignKey(ed => ed.EmployeeIqamaNo);
-
+        modelBuilder.Entity<RiderShiftSubstitution>()
+    .Property(x => x.EndDate)
+    .HasDefaultValueSql("GETUTCDATE()");
         modelBuilder.Entity<Employees>()
         .Property(x => x.DateOfBirth)
         .HasConversion(

@@ -4,6 +4,7 @@ using Domain;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Domain.Migrations
 {
     [DbContext(typeof(ApplicationDbcontext))]
-    partial class ApplicationDbcontextModelSnapshot : ModelSnapshot
+    [Migration("20251203122537_intitnti")]
+    partial class intitnti
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -169,7 +172,7 @@ namespace Domain.Migrations
                             IsDisable = false,
                             LockoutEnabled = false,
                             NormalizedUserName = "ADMIN",
-                            PasswordHash = "AQAAAAIAAYagAAAAEEkH8cY3D76gmouRUWAeRGYneTrEXJc9wycYlAph8qvFP4JMKVPGKtlHLSmr/2a1YA==",
+                            PasswordHash = "AQAAAAIAAYagAAAAEDEKpF1/1YNBIwX/2h3lpe+9Xi6Inllf/f528LVesDWt0xkuIo3cXO+SMfMSDW+cag==",
                             PhoneNumberConfirmed = false,
                             SecurityStamp = "9FABB58491024B7BB140E4D6658B5BDA",
                             TwoFactorEnabled = false,
@@ -186,7 +189,7 @@ namespace Domain.Migrations
                             IsDisable = false,
                             LockoutEnabled = false,
                             NormalizedUserName = "MASTER",
-                            PasswordHash = "AQAAAAIAAYagAAAAEKTZdzjYQMLzgTGf389LMUOLsQjFA2VKbU1r8JK8PUTb/J5LgUsXzkSnGynBJo4OpQ==",
+                            PasswordHash = "AQAAAAIAAYagAAAAEMIea1YkOg27oCVSn5NMW5rfBe25HtAgey4EM2bSaTrrh+MKgDN/DHiow7JajyBOEQ==",
                             PhoneNumberConfirmed = false,
                             SecurityStamp = "9FABB58491024B7BB140E4D6658B5BDA",
                             TwoFactorEnabled = false,
@@ -647,11 +650,7 @@ namespace Domain.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("int");
 
-                    b.Property<int>("ActualRiderWorkingId")
-                        .HasColumnType("int");
-
                     b.Property<string>("CreatedBy")
-                        .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
@@ -671,9 +670,6 @@ namespace Domain.Migrations
                     b.Property<DateTime>("StartDate")
                         .HasColumnType("datetime2");
 
-                    b.Property<int>("SubstituteRiderId")
-                        .HasColumnType("int");
-
                     b.Property<int>("SubstituteWorkingId")
                         .HasMaxLength(50)
                         .HasColumnType("int");
@@ -681,8 +677,6 @@ namespace Domain.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("ActualRiderId");
-
-                    b.HasIndex("SubstituteRiderId");
 
                     b.ToTable("RiderShiftSubstitutions");
                 });
@@ -1321,15 +1315,7 @@ namespace Domain.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.HasOne("Domain.Entities.RiderDetails", "SubstituteRider")
-                        .WithMany()
-                        .HasForeignKey("SubstituteRiderId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
                     b.Navigation("ActualRider");
-
-                    b.Navigation("SubstituteRider");
                 });
 
             modelBuilder.Entity("Domain.Entities.RiderVehicleStatus", b =>

@@ -1,8 +1,8 @@
-﻿using System;
+﻿using Domain.Entities;
+using System;
 using System.Collections.Generic;
 using System.Text;
 
-namespace Application.Contracts.Employees;
 
 public record CompanyResponse
 (

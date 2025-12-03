@@ -7,13 +7,16 @@ namespace Domain.Entities;
 public class RiderShiftSubstitution
 {
     public int Id { get; set; }
-    public int ActualRiderId { get; set; } //the one who is working
-    public int SubstituteWorkingId { get; set; } //usied to work
-    public string? Reason { get; set; } = string.Empty;  // "Sick", "Leave", "Cover
-    public DateTime StartDate { get; set; } = DateTime.UtcNow;
-    public string? CreatedBy { get; set; }
-    public bool IsActive { get; set; } = true;
+    public int ActualRiderId { get; set; }
+    public int ActualRiderWorkingId { get; set; } // ✅ ADD THIS
+    public int SubstituteRiderId { get; set; } // ✅ ADD THIS
+    public int SubstituteWorkingId { get; set; }
+    public DateTime StartDate { get; set; }
     public DateTime? EndDate { get; set; }
-    public RiderDetails ActualRider { get; set; } = default!;
+    public string? Reason { get; set; }
+    public string CreatedBy { get; set; }
+    public bool IsActive { get; set; }
 
+    public RiderDetails ActualRider { get; set; }
+    public RiderDetails SubstituteRider { get; set; } // ✅ ADD THIS navigation
 }

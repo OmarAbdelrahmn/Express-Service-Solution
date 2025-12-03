@@ -151,8 +151,8 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
         if (request.Sponsor is not null)
             employee.Sponsor = request.Sponsor;
 
-        if (request.SponserNo.HasValue)
-            employee.SponsorNo = request.SponserNo.Value;
+        if (request.SponsorNo.HasValue)
+            employee.SponsorNo = request.SponsorNo.Value;
 
         if (request.JobTitle is not null)
             employee.JobTitle = request.JobTitle;
@@ -515,7 +515,7 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
             var statusChange = new TempEmployeeStatusChange
             {
                 EmployeeIqamaNo = iqamaNo,
-                Action = "Enable",
+                Action = "enable",
                 Reason = reason,
                 RequestedBy = requestedBy,
                 RequestedAt = DateTime.Now,
@@ -607,7 +607,7 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
                     new Error("InvalidResolution", "Resolution must be 'Approved' or 'Rejected'", 400));
 
             var statusChanges = await dbcontext.TempEmployeeStatusChanges
-                .Where(t => request.IqamaNo.ToString().Contains(t.EmployeeIqamaNo.ToString()) && !t.IsResolved)
+                .Where(t => request.IqamaNo == t.EmployeeIqamaNo && !t.IsResolved)
                 .Include(t => t.Employee)
                 .SingleOrDefaultAsync();
 
@@ -619,61 +619,67 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
             {
                 if (request.Resolution == "Approved")
                 {
-                    var Employee = await dbcontext.Employees
+                    var employee = await dbcontext.Employees
                         .FirstOrDefaultAsync(u => u.IqamaNo == statusChanges.EmployeeIqamaNo);
 
-                    if (Employee != null)
+                    if (employee == null)
                     {
-                        if (statusChanges.Action == "Enable")
-                        {
-                            Employee.Status = "Enable";
-                        }
-                        else if (statusChanges.Action == "Disable")
-                        {
-                            Employee.Status = "Disable";
-                        }
+                        return Result.Failure(new Error(
+                            "not_found",
+                            $"Warning: No Employee found for {statusChanges.EmployeeIqamaNo}",
+                            404
+                        ));
+                    }
 
-                        dbcontext.Employees.Update(Employee);
-                    }
-                    else
-                    {
-                        Result.Failure(new Error("not found",$"Warning: No Employee found for  {statusChanges.EmployeeIqamaNo}",404));
-                    }
+                    employee.Status = statusChanges.Action == "enable" ? "enable" : "disable";
+                    dbcontext.Employees.Update(employee);
+
+                    statusChanges.IsResolved = true;
+                    statusChanges.Resolution = request.Resolution;   // "Approved" or "Rejected"
+                    statusChanges.ResolvedBy = request.ResolvedBy;
+                    statusChanges.ResolvedAt = DateTime.Now;
+
+                    await dbcontext.SaveChangesAsync();
+                    await transaction.CommitAsync();
+
+                    return Result.Success();
                 }
                 else
                 {
-                    Result.Success();
+                    statusChanges.AdminNotes = request.AdminNot ?? "Request was rejected";
+                    // Always update statusChanges
+                    statusChanges.IsResolved = true;
+                    statusChanges.Resolution = request.Resolution;   // "Approved" or "Rejected"
+                    statusChanges.ResolvedBy = request.ResolvedBy;
+                    statusChanges.ResolvedAt = DateTime.Now;
 
+                    await dbcontext.SaveChangesAsync();
+                    await transaction.CommitAsync();
+
+                    return Result.Success();
                 }
 
-                statusChanges.IsResolved = true;
-                statusChanges.Resolution = request.Resolution;
-                statusChanges.ResolvedBy = request.ResolvedBy;
-                statusChanges.ResolvedAt = DateTime.Now;
-                statusChanges.AdminNotes = request.AdminNot;
-
+                
             }
             catch (Exception ex)
             {
-                Result.Failure(new Error("Somthing wrong", $"somthing wrong ${ex}", 404));
-
+                await transaction.RollbackAsync();
+                return Result.Failure(new Error(
+                    "error",
+                    $"Something went wrong: {ex.Message}",
+                    500
+                ));
             }
-
-
-            await dbcontext.SaveChangesAsync();
-            await transaction.CommitAsync();
-
-
-            return Result.Success();
         }
+
         catch (Exception ex)
         {
             await transaction.RollbackAsync();
             return Result.Failure<BulkResolutionResponse>(
                 new Error("ResolveError", $"Failed to resolve status changes: {ex.Message}", 500));
         }
-    }
-
+        }
+        
     private TempEmployeeStatusChangeResponse MapToResponse(TempEmployeeStatusChange statusChange)
     {
         return new TempEmployeeStatusChangeResponse(

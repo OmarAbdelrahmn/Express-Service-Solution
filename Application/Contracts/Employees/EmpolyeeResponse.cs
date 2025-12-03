@@ -24,23 +24,22 @@ public record EmpolyeeResponse(
     DateTime CreatedAt
     );
 public record EmpolyeeRequest(
-    int? IqamaNo,
+    int IqamaNo,
     DateOnly? IqamaEndM,
     DateOnly? IqamaEndH,
-    string? PassportNo,
+    string PassportNo,
     DateOnly? PassportEnd,
-    string? Sponsor,
-    int? SponserNo,
-    string? JobTitle,
-    string? NameAR,
-    string? NameEN,
-    string? Country,
-    string? Phone,
+    string Sponsor,
+    int SponsorNo,
+    string JobTitle,
+    string NameAR,
+    string NameEN,
+    string Country,
+    string Phone,
     DateOnly? DateOfBirth,
-    string? Status,
-    string? IBAN,
-    bool? INKSA,
-    DateTime? CreatedAt
+    string Status,
+    string IBAN,
+    bool INKSA
     );
 public record UEmpolyeeRequest(
     DateOnly? IqamaEndM,
@@ -48,7 +47,7 @@ public record UEmpolyeeRequest(
     string? PassportNo,
     DateOnly? PassportEnd,
     string? Sponsor,
-    int? SponserNo,
+    int? SponsorNo,
     string? JobTitle,
     string? NameAR,
     string? NameEN,
@@ -66,7 +65,7 @@ public record RiderResponse(
     string PassportNo,
     DateOnly PassportEnd,
     string Sponsor,
-    int SponserNo,
+    int SponsorNo,
     string JobTitle,
     string NameAR,
     string NameEN,

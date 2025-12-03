@@ -362,7 +362,7 @@ public class RiderService(ApplicationDbcontext dbcontext) : IRiderService
             PassportNo: employee.PassportNo,
             PassportEnd: employee.PassportEnd ?? default,
             Sponsor: employee.Sponsor,
-            SponserNo: employee.SponsorNo,
+            SponsorNo: employee.SponsorNo,
             JobTitle: employee.JobTitle,
             NameAR: employee.NameAR,
             NameEN: employee.NameEN,

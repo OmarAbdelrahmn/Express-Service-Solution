@@ -18,7 +18,7 @@ public interface IRiderSub
 
 
 public record StartSubstitutionRequest(
-    int ActualRiderId,
+    int ActualRiderWorkingId,
     int SubstituteWorkingId,
     string Reason,
     string? CreatedBy
@@ -28,6 +28,7 @@ public record RiderSubstitutionResponse(
     int Id,
     string ActualRiderName,
     int ActualRiderWorkingId,
+    string SubstituteRiderName,  // ✅ Add this
     int SubstituteWorkingId,
     DateTime StartDate,
     DateTime? EndDate,

@@ -55,7 +55,7 @@ public class CompanyService(ApplicationDbcontext dbcontext) : ICompanyService
 
         var companyResponses = companies.Adapt<IEnumerable<CompanyResponse>>();
 
-        return Result.Success(companyResponses); ;
+        return Result.Success(companyResponses); 
     }
 
     public async Task<Result<IEnumerable<CompanyResponse>>> GetAllEmployee()
