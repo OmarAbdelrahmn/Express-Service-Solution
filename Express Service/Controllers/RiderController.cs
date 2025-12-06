@@ -38,10 +38,10 @@ public class RiderController(IRiderService service) : ControllerBase
             ? Ok(result.Value) : result.ToProblem();
     }
 
-    [HttpGet("iqama/{iqamaNo:int}")]
-    public async Task<IActionResult> GetRiderByIqama(int iqamaNo)
+    [HttpGet("iqama/{IqamaNo:long}")]
+    public async Task<IActionResult> GetRiderByIqama(long IqamaNo)
     {
-        var result = await service.Get(iqamaNo);
+        var result = await service.Get(IqamaNo);
         
         return result.IsSuccess
             ? Ok(result.Value) : result.ToProblem();
@@ -56,26 +56,26 @@ public class RiderController(IRiderService service) : ControllerBase
             ? Ok(new Re("Rider Add Successfully")) : result.ToProblem();
     }
 
-    [HttpPut("{iqamaNo:int}")]
-    public async Task<IActionResult> UpdateRider(int iqamaNo, [FromBody] URiderRequest request)
+    [HttpPut("{IqamaNo:long}")]
+    public async Task<IActionResult> UpdateRider(long IqamaNo, [FromBody] URiderRequest request)
     {
-        var result = await service.UpdateAsync(iqamaNo, request);
+        var result = await service.UpdateAsync(IqamaNo, request);
         
         return result.IsSuccess
             ? Ok(result.Value) : result.ToProblem();
     }
 
-    [HttpDelete("{iqamaNo:int}")]
-    public async Task<IActionResult> DeleteRider(int iqamaNo)
+    [HttpDelete("{IqamaNo:long}")]
+    public async Task<IActionResult> DeleteRider(long IqamaNo)
     {
-        var result = await service.DeleteAsync(iqamaNo);
+        var result = await service.DeleteAsync(IqamaNo);
         
         return result.IsSuccess
             ? Ok(new Re("Rider Deleted Successfully")) : result.ToProblem();
     }
 
     [HttpPost("change-working-id")]
-    public async Task<IActionResult> ChangeWorkingId([FromQuery] int oldWorkingId, [FromQuery] int newWorkingId)
+    public async Task<IActionResult> ChangeWorkingId([FromQuery] string oldWorkingId, [FromQuery] string newWorkingId)
     {
         var result = await service.ChangeWorkinId(oldWorkingId, newWorkingId);
         
@@ -83,10 +83,10 @@ public class RiderController(IRiderService service) : ControllerBase
             ? Ok(new Re("Working ID Changed Successfully")) : result.ToProblem();
     }
 
-    [HttpPost("{iqamaNo:int}/add-employee")]
-    public async Task<IActionResult> AddETOR(int iqamaNo, [FromBody] EMTOR request)
+    [HttpPost("{IqamaNo:long}/add-employee")]
+    public async Task<IActionResult> AddETOR(long IqamaNo, [FromBody] EMTOR request)
     {
-        var result = await service.AddETOR(iqamaNo, request);
+        var result = await service.AddETOR(IqamaNo, request);
         
         return result.IsSuccess
             ? Ok(new Re("Added Successfully")) : result.ToProblem();

@@ -7,7 +7,7 @@ namespace Domain.Entities;
 public class RiderShift
 { 
     public int RiderId { get; set; }
-    public int WorkingId { get; set; } 
+    public string WorkingId { get; set; } 
     public DateOnly ShiftDate { get; set; }
     public int AcceptedDailyOrders { get; set; }
     public int RejectedDailyOrders { get; set; }

@@ -8,9 +8,9 @@ public class RiderShiftSubstitution
 {
     public int Id { get; set; }
     public int ActualRiderId { get; set; }
-    public int ActualRiderWorkingId { get; set; } // ✅ ADD THIS
+    public string ActualRiderWorkingId { get; set; } // ✅ ADD THIS
     public int SubstituteRiderId { get; set; } // ✅ ADD THIS
-    public int SubstituteWorkingId { get; set; }
+    public string SubstituteWorkingId { get; set; }
     public DateTime StartDate { get; set; }
     public DateTime? EndDate { get; set; }
     public string? Reason { get; set; }

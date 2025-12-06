@@ -8,9 +8,9 @@ namespace Application.Service.Riders;
 public interface IRiderSub 
 {
     Task<Result<RiderSubstitutionResponse>> StartSubstitution(StartSubstitutionRequest request, CancellationToken cancellationToken = default);
-    Task<Result<RiderSubstitutionResponse>> StopSubstitutionByWorkingId(int workingId, CancellationToken cancellationToken = default);
+    Task<Result<RiderSubstitutionResponse>> StopSubstitutionByWorkingId(string WorkingId, CancellationToken cancellationToken = default);
     Task<Result<IEnumerable<RiderSubstitutionResponse>>> GetActiveSubstitutions(CancellationToken cancellationToken = default);
-    Task<Result<IEnumerable<RiderSubstitutionResponse>>> GetSubstitutionHistory(int riderId, CancellationToken cancellationToken = default);
+    Task<Result<IEnumerable<RiderSubstitutionResponse>>> GetSubstitutionHistory(string riderId, CancellationToken cancellationToken = default);
     Task<Result<IEnumerable<RiderSubstitutionResponse>>> GetAllSubstitutions(CancellationToken cancellationToken = default);
     Task<Result<IEnumerable<RiderSubstitutionResponse>>> GetInactiveSubstitutions(CancellationToken cancellationToken = default);
 
@@ -18,8 +18,8 @@ public interface IRiderSub
 
 
 public record StartSubstitutionRequest(
-    int ActualRiderWorkingId,
-    int SubstituteWorkingId,
+    string ActualRiderWorkingId,
+    string SubstituteWorkingId,
     string Reason,
     string? CreatedBy
 );
@@ -27,9 +27,9 @@ public record StartSubstitutionRequest(
 public record RiderSubstitutionResponse(
     int Id,
     string ActualRiderName,
-    int ActualRiderWorkingId,
+    string ActualRiderWorkingId,
     string SubstituteRiderName,  // ✅ Add this
-    int SubstituteWorkingId,
+    string SubstituteWorkingId,
     DateTime StartDate,
     DateTime? EndDate,
     string Reason,

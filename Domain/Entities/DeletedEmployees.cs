@@ -7,7 +7,7 @@ namespace Domain.Entities;
 public class DeletedEmployees
 {
     public int Id { get; set; }
-    public int IqamaNo { get; set; }
+    public long IqamaNo { get; set; }
     public DateOnly IqamaEndM { get; set; }
     public DateOnly IqamaEndH { get; set; }
     public string? PassportNo { get; set; } = string.Empty;
@@ -24,7 +24,7 @@ public class DeletedEmployees
     public DateTime CreatedAt { get; set; } = DateTime.Now;
     public bool INKSA { get; set; } = true;
     public int? HousingId { get; set; }
-    public int? WorkingId { get; set; }
+    public string? WorkingId { get; set; }
     public string? TshirtSize { get; set; }
     public string? LicenseNumber { get; set; }
     public int? CompanyId { get; set; }

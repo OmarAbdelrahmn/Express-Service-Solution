@@ -10,10 +10,13 @@ builder.Services.AddControllers();
 builder.Services.AddOpenApi();
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("AllowLocalhost3000",
+    options.AddPolicy("AllowFrontend",
         policy =>
         {
-            policy.WithOrigins("http://localhost:3000")
+            policy.WithOrigins(
+                      "http://localhost:3000",
+                      "https://fastexp.netlify.app"
+                  )
                   .AllowAnyHeader()
                   .AllowAnyMethod()
                   .AllowCredentials();
@@ -35,7 +38,7 @@ var app = builder.Build();
 
 app.UseHttpsRedirection();
 
-app.UseCors("AllowLocalhost3000");
+app.UseCors("AllowFrontend");
 
 app.UseAuthorization();
 

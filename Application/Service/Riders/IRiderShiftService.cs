@@ -11,25 +11,59 @@ namespace Application.Service.Riders;
 public interface IRiderShiftService
 {
     Task<Result<RiderShiftResponse>> CreateShiftAsync(CreateRiderShiftRequest request, CancellationToken cancellationToken = default);
-    Task<Result<RiderShiftResponse>> GetShiftAsync(int workingId, DateOnly shiftDate, CancellationToken cancellationToken = default);
-    Task<Result<IEnumerable<RiderShiftResponse>>> GetShiftsByRiderAsync(int WorkingId, CancellationToken cancellationToken = default);
+    Task<Result<RiderShiftResponse>> GetShiftAsync(string WorkingId, DateOnly shiftDate, CancellationToken cancellationToken = default);
+    Task<Result<IEnumerable<RiderShiftResponse>>> GetShiftsByRiderAsync(string WorkingId, CancellationToken cancellationToken = default);
     Task<Result<IEnumerable<RiderShiftResponse>>> GetShiftsByDateAsync(DateOnly shiftDate, CancellationToken cancellationToken = default);
     Task<Result<RiderShiftResponse>> UpdateShiftAsync(UpdateRiderShiftRequest request, CancellationToken cancellationToken = default);
-    Task<Result> DeleteShiftAsync(int workingId, DateOnly shiftDate, CancellationToken cancellationToken = default);
+    Task<Result> DeleteShiftAsync(string WorkingId, DateOnly shiftDate, CancellationToken cancellationToken = default);
     Task<Result<IEnumerable<RiderShiftResponse>>> GetShiftsByDateRangeAsync(DateOnly startDate, DateOnly endDate, CancellationToken cancellationToken = default);
     Task<Result<BulkDeleteResult>> DeleteShiftsByDateAsync(DateOnly shiftDate, CancellationToken cancellationToken = default);
     Task<Result<BulkDeleteResult>> DeleteShiftsByDateRangeAsync(DateOnly startDate, DateOnly endDate, CancellationToken cancellationToken = default);
-    Task<Result<BulkDeleteResult>> DeleteShiftsByRiderAndDateRangeAsync(int workingId, DateOnly startDate, DateOnly endDate, CancellationToken cancellationToken = default);
+    Task<Result<BulkDeleteResult>> DeleteShiftsByRiderAndDateRangeAsync(string WorkingId, DateOnly startDate, DateOnly endDate, CancellationToken cancellationToken = default);
     Task<Result<BulkComparisonResult>> CreateShiftComparisonsAsync(Stream excelStream,DateOnly shiftDate,int rejectionThreshold = 2, CancellationToken cancellationToken = default);
     Task<Result<BulkImportResult>> ImportShiftsFromExcelAsync(Stream excelStream,DateOnly shiftDate,int rejectionThreshold = 2,CancellationToken cancellationToken = default);
     Task<Result<ResolutionResult>> ResolveShiftComparisonsAsync(ResolveComparisonsRequest request,CancellationToken cancellationToken = default);
     Task<Result<BulkComparisonResult>> GetPendingComparisonsAsync(DateOnly shiftDate,CancellationToken cancellationToken = default);
+    // Add these methods to IRiderShiftService interface
 
+    Task<Result<IEnumerable<AcceptedOrdersResponse>>> GetAcceptedOrdersByDateAsync(
+        DateOnly shiftDate,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<IEnumerable<AcceptedOrdersResponse>>> GetPreviousDayAcceptedOrdersAsync(
+        CancellationToken cancellationToken = default);
+
+    Task<Result<AcceptedOrdersResponse>> GetAcceptedOrdersByRiderAndDateAsync(
+        string workingId,
+        DateOnly shiftDate,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<AcceptedOrdersResponse>> GetPreviousDayAcceptedOrdersByRiderAsync(
+        string workingId,
+        CancellationToken cancellationToken = default);
+
+    // Response DTO
+   
 }
-
+public record AcceptedOrdersResponse(
+       int RiderId,
+       string WorkingId,
+       string RiderName,
+       string CompanyName,
+       DateOnly ShiftDate,
+       int AcceptedDailyOrders,
+       int RejectedDailyOrders,
+       int RealRejectedDailyOrders,
+       int StackedDeliveries,
+       float WorkingHours,
+       string ShiftStatus,
+       bool HasRejectionProblem,
+       decimal PenaltyAmount,
+       DateTime CreatedAt
+   );
 
 public record CreateRiderShiftRequest(
-    int WorkingId,  
+    string WorkingId,  
     DateOnly ShiftDate,
     int AcceptedDailyOrders,
     int RejectedDailyOrders,
@@ -39,7 +73,7 @@ public record CreateRiderShiftRequest(
 );
 
 public record UpdateRiderShiftRequest(
-    int WorkingId, 
+    string WorkingId, 
     DateOnly ShiftDate,
     int? AcceptedDailyOrders,
     int? RejectedDailyOrders,
@@ -50,7 +84,7 @@ public record UpdateRiderShiftRequest(
 
 public record RiderShiftResponse(
     int RiderId,
-    int WorkingId,
+    string WorkingId,
     DateOnly ShiftDate,
     int AcceptedDailyOrders,
     int RejectedDailyOrders,
@@ -65,7 +99,7 @@ public record RiderShiftResponse(
     decimal PenaltyAmount,
     DateTime CreatedAt,
     bool IsSubstitution,
-    int? OriginalWorkingId
+    string? OriginalWorkingId
 );
 
 
@@ -79,7 +113,7 @@ public record BulkDeleteResult(
 public record MonthlyRiderReport(
     int RiderId,
     string RiderName,
-    int WorkingId,  
+    string WorkingId,  
     int Year,
     int Month,
 
@@ -124,7 +158,7 @@ public record CompanyPeriodBreakdown(
 public record YearlyRiderReport(
     int RiderId,
     string RiderName,
-    int WorkingId,  
+    string WorkingId,  
     int Year,
 
     int TotalWorkingDays,
@@ -182,9 +216,9 @@ public record MonthlyBreakdown(
 );
 public record DateRangeReport(
     int RiderId,
-    int IqamaNo,
+    long IqamaNo,
     string RiderName,
-    int WorkingId,  
+    string WorkingId,  
     DateOnly StartDate,
     DateOnly EndDate,
 
@@ -231,7 +265,7 @@ public record CompanyPerformanceReport(
 public record ProblemShiftDetail(
     int RiderId,
     string RiderName,
-    int WorkingId,  
+    string WorkingId,  
     DateOnly ShiftDate,
     string CompanyName,
     int AcceptedOrders,
@@ -246,7 +280,7 @@ public record ProblemShiftDetail(
 public record RiderPerformanceSummary(
     int RiderId,
     string RiderName,
-    int WorkingId,  
+    string WorkingId,  
     int TotalShifts,
     int CompletedShifts,
     int TotalAcceptedOrders,
@@ -256,7 +290,7 @@ public record RiderPerformanceSummary(
 );
 
 public record WorkingIdPeriod(
-    int WorkingId,
+    string WorkingId,
     DateOnly StartDate,
     DateOnly EndDate,
     int ShiftCount

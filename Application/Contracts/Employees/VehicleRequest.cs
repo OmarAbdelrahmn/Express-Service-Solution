@@ -22,7 +22,6 @@ public record VehicleRequest
         string? LicenseImagePath,
         string? ExstraImage,
         string? ExstraImage1,
-        DateTime CreatedAt,
         string Location
     );
 public record UVehicleRequest
@@ -86,7 +85,7 @@ public class VehicleStatusSummary
 }
 public class RiderInfoDto
 {
-    public int EmployeeIqamaNo { get; set; }
+    public long EmployeeIqamaNo { get; set; }
     public string RiderName { get; set; }
     public string RiderNameE { get; set; }
     public DateTime TakenDate { get; set; }
@@ -140,7 +139,7 @@ public class UnavailableVehicleDto
     public string Location { get; set; } = string.Empty; // ADDED
     public DateOnly LicenseExpiryDate { get; set; }
     public string StatusType { get; set; }
-    public int? RiderIqamaNo { get; set; }
+    public long? RiderIqamaNo { get; set; }
     public string RiderName { get; set; }
     public string RiderNameE { get; set; }
     public string Reason { get; set; }
@@ -159,7 +158,7 @@ public class VehicleHistoryDto
     public int ManufactureYear { get; set; }
     public string Manufacturer { get; set; } = string.Empty;
     public string Location { get; set; } = string.Empty; // ADDED
-    public int? EmployeeIqamaNo { get; set; }
+    public long? EmployeeIqamaNo { get; set; }
     public string RiderName { get; set; }
     public string RiderNameE { get; set; }
     public VehicleStatusType StatusType { get; set; }

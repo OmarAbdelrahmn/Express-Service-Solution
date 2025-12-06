@@ -12,8 +12,8 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Domain.Migrations
 {
     [DbContext(typeof(ApplicationDbcontext))]
-    [Migration("20251118143829_andingstatus")]
-    partial class andingstatus
+    [Migration("20251205101413_init")]
+    partial class init
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -172,7 +172,7 @@ namespace Domain.Migrations
                             IsDisable = false,
                             LockoutEnabled = false,
                             NormalizedUserName = "ADMIN",
-                            PasswordHash = "AQAAAAIAAYagAAAAEHRZj8Pt+x3m9Ywsb+scsHhqyoeEgq4FY0Y3Z2pTWmBPoAPivikpY8TaEUQaERStaA==",
+                            PasswordHash = "AQAAAAIAAYagAAAAEJmaWg42o3LN4b53Ugf9Lyx/dpHrMCbetjuC+kOmui/c6ctQMU5JB3j9NXzB6J67yw==",
                             PhoneNumberConfirmed = false,
                             SecurityStamp = "9FABB58491024B7BB140E4D6658B5BDA",
                             TwoFactorEnabled = false,
@@ -189,41 +189,12 @@ namespace Domain.Migrations
                             IsDisable = false,
                             LockoutEnabled = false,
                             NormalizedUserName = "MASTER",
-                            PasswordHash = "AQAAAAIAAYagAAAAED/Qvs0qyM3Z2ZEJbGUqyqfsA5+gxlLr/YOnjCOtoXikId30HKvtzAlAq++kjyrQ4A==",
+                            PasswordHash = "AQAAAAIAAYagAAAAEJVMSrwscEutv0axNqQUZiX8dm3+F6bj55iCGDtfRbC6xDq/mnk99wy2WkJy0oHDYg==",
                             PhoneNumberConfirmed = false,
                             SecurityStamp = "9FABB58491024B7BB140E4D6658B5BDA",
                             TwoFactorEnabled = false,
                             UserName = "Master"
                         });
-                });
-
-            modelBuilder.Entity("Domain.Entities.ArchivedRiderShift", b =>
-                {
-                    b.Property<int>("id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("id"));
-
-                    b.Property<int>("DailyOrders")
-                        .HasColumnType("int");
-
-                    b.Property<int>("RiderId")
-                        .HasColumnType("int");
-
-                    b.Property<DateOnly>("ShiftDate")
-                        .HasColumnType("date");
-
-                    b.Property<string>("ShiftStatus")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<int>("WorkingId")
-                        .HasColumnType("int");
-
-                    b.HasKey("id");
-
-                    b.ToTable("ArchivedRiderShifts");
                 });
 
             modelBuilder.Entity("Domain.Entities.Company", b =>
@@ -304,8 +275,8 @@ namespace Domain.Migrations
                     b.Property<DateOnly>("IqamaEndM")
                         .HasColumnType("date");
 
-                    b.Property<int>("IqamaNo")
-                        .HasColumnType("int");
+                    b.Property<long>("IqamaNo")
+                        .HasColumnType("bigint");
 
                     b.Property<string>("JobTitle")
                         .IsRequired()
@@ -345,8 +316,8 @@ namespace Domain.Migrations
                     b.Property<int?>("VehicleId")
                         .HasColumnType("int");
 
-                    b.Property<int?>("WorkingId")
-                        .HasColumnType("int");
+                    b.Property<string>("WorkingId")
+                        .HasColumnType("nvarchar(max)");
 
                     b.HasKey("Id");
 
@@ -379,9 +350,6 @@ namespace Domain.Migrations
                     b.Property<long>("EmployeeIqamaNo")
                         .HasColumnType("bigint");
 
-                    b.Property<int>("EmployeeIqamaNo1")
-                        .HasColumnType("int");
-
                     b.Property<string>("IqamaImagePath")
                         .HasColumnType("nvarchar(max)");
 
@@ -399,15 +367,16 @@ namespace Domain.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("EmployeeIqamaNo1");
+                    b.HasIndex("EmployeeIqamaNo")
+                        .IsUnique();
 
                     b.ToTable("EmployeeDocuments");
                 });
 
             modelBuilder.Entity("Domain.Entities.Employees", b =>
                 {
-                    b.Property<int>("IqamaNo")
-                        .HasColumnType("int");
+                    b.Property<long>("IqamaNo")
+                        .HasColumnType("bigint");
 
                     b.Property<string>("Country")
                         .IsRequired()
@@ -468,6 +437,9 @@ namespace Domain.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
 
+                    b.Property<int>("SponsorNo")
+                        .HasColumnType("int");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
@@ -501,8 +473,8 @@ namespace Domain.Migrations
                     b.Property<int>("Capacity")
                         .HasColumnType("int");
 
-                    b.Property<int?>("ManagerId")
-                        .HasColumnType("int");
+                    b.Property<long?>("ManagerIqamaNo")
+                        .HasColumnType("bigint");
 
                     b.Property<string>("Name")
                         .IsRequired()
@@ -560,8 +532,8 @@ namespace Domain.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
-                    b.Property<int>("EmployeeIqamaNo")
-                        .HasColumnType("int");
+                    b.Property<long>("EmployeeIqamaNo")
+                        .HasColumnType("bigint");
 
                     b.Property<string>("LicenseNumber")
                         .HasColumnType("nvarchar(max)");
@@ -570,22 +542,18 @@ namespace Domain.Migrations
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("VehicleNumber")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("VehicleNumber1")
                         .HasColumnType("nvarchar(450)");
 
-                    b.Property<int?>("WorkingId")
-                        .HasColumnType("int");
+                    b.Property<string>("WorkingId")
+                        .HasColumnType("nvarchar(max)");
 
                     b.HasKey("Id");
 
                     b.HasIndex("CompanyId");
 
-                    b.HasIndex("EmployeeIqamaNo")
-                        .IsUnique();
-
-                    b.HasIndex("VehicleNumber1");
+                    b.HasIndex("VehicleNumber")
+                        .IsUnique()
+                        .HasFilter("[VehicleNumber] IS NOT NULL");
 
                     b.ToTable("RiderDetails");
                 });
@@ -598,7 +566,10 @@ namespace Domain.Migrations
                     b.Property<DateOnly>("ShiftDate")
                         .HasColumnType("date");
 
-                    b.Property<int>("WorkingId")
+                    b.Property<string>("WorkingId")
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<int>("AcceptedDailyOrders")
                         .HasColumnType("int");
 
                     b.Property<int>("CompanyId")
@@ -607,12 +578,21 @@ namespace Domain.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
-                    b.Property<int>("DailyOrders")
+                    b.Property<int>("RealRejectedDailyOrders")
+                        .HasColumnType("int");
+
+                    b.Property<int>("RejectedDailyOrders")
                         .HasColumnType("int");
 
                     b.Property<string>("ShiftStatus")
                         .IsRequired()
                         .HasColumnType("nvarchar(450)");
+
+                    b.Property<int>("StackedDeliveries")
+                        .HasColumnType("int");
+
+                    b.Property<float>("WorkingHours")
+                        .HasColumnType("real");
 
                     b.HasKey("RiderId", "ShiftDate", "WorkingId");
 
@@ -637,25 +617,37 @@ namespace Domain.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
+                    b.Property<int>("ActualRiderId")
+                        .HasMaxLength(50)
+                        .HasColumnType("int");
+
+                    b.Property<string>("ActualRiderWorkingId")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("CreatedBy")
+                        .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
-                    b.Property<string>("OriginalWorkingId")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
+                    b.Property<DateTime>("EndDate")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2")
+                        .HasDefaultValueSql("GETUTCDATE()");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
 
                     b.Property<string>("Reason")
                         .IsRequired()
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
 
-                    b.Property<DateOnly>("ShiftDate")
-                        .HasColumnType("date");
+                    b.Property<DateTime>("StartDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("SubstituteRiderId")
+                        .HasColumnType("int");
 
                     b.Property<string>("SubstituteWorkingId")
                         .IsRequired()
@@ -663,6 +655,10 @@ namespace Domain.Migrations
                         .HasColumnType("nvarchar(50)");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("ActualRiderId");
+
+                    b.HasIndex("SubstituteRiderId");
 
                     b.ToTable("RiderShiftSubstitutions");
                 });
@@ -675,8 +671,8 @@ namespace Domain.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
-                    b.Property<int?>("EmployeeIqamaNo")
-                        .HasColumnType("int");
+                    b.Property<long?>("EmployeeIqamaNo")
+                        .HasColumnType("bigint");
 
                     b.Property<bool>("IsActive")
                         .HasColumnType("bit");
@@ -694,17 +690,355 @@ namespace Domain.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(450)");
 
-                    b.Property<string>("VehicleNumber1")
+                    b.HasKey("Id");
+
+                    b.HasIndex("VehicleNumber", "IsActive");
+
+                    b.ToTable("RiderVehicleStatus");
+                });
+
+            modelBuilder.Entity("Domain.Entities.TempEmployeeStatusChange", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<string>("AdminNotes")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<long>("EmployeeIqamaNo")
+                        .HasColumnType("bigint");
+
+                    b.Property<bool>("IsResolved")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTime>("RequestedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("RequestedBy")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("Resolution")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("ResolvedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("ResolvedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EmployeeIqamaNo");
+
+                    b.HasIndex("IsResolved");
+
+                    b.HasIndex("RequestedAt");
+
+                    b.ToTable("TempEmployeeStatusChanges");
+                });
+
+            modelBuilder.Entity("Domain.Entities.TempEmployeeUpdate", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<long>("IqamaNo")
+                        .HasColumnType("bigint");
+
+                    b.Property<bool>("IsNewEmployee")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsResolved")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("NewCountry")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateOnly?>("NewDateOfBirth")
+                        .HasColumnType("date");
+
+                    b.Property<string>("NewIBAN")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool?>("NewINKSA")
+                        .HasColumnType("bit");
+
+                    b.Property<DateOnly?>("NewIqamaEndH")
+                        .HasColumnType("date");
+
+                    b.Property<DateOnly?>("NewIqamaEndM")
+                        .HasColumnType("date");
+
+                    b.Property<string>("NewJobTitle")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("NewNameAR")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("NewNameEN")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateOnly?>("NewPassportEnd")
+                        .HasColumnType("date");
+
+                    b.Property<string>("NewPassportNo")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("NewPhone")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("NewSponsor")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int?>("NewSponsorNo")
+                        .HasColumnType("int");
+
+                    b.Property<string>("NewStatus")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("OldCountry")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateOnly?>("OldDateOfBirth")
+                        .HasColumnType("date");
+
+                    b.Property<string>("OldIBAN")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool?>("OldINKSA")
+                        .HasColumnType("bit");
+
+                    b.Property<DateOnly?>("OldIqamaEndH")
+                        .HasColumnType("date");
+
+                    b.Property<DateOnly?>("OldIqamaEndM")
+                        .HasColumnType("date");
+
+                    b.Property<string>("OldJobTitle")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("OldNameAR")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("OldNameEN")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateOnly?>("OldPassportEnd")
+                        .HasColumnType("date");
+
+                    b.Property<string>("OldPassportNo")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("OldPhone")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("OldSponsor")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int?>("OldSponsorNo")
+                        .HasColumnType("int");
+
+                    b.Property<string>("OldStatus")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Resolution")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("ResolvedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("ResolvedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime>("UploadedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UploadedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IqamaNo");
+
+                    b.HasIndex("IsResolved");
+
+                    b.HasIndex("UploadedAt");
+
+                    b.ToTable("TempEmployeeUpdates");
+                });
+
+            modelBuilder.Entity("Domain.Entities.TempRiderShiftComparison", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("CompanyId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("IsResolved")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsSubstitution")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false);
+
+                    b.Property<int>("NewAcceptedDailyOrders")
+                        .HasColumnType("int");
+
+                    b.Property<int>("NewRealRejectedDailyOrders")
+                        .HasColumnType("int");
+
+                    b.Property<int>("NewRejectedDailyOrders")
+                        .HasColumnType("int");
+
+                    b.Property<string>("NewShiftStatus")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<int>("NewStackedDeliveries")
+                        .HasColumnType("int");
+
+                    b.Property<float>("NewWorkingHours")
+                        .HasColumnType("real");
+
+                    b.Property<int?>("OldAcceptedDailyOrders")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("OldCreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int?>("OldRealRejectedDailyOrders")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("OldRejectedDailyOrders")
+                        .HasColumnType("int");
+
+                    b.Property<string>("OldShiftStatus")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<int?>("OldStackedDeliveries")
+                        .HasColumnType("int");
+
+                    b.Property<float?>("OldWorkingHours")
+                        .HasColumnType("real");
+
+                    b.Property<string>("OriginalRiderWorkingId")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("RiderId")
+                        .HasColumnType("int");
+
+                    b.Property<DateOnly>("ShiftDate")
+                        .HasColumnType("date");
+
+                    b.Property<DateTime>("UploadedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("WorkingId")
                         .IsRequired()
                         .HasColumnType("nvarchar(450)");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("VehicleNumber1");
+                    b.HasIndex("CompanyId");
 
-                    b.HasIndex("VehicleNumber", "IsActive");
+                    b.HasIndex("IsResolved");
 
-                    b.ToTable("RiderVehicleStatus");
+                    b.HasIndex("IsSubstitution");
+
+                    b.HasIndex("ShiftDate", "WorkingId");
+
+                    b.HasIndex("RiderId", "WorkingId", "ShiftDate");
+
+                    b.ToTable("TempRiderShiftComparisons");
+                });
+
+            modelBuilder.Entity("Domain.Entities.TempVehicleOperation", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("AdminNotes")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("IsResolved")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTime>("RequestedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("RequestedBy")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("Resolution")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("ResolvedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("ResolvedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<long>("RiderIqamaNo")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("VehicleNumber")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("VehiclePlateNumber")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<int>("VehicleStatusType")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IsResolved");
+
+                    b.HasIndex("RequestedAt");
+
+                    b.HasIndex("RiderIqamaNo");
+
+                    b.HasIndex("VehicleNumber");
+
+                    b.ToTable("TempVehicleOperations");
                 });
 
             modelBuilder.Entity("Domain.Entities.Vehicle", b =>
@@ -727,9 +1061,34 @@ namespace Domain.Migrations
                     b.Property<string>("LicenseImagePath")
                         .HasColumnType("nvarchar(max)");
 
-                    b.Property<string>("LicenseNumber")
+                    b.Property<string>("Location")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("ManufactureYear")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Manufacturer")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("OwnerId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("OwnerName")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("PlateNumberA")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("PlateNumberE")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("SerialNumber")
+                        .HasColumnType("int");
 
                     b.Property<string>("VehicleImagePath")
                         .HasColumnType("nvarchar(max)");
@@ -739,6 +1098,10 @@ namespace Domain.Migrations
                         .HasColumnType("nvarchar(max)");
 
                     b.HasKey("VehicleNumber");
+
+                    b.HasIndex("PlateNumberA");
+
+                    b.HasIndex("SerialNumber");
 
                     b.HasIndex("VehicleNumber");
 
@@ -866,8 +1229,8 @@ namespace Domain.Migrations
             modelBuilder.Entity("Domain.Entities.EmployeeDocuments", b =>
                 {
                     b.HasOne("Domain.Entities.Employees", "Employee")
-                        .WithMany()
-                        .HasForeignKey("EmployeeIqamaNo1")
+                        .WithOne("EmployeeDocuments")
+                        .HasForeignKey("Domain.Entities.EmployeeDocuments", "EmployeeIqamaNo")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
@@ -898,8 +1261,8 @@ namespace Domain.Migrations
                         .IsRequired();
 
                     b.HasOne("Domain.Entities.Vehicle", "Vehicle")
-                        .WithMany()
-                        .HasForeignKey("VehicleNumber1");
+                        .WithOne("RiderDetails")
+                        .HasForeignKey("Domain.Entities.RiderDetails", "VehicleNumber");
 
                     b.Navigation("Company");
 
@@ -910,22 +1273,110 @@ namespace Domain.Migrations
 
             modelBuilder.Entity("Domain.Entities.RiderShift", b =>
                 {
+                    b.HasOne("Domain.Entities.Company", "Company")
+                        .WithMany()
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.HasOne("Domain.Entities.RiderDetails", "Rider")
                         .WithMany("RiderShifts")
                         .HasForeignKey("RiderId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.Navigation("Company");
+
                     b.Navigation("Rider");
+                });
+
+            modelBuilder.Entity("Domain.Entities.RiderShiftSubstitution", b =>
+                {
+                    b.HasOne("Domain.Entities.RiderDetails", "ActualRider")
+                        .WithMany()
+                        .HasForeignKey("ActualRiderId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Domain.Entities.RiderDetails", "SubstituteRider")
+                        .WithMany()
+                        .HasForeignKey("SubstituteRiderId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("ActualRider");
+
+                    b.Navigation("SubstituteRider");
                 });
 
             modelBuilder.Entity("Domain.Entities.RiderVehicleStatus", b =>
                 {
                     b.HasOne("Domain.Entities.Vehicle", "Vehicle")
-                        .WithMany()
-                        .HasForeignKey("VehicleNumber1")
+                        .WithMany("RiderVehicleStatuses")
+                        .HasForeignKey("VehicleNumber")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.Navigation("Vehicle");
+                });
+
+            modelBuilder.Entity("Domain.Entities.TempEmployeeStatusChange", b =>
+                {
+                    b.HasOne("Domain.Entities.Employees", "Employee")
+                        .WithMany()
+                        .HasForeignKey("EmployeeIqamaNo")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Employee");
+                });
+
+            modelBuilder.Entity("Domain.Entities.TempEmployeeUpdate", b =>
+                {
+                    b.HasOne("Domain.Entities.Employees", "Employee")
+                        .WithMany()
+                        .HasForeignKey("IqamaNo")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+
+                    b.Navigation("Employee");
+                });
+
+            modelBuilder.Entity("Domain.Entities.TempRiderShiftComparison", b =>
+                {
+                    b.HasOne("Domain.Entities.Company", "Company")
+                        .WithMany()
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Domain.Entities.RiderDetails", "Rider")
+                        .WithMany()
+                        .HasForeignKey("RiderId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Company");
+
+                    b.Navigation("Rider");
+                });
+
+            modelBuilder.Entity("Domain.Entities.TempVehicleOperation", b =>
+                {
+                    b.HasOne("Domain.Entities.RiderDetails", "Rider")
+                        .WithMany()
+                        .HasForeignKey("RiderIqamaNo")
+                        .HasPrincipalKey("EmployeeIqamaNo")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Domain.Entities.Vehicle", "Vehicle")
+                        .WithMany()
+                        .HasForeignKey("VehicleNumber")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Rider");
 
                     b.Navigation("Vehicle");
                 });
@@ -983,6 +1434,8 @@ namespace Domain.Migrations
 
             modelBuilder.Entity("Domain.Entities.Employees", b =>
                 {
+                    b.Navigation("EmployeeDocuments");
+
                     b.Navigation("RiderDetails");
                 });
 
@@ -994,6 +1447,13 @@ namespace Domain.Migrations
             modelBuilder.Entity("Domain.Entities.RiderDetails", b =>
                 {
                     b.Navigation("RiderShifts");
+                });
+
+            modelBuilder.Entity("Domain.Entities.Vehicle", b =>
+                {
+                    b.Navigation("RiderDetails");
+
+                    b.Navigation("RiderVehicleStatuses");
                 });
 #pragma warning restore 612, 618
         }

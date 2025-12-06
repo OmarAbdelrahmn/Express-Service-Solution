@@ -13,18 +13,18 @@ public interface IEmployeeService
 {
     Task<Result<IEnumerable<EmpolyeeResponse>>>GetAllEmployee();
     Task<Result<IEnumerable<DeletedEmployees>>>GetAlldeletedEmployee();
-    Task<Result<IEnumerable<EmpolyeeResponse>>>Get(int IqamaNo);
+    Task<Result<IEnumerable<EmpolyeeResponse>>>Get(long IqamaNo);
     Task<Result<EmpolyeeResponse>> CreateAsync(EmpolyeeRequest Request);
-    Task<Result<EmpolyeeResponse>> UpdateAsync(int IqamaNo, UEmpolyeeRequest Request);
-    Task<Result> DeleteAsync(int IqamaNo, CancellationToken cancellationToken = default);
-    Task<Result> AddEmployeeToHousing(int IqamaNo , string HousingName);
-    Task<Result> ChangeEmployeeToHousing(int IqamaNo , string oldHousingName , string NewHousingName);
+    Task<Result<EmpolyeeResponse>> UpdateAsync(long IqamaNo, UEmpolyeeRequest Request);
+    Task<Result> DeleteAsync(long IqamaNo, CancellationToken cancellationToken = default);
+    Task<Result> AddEmployeeToHousing(long IqamaNo , string HousingName);
+    Task<Result> ChangeEmployeeToHousing(long IqamaNo , string oldHousingName , string NewHousingName);
     Task<Result<IEnumerable<EmpolyeeResponse>>> Filter(EmployeeFilter filter);
     Task<Result<PagedList<EmpolyeeResponse>>> Filter2(EmployeeFilter2 filter);
     Task<List<EmpolyeeResponse>> SmartSearch(string keyword);
 
-    Task<Result> RequestEnableEmployeeAsync(int iqamaNo, string reason, string requestedBy);
-    Task<Result> RequestDisableEmployeeAsync(int iqamaNo, string reason, string requestedBy);
+    Task<Result> RequestEnableEmployeeAsync(long IqamaNo, string reason, string requestedBy);
+    Task<Result> RequestDisableEmployeeAsync(long IqamaNo, string reason, string requestedBy);
     Task<Result<IEnumerable<TempEmployeeStatusChangeResponse>>> GetPendingStatusChangesAsync();
     Task<Result> ResolveStatusChangesAsync(EBulkResolutionRequest request);
 

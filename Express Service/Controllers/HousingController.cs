@@ -14,7 +14,7 @@ public class HousingController(IHousingService service , IEmployeeService servic
 
 
     [HttpPut("{IqamaNo}/add/{HousingName}")]
-    public async Task<IActionResult> add(int IqamaNo, string HousingName)
+    public async Task<IActionResult> add(long IqamaNo, string HousingName)
     {
         var response = await service1.AddEmployeeToHousing(IqamaNo, HousingName);
         return response.IsSuccess ?
@@ -23,7 +23,7 @@ public class HousingController(IHousingService service , IEmployeeService servic
     }
 
     [HttpPut("{IqamaNo}/change/{oldHousingName}/{NewHousingName}")]
-    public async Task<IActionResult> Update(int IqamaNo, string oldHousingName, string NewHousingName)
+    public async Task<IActionResult> Update(long IqamaNo, string oldHousingName, string NewHousingName)
     {
         var response = await service1.ChangeEmployeeToHousing(IqamaNo, oldHousingName, NewHousingName);
         return response.IsSuccess ?

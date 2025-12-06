@@ -25,7 +25,7 @@ public class ApplicationDbcontext(DbContextOptions<ApplicationDbcontext> options
     public required DbSet<RiderShiftSubstitution> RiderShiftSubstitutions{ get; set; }
     public required DbSet<Vehicle> Vehicles { get; set; }
     public required DbSet<DeletedEmployees> DeletedEmployees { get; set; }
-    public required DbSet<ArchivedRiderShift> ArchivedRiderShifts { get; set; }
+    //public required DbSet<ArchivedRiderShift> ArchivedRiderShifts { get; set; }
     public required DbSet<RiderCompanyHistory> RiderCompanyHistory { get; set; }
     public required DbSet<RiderVehicleStatus> RiderVehicleStatus { get; set; }
     public required DbSet<TempRiderShiftComparison> TempRiderShiftComparisons { get; set; }
@@ -148,6 +148,13 @@ public class ApplicationDbcontext(DbContextOptions<ApplicationDbcontext> options
             v => v.ToDateTime(TimeOnly.MinValue),
             v => DateOnly.FromDateTime(v)
         );
+
+        foreach (var property in modelBuilder.Model.GetEntityTypes()
+       .SelectMany(t => t.GetProperties())
+       .Where(p => p.ClrType == typeof(decimal) || p.ClrType == typeof(decimal?)))
+        {
+            property.SetColumnType("decimal(38, 0)");
+        }
 
         base.OnModelCreating(modelBuilder);
 

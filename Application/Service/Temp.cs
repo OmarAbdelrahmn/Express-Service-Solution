@@ -39,12 +39,12 @@ public class Temp(ApplicationDbcontext dbcontext) : ITemp
             {
                 var iqamaNoValue = worksheet.Cell(row, columnMapping["IqamaNo"]).Value.ToString();
 
-                if (string.IsNullOrWhiteSpace(iqamaNoValue) || !int.TryParse(iqamaNoValue, out int iqamaNo))
+                if (string.IsNullOrWhiteSpace(iqamaNoValue) || !long.TryParse(iqamaNoValue, out long IqamaNo))
                     continue;
 
                 var existingEmployee = await dbcontext.Employees
                     .AsNoTracking()
-                    .FirstOrDefaultAsync(e => e.IqamaNo == iqamaNo);
+                    .FirstOrDefaultAsync(e => e.IqamaNo == IqamaNo);
 
                 // Get new values from Excel
                 var newIqamaEndM = GetDateValue(worksheet, row, columnMapping, "IqamaEndM");
@@ -68,7 +68,7 @@ public class Temp(ApplicationDbcontext dbcontext) : ITemp
                 {
                     var tempUpdate = new TempEmployeeUpdate
                     {
-                        IqamaNo = iqamaNo,
+                        IqamaNo = IqamaNo,
                         IsNewEmployee = true,
                         UploadedAt = DateTime.Now,
                         UploadedBy = uploadedBy,
@@ -95,7 +95,7 @@ public class Temp(ApplicationDbcontext dbcontext) : ITemp
 
                 var tempUpdateExisting = new TempEmployeeUpdate
                 {
-                    IqamaNo = iqamaNo,
+                    IqamaNo = IqamaNo,
                     IsNewEmployee = false,
                     UploadedAt = DateTime.Now,
                     UploadedBy = uploadedBy
@@ -585,7 +585,7 @@ public record BulkUploadResult(
 // Response record for individual temp employee update
 public record TempEmployeeUpdateResponse(
     int Id,
-    int IqamaNo,
+    long IqamaNo,
     string EmployeeNameAR,
     string EmployeeNameEN,
     bool IsNewEmployee,
@@ -608,7 +608,7 @@ public record BulkResolutionRequest(
     string ResolvedBy
 );
 public record EBulkResolutionRequest(
-    int IqamaNo,
+    long IqamaNo,
     string Resolution, // "Approved" or "Rejected"
     string ResolvedBy,
     string AdminNot

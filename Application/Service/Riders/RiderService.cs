@@ -18,7 +18,7 @@ public class RiderService(ApplicationDbcontext dbcontext) : IRiderService
 {
     private readonly ApplicationDbcontext dbcontext = dbcontext;
 
-    public async Task<Result<IEnumerable<RiderResponse>>> Get(int IqamaNo)
+    public async Task<Result<IEnumerable<RiderResponse>>> Get(long IqamaNo)
     {
 
         var isexist = await dbcontext
@@ -165,7 +165,7 @@ public class RiderService(ApplicationDbcontext dbcontext) : IRiderService
             return Result.Failure(new Error("Server Error", ex.Message, 500));
         }
     }
-    public async Task<Result> DeleteAsync(int IqamaNo, CancellationToken cancellationToken = default)
+    public async Task<Result> DeleteAsync(long IqamaNo, CancellationToken cancellationToken = default)
     {
         using var transaction = await dbcontext.Database.BeginTransactionAsync(cancellationToken);
 
@@ -206,7 +206,7 @@ public class RiderService(ApplicationDbcontext dbcontext) : IRiderService
             return Result.Failure(new Error("Server Error", ex.Message, 500));
         }
     }
-    public async Task<Result<RiderResponse>> UpdateAsync(int IqamaNo, URiderRequest request)
+    public async Task<Result<RiderResponse>> UpdateAsync(long IqamaNo, URiderRequest request)
     {
         using var transaction = await dbcontext.Database.BeginTransactionAsync();
 
@@ -273,8 +273,8 @@ public class RiderService(ApplicationDbcontext dbcontext) : IRiderService
             if (request.INKSA is not null)
                 employee.INKSA = request.INKSA.Value;
 
-            if (request.WorkingId.HasValue)
-                riderDetails.WorkingId = request.WorkingId.Value;
+            if (!string.IsNullOrWhiteSpace(request.WorkingId) || int.TryParse(request.WorkingId, out var id) || id > 0)
+                riderDetails.WorkingId = request.WorkingId;
 
             if (request.TshirtSize is not null)
                 riderDetails.TshirtSize = request.TshirtSize;
@@ -374,14 +374,14 @@ public class RiderService(ApplicationDbcontext dbcontext) : IRiderService
             CreatedAt: employee.CreatedAt,
             INKSA: employee.INKSA,
             HousingAddress: employee.Housing?.Name,
-            WorkingId: rider.WorkingId ?? 0,
+            WorkingId: rider.WorkingId ?? "0",
             EmployeeIqamaNo: rider.EmployeeIqamaNo,
             TshirtSize: rider.TshirtSize!,
             LicenseNumber: rider.LicenseNumber!,
             CompanyName: rider.Company.Name
         );
     }
-    public async Task<Result> ChangeWorkinId(int OldWorkinId, int NewWorkingId)
+    public async Task<Result> ChangeWorkinId(string OldWorkinId, string NewWorkingId)
     {
         var rider = await dbcontext.RiderDetails.FirstOrDefaultAsync(r => r.WorkingId == OldWorkinId);
 
@@ -393,7 +393,7 @@ public class RiderService(ApplicationDbcontext dbcontext) : IRiderService
 
         return Result.Success();
     }
-    public async Task<Result> AddETOR(int IqamaNo, EMTOR request)
+    public async Task<Result> AddETOR(long IqamaNo, EMTOR request)
     {
         using var transaction = await dbcontext.Database.BeginTransactionAsync();
 

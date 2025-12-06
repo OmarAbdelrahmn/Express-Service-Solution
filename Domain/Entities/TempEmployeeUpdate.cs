@@ -7,7 +7,7 @@ namespace Domain.Entities;
 public class TempEmployeeUpdate
 {
     public int Id { get; set; }
-    public int IqamaNo { get; set; }
+    public long IqamaNo { get; set; }
 
     // Old values (from database)
     public DateOnly? OldIqamaEndM { get; set; }
@@ -56,7 +56,7 @@ public class TempEmployeeUpdate
 public class TempEmployeeStatusChange
 {
     public int Id { get; set; }
-    public int EmployeeIqamaNo { get; set; }
+    public long EmployeeIqamaNo { get; set; }
     public string Action { get; set; } = string.Empty; // "Enable" or "Disable"
     public string Reason { get; set; } = string.Empty;
     public string RequestedBy { get; set; } = string.Empty;
@@ -75,7 +75,7 @@ public class TempEmployeeStatusChange
 public class TempVehicleOperation
 {
     public int Id { get; set; }
-    public int RiderIqamaNo { get; set; }
+    public long RiderIqamaNo { get; set; }
     public string VehiclePlateNumber { get; set; } = string.Empty;
     public string VehicleNumber { get; set; } = string.Empty;
     public VehicleStatusType VehicleStatusType { get; set; }

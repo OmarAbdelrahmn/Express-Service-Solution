@@ -8,7 +8,7 @@ public record HousingRequest(
         string Name,
         string Address,
         int Capacity,
-        int? ManagerIqamaNo
+        long? ManagerIqamaNo
     );
 public record HousingResponse(
 
@@ -16,7 +16,7 @@ public record HousingResponse(
     string Name,
     string Address,
     int Capacity,
-    int? ManagerId,
+    long? ManagerIqamaNo,
     ICollection<EmpolyeeResponse> Employees
 
     );
@@ -26,6 +26,6 @@ public record UHousingResponse(
     string Name,
     string Address,
     int Capacity,
-    int? ManagerId
+    long? ManagerIqamaNo
     );
 

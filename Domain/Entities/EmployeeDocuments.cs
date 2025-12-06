@@ -11,7 +11,7 @@ public class EmployeeDocuments
 
     public int Id { get; set; }
     [ForeignKey("EmployeeIqamaNo")]
-    public int EmployeeIqamaNo { get; set; }  
+    public long EmployeeIqamaNo { get; set; }  
 
    
     public string? ProfileImagePath { get; set; }  

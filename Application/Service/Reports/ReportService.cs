@@ -258,7 +258,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
             TotalRiders: allRiders.Count,
             ActiveRiders: activeRiders.Count,
             InactiveRiders: allRiders.Count - activeRiders.Count,
-            RidersWithWorkingId: allRiders.Count(r => r.WorkingId.HasValue && r.WorkingId > 0),
+            RidersWithWorkingId: allRiders.Count(r => !string.IsNullOrWhiteSpace(r.WorkingId) && r.WorkingId != "0"),
             RidersWithSubstitution: substitutions.Count,
             AverageShiftsPerRider: activeRiders.Any() ? (decimal)shifts.Count / activeRiders.Count : 0,
             TotalWorkingHours: shifts.Sum(s => s.WorkingHours)
@@ -534,12 +534,12 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
 
 
     public async Task<Result<MonthlyRiderReport>> GetMonthlyReportByWorkingIdAsync(
-        int workingId,
+        string WorkingId,
         int year,
         int month,
         CancellationToken cancellationToken = default)
     {
-        if (workingId <= 0)
+        if (string.IsNullOrWhiteSpace(WorkingId) || !int.TryParse(WorkingId, out var id) || id <= 0)
             return Result.Failure<MonthlyRiderReport>(
                 new Error("Invalid working ID", "invalid_input", 400));
 
@@ -549,11 +549,11 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
 
         var rider = await _dbcontext.RiderDetails
             .Include(r => r.Employee)
-            .FirstOrDefaultAsync(r => r.WorkingId == workingId, cancellationToken);
+            .FirstOrDefaultAsync(r => r.WorkingId == WorkingId, cancellationToken);
 
         if (rider == null)
             return Result.Failure<MonthlyRiderReport>(
-                new Error($"Rider with WorkingId {workingId} not found", "not_found", 404));
+                new Error($"Rider with WorkingId {WorkingId} not found", "not_found", 404));
 
         var startDate = new DateOnly(year, month, 1);
         var endDate = startDate.AddMonths(1).AddDays(-1);
@@ -571,7 +571,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
         if (!shifts.Any())
         {
             return Result.Success(CreateEmptyMonthlyReport(
-                rider.Id, rider.Employee.NameAR, workingId, year, month));
+                rider.Id, rider.Employee.NameAR, WorkingId, year, month));
         }
 
         var workingIdHistory = DetectWorkingIdChanges(shifts);
@@ -599,7 +599,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
         var report = new MonthlyRiderReport(
             RiderId: rider.Id,
             RiderName: rider.Employee.NameAR,
-            WorkingId: workingId,
+            WorkingId: WorkingId,
             Year: year,
             Month: month,
             TotalWorkingDays: totalWorkingDays,
@@ -631,15 +631,15 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                 new Error("Month must be between 1 and 12", "invalid_input", 400));
 
         var allRiders = await _dbcontext.RiderDetails
-            .Where(r => r.WorkingId.HasValue && r.WorkingId > 0)
-            .ToListAsync(cancellationToken);
+.Where(r => !string.IsNullOrWhiteSpace(r.WorkingId) && r.WorkingId != "0")
+.ToListAsync(cancellationToken);
 
         var reports = new List<MonthlyRiderReport>();
 
         foreach (var rider in allRiders)
         {
             var result = await GetMonthlyReportByWorkingIdAsync(
-                rider.WorkingId!.Value, year, month, cancellationToken);
+                rider.WorkingId!, year, month, cancellationToken);
 
             if (result.IsSuccess)
             {
@@ -651,21 +651,21 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
     }
 
     public async Task<Result<YearlyRiderReport>> GetYearlyReportByWorkingIdAsync(
-        int workingId,
+        string WorkingId,
         int year,
         CancellationToken cancellationToken = default)
     {
-        if (workingId <= 0)
+        if (string.IsNullOrWhiteSpace(WorkingId) || !int.TryParse(WorkingId, out var id) || id <= 0)
             return Result.Failure<YearlyRiderReport>(
                 new Error("Invalid working ID", "invalid_input", 400));
 
         var rider = await _dbcontext.RiderDetails
             .Include(r => r.Employee)
-            .FirstOrDefaultAsync(r => r.WorkingId == workingId, cancellationToken);
+            .FirstOrDefaultAsync(r => r.WorkingId == WorkingId, cancellationToken);
 
         if (rider == null)
             return Result.Failure<YearlyRiderReport>(
-                new Error($"Rider with WorkingId {workingId} not found", "not_found", 404));
+                new Error($"Rider with WorkingId {WorkingId} not found", "not_found", 404));
 
         var startDate = new DateOnly(year, 1, 1);
         var endDate = new DateOnly(year, 12, 31);
@@ -683,7 +683,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
         if (!shifts.Any())
         {
             return Result.Success(CreateEmptyYearlyReport(
-                rider.Id, rider.Employee.NameAR, workingId, year));
+                rider.Id, rider.Employee.NameAR, WorkingId, year));
         }
 
         var workingIdHistory = DetectWorkingIdChanges(shifts);
@@ -704,7 +704,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
         var report = new YearlyRiderReport(
             RiderId: rider.Id,
             RiderName: rider.Employee.NameAR,
-            WorkingId: workingId,
+            WorkingId: WorkingId,
             Year: year,
             TotalWorkingDays: totalWorkingDays,
             CompletedShifts: completedShifts,
@@ -730,15 +730,15 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
         CancellationToken cancellationToken = default)
     {
         var allRiders = await _dbcontext.RiderDetails
-            .Where(r => r.WorkingId.HasValue && r.WorkingId > 0)
-            .ToListAsync(cancellationToken);
+.Where(r => !string.IsNullOrWhiteSpace(r.WorkingId) && r.WorkingId != "0")
+.ToListAsync(cancellationToken);
 
         var reports = new List<YearlyRiderReport>();
 
         foreach (var rider in allRiders)
         {
             var result = await GetYearlyReportByWorkingIdAsync(
-                rider.WorkingId!.Value, year, cancellationToken);
+                rider.WorkingId!, year, cancellationToken);
 
             if (result.IsSuccess)
             {
@@ -751,12 +751,12 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
 
 
     public async Task<Result<DateRangeReport>> GetCustomDateRangeReportByWorkingIdAsync(
-        int workingId,
+        string WorkingId,
         DateOnly startDate,
         DateOnly endDate,
         CancellationToken cancellationToken = default)
     {
-        if (workingId <= 0)
+        if (string.IsNullOrWhiteSpace(WorkingId) || !int.TryParse(WorkingId, out var id) || id <= 0)
             return Result.Failure<DateRangeReport>(
                 new Error("Invalid working ID", "invalid_input", 400));
 
@@ -766,11 +766,11 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
 
         var rider = await _dbcontext.RiderDetails
             .Include(r => r.Employee)
-            .FirstOrDefaultAsync(r => r.WorkingId == workingId, cancellationToken);
+            .FirstOrDefaultAsync(r => r.WorkingId == WorkingId, cancellationToken);
 
         if (rider == null)
             return Result.Failure<DateRangeReport>(
-                new Error($"Rider with WorkingId {workingId} not found", "not_found", 404));
+                new Error($"Rider with WorkingId {WorkingId} not found", "not_found", 404));
 
         var shifts = await _dbcontext.RiderShifts
             .Include(s => s.Company)
@@ -785,7 +785,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
         if (!shifts.Any())
         {
             return Result.Success(CreateEmptyDateRangeReport(
-                rider.Id,rider.EmployeeIqamaNo, rider.Employee.NameAR, workingId, startDate, endDate));
+                rider.Id,rider.EmployeeIqamaNo, rider.Employee.NameAR, WorkingId, startDate, endDate));
         }
 
         var workingIdHistory = DetectWorkingIdChanges(shifts);
@@ -806,7 +806,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
             RiderId: rider.Id,
             IqamaNo: rider.EmployeeIqamaNo,
             RiderName: rider.Employee.NameAR,
-            WorkingId: workingId,
+            WorkingId: WorkingId,
             StartDate: startDate,
             EndDate: endDate,
             TotalWorkingDays: totalWorkingDays,
@@ -838,15 +838,15 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                 new Error("End date must be after start date", "invalid_input", 400));
 
         var allRiders = await _dbcontext.RiderDetails
-            .Where(r => r.WorkingId.HasValue && r.WorkingId > 0)
-            .ToListAsync(cancellationToken);
+.Where(r => !string.IsNullOrWhiteSpace(r.WorkingId) && r.WorkingId != "0")
+.ToListAsync(cancellationToken);
 
         var reports = new List<DateRangeReport>();
 
         foreach (var rider in allRiders)
         {
             var result = await GetCustomDateRangeReportByWorkingIdAsync(
-                rider.WorkingId!.Value, startDate, endDate, cancellationToken);
+                rider.WorkingId!, startDate, endDate, cancellationToken);
 
             if (result.IsSuccess)
             {
@@ -964,14 +964,14 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
 
 
     public async Task<Result<RiderPeriodComparison>> CompareRiderPeriodsAsync(
-    int workingId,
+    string WorkingId,
     DateOnly period1Start,
     DateOnly period1End,
     DateOnly period2Start,
     DateOnly period2End,
     CancellationToken cancellationToken = default)
     {
-        if (workingId <= 0)
+        if (string.IsNullOrWhiteSpace(WorkingId) || !int.TryParse(WorkingId, out var id) || id <= 0)
             return Result.Failure<RiderPeriodComparison>(
                 new Error("Invalid working ID", "invalid_input", 400));
 
@@ -985,11 +985,11 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
 
         var rider = await _dbcontext.RiderDetails
             .Include(r => r.Employee)
-            .FirstOrDefaultAsync(r => r.WorkingId == workingId, cancellationToken);
+            .FirstOrDefaultAsync(r => r.WorkingId == WorkingId, cancellationToken);
 
         if (rider == null)
             return Result.Failure<RiderPeriodComparison>(
-                new Error($"Rider with WorkingId {workingId} not found", "not_found", 404));
+                new Error($"Rider with WorkingId {WorkingId} not found", "not_found", 404));
 
         // Get shifts for both periods
         var period1Shifts = await _dbcontext.RiderShifts
@@ -1027,7 +1027,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
         var comparison = new RiderPeriodComparison(
             RiderId: rider.Id,
             RiderName: rider.Employee.NameAR,
-            WorkingId: workingId,
+            WorkingId: WorkingId,
             Period1: period1Summary,
             Period2: period2Summary,
             Comparison: comparisonMetrics,
@@ -1055,15 +1055,15 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                 new Error("Period 2: End date must be after start date", "invalid_input", 400));
 
         var allRiders = await _dbcontext.RiderDetails
-            .Where(r => r.WorkingId.HasValue && r.WorkingId > 0)
-            .ToListAsync(cancellationToken);
+.Where(r => !string.IsNullOrWhiteSpace(r.WorkingId) && r.WorkingId != "0")
+.ToListAsync(cancellationToken);
 
         var comparisons = new List<RiderPeriodComparison>();
 
         foreach (var rider in allRiders)
         {
             var result = await CompareRiderPeriodsAsync(
-                rider.WorkingId!.Value,
+                rider.WorkingId!,
                 period1Start,
                 period1End,
                 period2Start,
@@ -1173,7 +1173,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
     }
         
     public async Task<Result<RiderPeriodComparison>> CompareRiderMonthsAsync(
-        int workingId,
+        string WorkingId,
         int year1,
         int month1,
         int year2,
@@ -1195,7 +1195,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
         var period2End = period2Start.AddMonths(1).AddDays(-1);
 
         return await CompareRiderPeriodsAsync(
-            workingId,
+            WorkingId,
             period1Start,
             period1End,
             period2Start,
@@ -1204,12 +1204,12 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
     }
 
     public async Task<Result<RiderPeriodComparison>> CompareRiderYearsAsync(
-        int workingId,
+        string WorkingId,
         int year1,
         int year2,
         CancellationToken cancellationToken = default)
     {
-        if (workingId <= 0)
+        if (string.IsNullOrWhiteSpace(WorkingId) || !int.TryParse(WorkingId, out var id) || id <= 0)
             return Result.Failure<RiderPeriodComparison>(
                 new Error("Invalid working ID", "invalid_input", 400));
 
@@ -1220,7 +1220,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
         var period2End = new DateOnly(year2, 12, 31);
 
         return await CompareRiderPeriodsAsync(
-            workingId,
+            WorkingId,
             period1Start,
             period1End,
             period2Start,
@@ -1699,17 +1699,16 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                         (s.ShiftDate >= period2Start && s.ShiftDate <= period2End)))
             .Select(s => s.Rider.WorkingId)
             .Distinct()
-            .Where(wid => wid.HasValue && wid.Value > 0)
-            .ToListAsync(cancellationToken);
+.Where(r => !string.IsNullOrWhiteSpace(r) && r != "0").ToListAsync(cancellationToken);
 
         var comparisons = new List<RiderPeriodComparison>();
 
         foreach (var workingId in riderIds)
         {
-            if (!workingId.HasValue) continue;
+            if (string.IsNullOrEmpty(workingId)) continue;
 
             var result = await CompareRiderPeriodsAsync(
-                workingId.Value,
+                workingId,
                 period1Start,
                 period1End,
                 period2Start,
@@ -2023,7 +2022,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
             assignments.Add(new RiderHousingAssignment(
                 RiderId: rider.Id,
                 RiderName: rider.Employee.NameAR,
-                WorkingId: rider.WorkingId ?? 0,
+                WorkingId: rider.WorkingId ?? "0",
                 ShiftsCount: riderShifts.Count,
                 OrdersCompleted: completed,
                 OrdersRejected: rejected,
@@ -2058,7 +2057,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
             assignments.Add(new RiderHousingAssignment(
                 RiderId: rider.Id,
                 RiderName: rider.Employee.NameAR,
-                WorkingId: rider.WorkingId ?? 0,
+                WorkingId: rider.WorkingId ?? "0",
                 ShiftsCount: riderShifts.Count,
                 OrdersCompleted: completed,
                 OrdersRejected: rejected,
@@ -2234,7 +2233,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                 var hasSubstitution = substitutionDict.ContainsKey(rider.Id);
                 var originalWorkingId = hasSubstitution
                     ? substitutionDict[rider.Id].SubstituteWorkingId
-                    : (int?)null;
+                    : (string?)null;
 
                 riderDetails.Add(new TopRiderDetail(
                     RiderId: rider.Id,
@@ -2304,12 +2303,12 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
 
 
     public async Task<Result<MonthlyStackedDeliveriesReport>> GetMonthlyStackedDeliveriesByWorkingIdAsync(
-    int workingId,
+    string WorkingId,
     int year,
     int month,
     CancellationToken cancellationToken = default)
     {
-        if (workingId <= 0)
+        if (string.IsNullOrWhiteSpace(WorkingId) || !int.TryParse(WorkingId, out var id) || id <= 0)
             return Result.Failure<MonthlyStackedDeliveriesReport>(
                 new Error("Invalid working ID", "invalid_input", 400));
 
@@ -2319,11 +2318,11 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
 
         var rider = await _dbcontext.RiderDetails
             .Include(r => r.Employee)
-            .FirstOrDefaultAsync(r => r.WorkingId == workingId, cancellationToken);
+            .FirstOrDefaultAsync(r => r.WorkingId == WorkingId, cancellationToken);
 
         if (rider == null)
             return Result.Failure<MonthlyStackedDeliveriesReport>(
-                new Error($"Rider with WorkingId {workingId} not found", "not_found", 404));
+                new Error($"Rider with WorkingId {WorkingId} not found", "not_found", 404));
 
         var startDate = new DateOnly(year, month, 1);
         var endDate = startDate.AddMonths(1).AddDays(-1);
@@ -2340,7 +2339,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
             return Result.Success(new MonthlyStackedDeliveriesReport(
                 RiderId: rider.Id,
                 RiderName: rider.Employee.NameAR,
-                WorkingId: workingId,
+                WorkingId: WorkingId,
                 Year: year,
                 Month: month,
                 TotalStackedDeliveries: 0,
@@ -2378,7 +2377,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
         var report = new MonthlyStackedDeliveriesReport(
             RiderId: rider.Id,
             RiderName: rider.Employee.NameAR,
-            WorkingId: workingId,
+            WorkingId: WorkingId,
             Year: year,
             Month: month,
             TotalStackedDeliveries: totalStacked,
@@ -2452,7 +2451,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
             riderSummaries.Add(new RiderStackedSummary(
                 RiderId: item.Rider.Id,
                 RiderName: item.Rider.Employee.NameAR,
-                WorkingId: item.Rider.WorkingId ?? 0,
+                WorkingId: item.Rider.WorkingId ?? "0",
                 TotalStackedDeliveries: totalStacked,
                 TotalShifts: totalShifts,
                 AverageStackedPerShift: avgStackedPerShift,
@@ -3025,12 +3024,12 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
     }
 
     private MonthlyRiderReport CreateEmptyMonthlyReport(
-        int riderId, string riderName, int workingId, int year, int month)
+        int riderId, string riderName, string WorkingId, int year, int month)
     {
         return new MonthlyRiderReport(
             RiderId: riderId,
             RiderName: riderName,
-            WorkingId: workingId,
+            WorkingId: WorkingId,
             Year: year,
             Month: month,
             TotalWorkingDays: 0,
@@ -3051,12 +3050,12 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
     }
 
     private YearlyRiderReport CreateEmptyYearlyReport(
-        int riderId, string riderName, int workingId, int year)
+        int riderId, string riderName, string WorkingId, int year)
     {
         return new YearlyRiderReport(
             RiderId: riderId,
             RiderName: riderName,
-            WorkingId: workingId,
+            WorkingId: WorkingId,
             Year: year,
             TotalWorkingDays: 0,
             CompletedShifts: 0,
@@ -3076,13 +3075,13 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
     }
 
     private DateRangeReport CreateEmptyDateRangeReport(
-        int riderId,int IqamaNo, string riderName, int workingId, DateOnly startDate, DateOnly endDate)
+        int riderId,long IqamaNo, string riderName, string WorkingId, DateOnly startDate, DateOnly endDate)
     {
         return new DateRangeReport(
             RiderId: riderId,
             IqamaNo: IqamaNo,
             RiderName: riderName,
-            WorkingId: workingId,
+            WorkingId: WorkingId,
             StartDate: startDate,
             EndDate: endDate,
             TotalWorkingDays: 0,

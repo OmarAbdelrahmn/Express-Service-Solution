@@ -11,5 +11,5 @@ public class Housing
     public string Address { get; set; } = string.Empty;
     public int Capacity { get; set; }
     public ICollection<Employees> Employees { get; set; } = [];
-    public int? ManagerId { get; set; }
+    public long? ManagerIqamaNo { get; set; }
 }

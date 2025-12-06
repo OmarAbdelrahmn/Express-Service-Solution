@@ -6,7 +6,7 @@ namespace Domain.Entities;
 
 public class Employees
 {
-    public int IqamaNo { get; set; }
+    public long IqamaNo { get; set; }
     public DateOnly IqamaEndM { get; set; }
     public DateOnly IqamaEndH { get; set; }
     public string? PassportNo { get; set; } = string.Empty;

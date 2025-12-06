@@ -71,9 +71,9 @@ public class HousingService(ApplicationDbcontext dbcontext) : IHousingService
         return Result.Success(companyResponses);
     }
 
-    public async Task<Result<IEnumerable<HousingResponse>>> GetWithManagerIqama(int ManagerIqamaNo)
+    public async Task<Result<IEnumerable<HousingResponse>>> GetWithManagerIqama(long ManagerIqamaNo)
     {
-        var companies = await dbcontext.Housings.Where(c => c.ManagerId == ManagerIqamaNo).Include(c => c.Employees).AsNoTracking().ToListAsync();
+        var companies = await dbcontext.Housings.Where(c => c.ManagerIqamaNo == ManagerIqamaNo).Include(c => c.Employees).AsNoTracking().ToListAsync();
 
         if (companies == null)
             return Result.Failure<IEnumerable<HousingResponse>>(new Error("housing.NotFound", $"Housing with ManagerIqamaNo {ManagerIqamaNo} was not found.", 404));
@@ -94,7 +94,7 @@ public class HousingService(ApplicationDbcontext dbcontext) : IHousingService
         companies.Name = Request.Name;
         companies.Address = Request.Address;
         companies.Capacity = Request.Capacity;
-        companies.ManagerId = Request.ManagerIqamaNo;
+        companies.ManagerIqamaNo = Request.ManagerIqamaNo;
 
         await dbcontext.SaveChangesAsync();
 

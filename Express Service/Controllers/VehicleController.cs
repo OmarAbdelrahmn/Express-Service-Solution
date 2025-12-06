@@ -112,21 +112,21 @@ public class VehicleController : ControllerBase
 
     [HttpPost("take")]
     public async Task<IActionResult> TakeVehicle(
-        [FromQuery] int iqamaNo,
+        [FromQuery] long IqamaNo,
         [FromQuery] string vehicleNumber,
         [FromQuery] string reason)
     {
-        var result = await _service.TakeVehicleAsync(iqamaNo, vehicleNumber, reason);
+        var result = await _service.TakeVehicleAsync(IqamaNo, vehicleNumber, reason);
         return result.IsSuccess ? Ok(new ApiMessage("Vehicle taken successfully")) : result.ToProblem();
     }
 
     [HttpPost("return")]
     public async Task<IActionResult> ReturnVehicle(
-        [FromQuery] int iqamaNo,
+        [FromQuery] long IqamaNo,
         [FromQuery] string vehicleNumber,
         [FromQuery] string reason)
     {
-        var result = await _service.ReturnVehicleAsync(iqamaNo, vehicleNumber, reason);
+        var result = await _service.ReturnVehicleAsync(IqamaNo, vehicleNumber, reason);
         return result.IsSuccess ? Ok(new ApiMessage("Vehicle returned successfully")) : result.ToProblem();
     }
 
@@ -141,7 +141,7 @@ public class VehicleController : ControllerBase
 
     [HttpPost("report-problem")]
     public async Task<IActionResult> ReportProblem(
-        [FromQuery] int riderIqamaNo,
+        [FromQuery] long riderIqamaNo,
         [FromQuery] string plate,
         [FromQuery] string reason)
     {

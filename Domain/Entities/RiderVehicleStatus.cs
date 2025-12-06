@@ -8,7 +8,7 @@ public class RiderVehicleStatus
 {
     public int Id { get; set; }
 
-    public int? EmployeeIqamaNo { get; set; }
+    public long? EmployeeIqamaNo { get; set; }
 
     public string VehicleNumber { get; set; } = string.Empty;
     public Vehicle Vehicle { get; set; } = default!;

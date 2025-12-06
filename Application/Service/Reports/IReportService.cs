@@ -15,7 +15,7 @@ public interface IReportService
 
 
     Task<Result<MonthlyRiderReport>> GetMonthlyReportByWorkingIdAsync(
-        int workingId,
+        string WorkingId,
         int year,
         int month,
         CancellationToken cancellationToken = default);
@@ -28,7 +28,7 @@ public interface IReportService
 
    
     Task<Result<YearlyRiderReport>> GetYearlyReportByWorkingIdAsync(
-        int workingId,
+        string WorkingId,
         int year,
         CancellationToken cancellationToken = default);
 
@@ -38,7 +38,7 @@ public interface IReportService
 
   
     Task<Result<DateRangeReport>> GetCustomDateRangeReportByWorkingIdAsync(
-        int workingId,
+        string WorkingId,
         DateOnly startDate,
         DateOnly endDate,
         CancellationToken cancellationToken = default);
@@ -72,7 +72,7 @@ public interface IReportService
 
    
     Task<Result<RiderPeriodComparison>> CompareRiderPeriodsAsync(
-        int workingId,
+        string WorkingId,
         DateOnly period1Start,
         DateOnly period1End,
         DateOnly period2Start,
@@ -88,7 +88,7 @@ public interface IReportService
 
   
     Task<Result<RiderPeriodComparison>> CompareRiderMonthsAsync(
-        int workingId,
+        string WorkingId,
         int year1,
         int month1,
         int year2,
@@ -96,7 +96,7 @@ public interface IReportService
         CancellationToken cancellationToken = default);
 
     Task<Result<RiderPeriodComparison>> CompareRiderYearsAsync(
-        int workingId,
+        string WorkingId,
         int year1,
         int year2,
         CancellationToken cancellationToken = default);
@@ -135,7 +135,7 @@ public interface IReportService
         CancellationToken cancellationToken = default);
 
     Task<Result<MonthlyStackedDeliveriesReport>> GetMonthlyStackedDeliveriesByWorkingIdAsync(
-       int workingId,
+       string WorkingId,
        int year,
        int month,
        CancellationToken cancellationToken = default);
@@ -169,7 +169,7 @@ public interface IReportService
 public record RiderPeriodComparison(
     int RiderId,
     string RiderName,
-    int WorkingId,
+    string WorkingId,
     PeriodSummary Period1,
     PeriodSummary Period2,
     ComparisonMetrics Comparison,
@@ -285,7 +285,7 @@ public record HousingPeriodBreakdown(
 public record RiderHousingAssignment(
     int RiderId,
     string RiderName,
-    int WorkingId,
+    string WorkingId,
     int ShiftsCount,
     int OrdersCompleted,
     int OrdersRejected,
@@ -354,7 +354,7 @@ public record CompanyPerformanceReport(
 public record RiderCompanyPerformance(
     int RiderId,
     string RiderName,
-    int WorkingId,
+    string WorkingId,
     int TotalShifts,
     int CompletedShifts,
     int TotalAcceptedOrders,
@@ -394,7 +394,7 @@ public record TopRidersReport(
 // Detailed information about each top rider
 public record TopRiderDetail(
     int RiderId,
-    int WorkingId,
+    string WorkingId,
     string RiderNameEN,
     string RiderNameAR,
     string CompanyName,
@@ -418,7 +418,7 @@ public record TopRiderDetail(
     string PerformanceGrade,
     List<string> Achievements,
     bool IsSubstitutionActive,
-    int? OriginalWorkingId
+    string? OriginalWorkingId
 );
 
 // Company-wise breakdown in the period
@@ -542,7 +542,7 @@ public record DailyShiftBreakdown(
 public record MonthlyStackedDeliveriesReport(
     int RiderId,
     string RiderName,
-    int WorkingId,
+    string WorkingId,
     int Year,
     int Month,
     int TotalStackedDeliveries,
@@ -585,7 +585,7 @@ public record PerformanceMetrics(
 public record TopPerformer(
     int RiderId,
     string RiderName,
-    int WorkingId,
+    string WorkingId,
     int TotalOrders,
     decimal PerformanceScore,
     decimal CompletionRate
@@ -629,7 +629,7 @@ public record AllRidersStackedDeliveriesReport(
 public record RiderStackedSummary(
     int RiderId,
     string RiderName,
-    int WorkingId,
+    string WorkingId,
     int TotalStackedDeliveries,
     int TotalShifts,
     decimal AverageStackedPerShift,

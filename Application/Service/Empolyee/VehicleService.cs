@@ -107,7 +107,8 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
     }
 
 
-    public async Task<Result> TakeVehicleAsync(int iqamaNo, string PlateNumberA, string reason)
+    public async Task<Result> TakeVehicleAsync(long  IqamaNo
+        , string PlateNumberA, string reason)
     {
         using var transaction = await dbcontext.Database.BeginTransactionAsync();
         try
@@ -115,7 +116,7 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
 
             var rider = await dbcontext.RiderDetails
                 .Include(r => r.Employee)
-            .FirstOrDefaultAsync(x => x.EmployeeIqamaNo == iqamaNo);
+            .FirstOrDefaultAsync(x => x.EmployeeIqamaNo == IqamaNo);
 
             if (rider == null)
                 return Result.Failure(new Error("NoRider", "No rider found with this Iqama", 400));
@@ -161,7 +162,7 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
 
             dbcontext.RiderVehicleStatus.Add(new RiderVehicleStatus
             {
-                EmployeeIqamaNo = iqamaNo,
+                EmployeeIqamaNo = IqamaNo,
                 VehicleNumber = vehicle.VehicleNumber,
                 StatusType = VehicleStatusType.Taken,
                 Reason = reason,
@@ -178,13 +179,13 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
             return Result.Failure(new Error("TakeVehicleError", $"Failed to take vehicle: {ex.Message}", 500));
         }
     }
-    public async Task<Result> ReturnVehicleAsync(int iqamaNo, string PlateNumberA, string reason)
+    public async Task<Result> ReturnVehicleAsync(long IqamaNo, string PlateNumberA, string reason)
     {
         using var transaction = await dbcontext.Database.BeginTransactionAsync();
         try
         {
             var rider = await dbcontext.RiderDetails
-                .FirstOrDefaultAsync(x => x.EmployeeIqamaNo == iqamaNo);
+                .FirstOrDefaultAsync(x => x.EmployeeIqamaNo == IqamaNo);
 
             if (rider == null)
                 return Result.Failure(new Error("NoRider", "No rider found with this Iqama", 404));
@@ -200,7 +201,7 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
 
             var activeStatus = await dbcontext.RiderVehicleStatus
                 .FirstOrDefaultAsync(s => s.Vehicle.PlateNumberA == PlateNumberA &&
-                                         s.EmployeeIqamaNo == iqamaNo &&
+                                         s.EmployeeIqamaNo == IqamaNo &&
                                          s.IsActive &&
                                          s.StatusType == VehicleStatusType.Taken);
 
@@ -214,7 +215,7 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
 
             dbcontext.RiderVehicleStatus.Add(new RiderVehicleStatus
             {
-                EmployeeIqamaNo = iqamaNo,
+                EmployeeIqamaNo = IqamaNo,
                 VehicleNumber = VehicleNumber,
                 StatusType = VehicleStatusType.Returned,
                 Reason = reason,
@@ -231,13 +232,13 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
             return Result.Failure(new Error("ReturnVehicleError", $"Failed to return vehicle: {ex.Message}", 500));
         }
     }
-    public async Task<Result> ReportProblemAsync(int iqamaNo, string PlateNumberA, string reason)
+    public async Task<Result> ReportProblemAsync(long IqamaNo, string PlateNumberA, string reason)
     {
         using var transaction = await dbcontext.Database.BeginTransactionAsync();
         try
         {
             var rider = await dbcontext.RiderDetails
-                .FirstOrDefaultAsync(x => x.EmployeeIqamaNo == iqamaNo);
+                .FirstOrDefaultAsync(x => x.EmployeeIqamaNo == IqamaNo);
 
             if (rider == null)
                 return Result.Failure(new Error("NoRider", "No rider found with this Iqama", 404));
@@ -261,7 +262,7 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
 
             var activeTakenStatus = await dbcontext.RiderVehicleStatus
                 .AnyAsync(s => s.VehicleNumber == VehicleNumber &&
-                              s.EmployeeIqamaNo == iqamaNo &&
+                              s.EmployeeIqamaNo == IqamaNo &&
                               s.IsActive &&
                               s.StatusType == VehicleStatusType.Taken);
 
@@ -271,7 +272,7 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
 
             var activeStatus = await dbcontext.RiderVehicleStatus
             .FirstOrDefaultAsync(s => s.VehicleNumber == vehicle.VehicleNumber &&
-                                      s.EmployeeIqamaNo == iqamaNo &&
+                                      s.EmployeeIqamaNo == IqamaNo &&
                                       s.IsActive &&
                                       s.StatusType == VehicleStatusType.Taken);
 
@@ -283,7 +284,7 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
 
             dbcontext.RiderVehicleStatus.Add(new RiderVehicleStatus
             {
-                EmployeeIqamaNo = iqamaNo,
+                EmployeeIqamaNo = IqamaNo,
                 VehicleNumber = VehicleNumber,
                 StatusType = VehicleStatusType.Problem,
                 Reason = reason,
@@ -885,7 +886,7 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
                     $"Failed to retrieve unavailable vehicles: {ex.Message}", 500));
         }
     }
-    public async Task<Result> ReportVehicleStolenAsync(string PlateNumberA, int? reportedByIqamaNo, string? reason)
+    public async Task<Result> ReportVehicleStolenAsync(string PlateNumberA, long? reportedByIqamaNo, string? reason)
     {
         using var transaction = await dbcontext.Database.BeginTransactionAsync();
         try
@@ -1455,7 +1456,7 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
 
 
 
-    private async Task<VehicleOperationValidation> ValidateTakeOperation(int riderIqamaNo, string vehicleNumber)
+    private async Task<VehicleOperationValidation> ValidateTakeOperation(long riderIqamaNo, string vehicleNumber)
     {
         var errors = new List<string>();
         var warnings = new List<string>();
@@ -1496,7 +1497,7 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
             Warnings: warnings
         );
     }
-    private async Task<VehicleOperationValidation> ValidateReturnOperation(int riderIqamaNo, string vehicleNumber)
+    private async Task<VehicleOperationValidation> ValidateReturnOperation(long riderIqamaNo, string vehicleNumber)
     {
         var errors = new List<string>();
         var warnings = new List<string>();
@@ -1522,7 +1523,7 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
             Warnings: warnings
         );
     }
-    private async Task<VehicleOperationValidation> ValidateReportProblemOperation(int riderIqamaNo, string vehicleNumber)
+    private async Task<VehicleOperationValidation> ValidateReportProblemOperation(long riderIqamaNo, string vehicleNumber)
     {
         var errors = new List<string>();
         var warnings = new List<string>();
@@ -1774,7 +1775,7 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
 // Response DTOs
 public record TempVehicleOperationResponse(
     int Id,
-    int RiderIqamaNo,
+    long RiderIqamaNo,
     string RiderNameAR,
     string RiderNameEN,
     string VehiclePlateNumber,
@@ -1811,7 +1812,7 @@ public record VehicleResolutionRequest(
 );
 public record SVehicleResolutionRequest
 {
-    public int RiderIqamaNo { get; init; }
+    public long RiderIqamaNo { get; init; }
     public string ResolvedBy { get; init; }
     public string Plate { get; init; }
 }

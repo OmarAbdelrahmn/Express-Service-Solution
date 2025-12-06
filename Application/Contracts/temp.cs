@@ -10,7 +10,7 @@ namespace Application.Contracts
 }
 public record TempEmployeeUpdateResponse(
     int Id,
-    int IqamaNo,
+    long IqamaNo,
     string EmployeeNameAR,
     string EmployeeNameEN,
     bool IsNewEmployee,
@@ -45,7 +45,7 @@ public record FieldChange<T>(
 
 public record TempEmployeeStatusChangeResponse(
     int Id,
-    int EmployeeIqamaNo,
+    long EmployeeIqamaNo,
     string EmployeeNameAR,
     string EmployeeNameEN,
     string Action,
@@ -60,7 +60,7 @@ public record TempEmployeeStatusChangeResponse(
 
 public record TempVehicleOperationResponse(
     int Id,
-    int RiderIqamaNo,
+    long RiderIqamaNo,
     string RiderNameAR,
     string RiderNameEN,
     string VehiclePlateNumber,

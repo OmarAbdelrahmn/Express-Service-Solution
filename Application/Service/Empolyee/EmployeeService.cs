@@ -19,7 +19,7 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
 {
     private readonly ApplicationDbcontext dbcontext = dbcontext;
 
-    public async Task<Result<IEnumerable<EmpolyeeResponse>>> Get(int IqamaNo)
+    public async Task<Result<IEnumerable<EmpolyeeResponse>>> Get(long IqamaNo)
     {
         var isexist = await dbcontext
             .Employees
@@ -111,7 +111,7 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
         return Result.Success(response);
     }
 
-    public async Task<Result> DeleteAsync(int IqamaNo, CancellationToken cancellationToken = default)
+    public async Task<Result> DeleteAsync(long IqamaNo, CancellationToken cancellationToken = default)
     {
         var employee = await dbcontext.Employees.Where(c => c.IqamaNo == IqamaNo && c.RiderDetails == null).FirstOrDefaultAsync();
 
@@ -129,7 +129,7 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
         return Result.Success();
     }
 
-    public async Task<Result<EmpolyeeResponse>> UpdateAsync(int IqamaNo, UEmpolyeeRequest request)
+    public async Task<Result<EmpolyeeResponse>> UpdateAsync(long IqamaNo, UEmpolyeeRequest request)
     {
         var employee = await dbcontext.Employees.Where(c => c.IqamaNo == IqamaNo && c.RiderDetails == null).Include(c => c.Housing).FirstOrDefaultAsync();
 
@@ -189,7 +189,7 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
         return Result.Success(response);
     }
 
-    public async Task<Result> AddEmployeeToHousing(int IqamaNo, string HousingName)
+    public async Task<Result> AddEmployeeToHousing(long IqamaNo, string HousingName)
     {
         var isexist = await dbcontext
             .Employees
@@ -226,7 +226,7 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
 
     }
 
-    public async Task<Result> ChangeEmployeeToHousing(int IqamaNo, string oldHousingName, string NewHousingName)
+    public async Task<Result> ChangeEmployeeToHousing(long IqamaNo, string oldHousingName, string NewHousingName)
     {
         var isexist = await dbcontext
            .Employees
@@ -491,13 +491,13 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
                 )).ToListAsync();
     }
 
-    public async Task<Result> RequestEnableEmployeeAsync(int iqamaNo, string reason, string requestedBy)
+    public async Task<Result> RequestEnableEmployeeAsync(long IqamaNo, string reason, string requestedBy)
     {
         try
         {
             var employee = await dbcontext.Employees
                 .Include(e => e.RiderDetails)
-                .FirstOrDefaultAsync(e => e.IqamaNo == iqamaNo);
+                .FirstOrDefaultAsync(e => e.IqamaNo == IqamaNo);
 
             if (employee == null)
                 return Result.Failure(
@@ -505,7 +505,7 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
 
             // Check if there's already a pending request for this employee
             var existingRequest = await dbcontext.TempEmployeeStatusChanges
-                .AnyAsync(t => t.EmployeeIqamaNo == iqamaNo && !t.IsResolved);
+                .AnyAsync(t => t.EmployeeIqamaNo == IqamaNo && !t.IsResolved);
 
             if (existingRequest)
                 return Result.Failure(
@@ -514,7 +514,7 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
 
             var statusChange = new TempEmployeeStatusChange
             {
-                EmployeeIqamaNo = iqamaNo,
+                EmployeeIqamaNo = IqamaNo,
                 Action = "enable",
                 Reason = reason,
                 RequestedBy = requestedBy,
@@ -534,20 +534,20 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
         }
     }
 
-    public async Task<Result> RequestDisableEmployeeAsync(int iqamaNo, string reason, string requestedBy)
+    public async Task<Result> RequestDisableEmployeeAsync(long IqamaNo, string reason, string requestedBy)
     {
         try
         {
             var employee = await dbcontext.Employees
                 .Include(e => e.RiderDetails)
-                .FirstOrDefaultAsync(e => e.IqamaNo == iqamaNo);
+                .FirstOrDefaultAsync(e => e.IqamaNo == IqamaNo);
 
             if (employee == null)
                 return Result.Failure(
                     new Error("NotFound", "Employee not found", 404));
 
             var existingRequest = await dbcontext.TempEmployeeStatusChanges
-                .AnyAsync(t => t.EmployeeIqamaNo == iqamaNo && !t.IsResolved);
+                .AnyAsync(t => t.EmployeeIqamaNo == IqamaNo && !t.IsResolved);
 
             if (existingRequest)
                 return Result.Failure(
@@ -556,7 +556,7 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
 
             var statusChange = new TempEmployeeStatusChange
             {
-                EmployeeIqamaNo = iqamaNo,
+                EmployeeIqamaNo = IqamaNo,
                 Action = "Disable",
                 Reason = reason,
                 RequestedBy = requestedBy,
@@ -715,7 +715,7 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
 
 public record TempEmployeeStatusChangeResponse(
     int Id,
-    int EmployeeIqamaNo,
+    long EmployeeIqamaNo,
     string EmployeeNameAR,
     string EmployeeNameEN,
     string Action,

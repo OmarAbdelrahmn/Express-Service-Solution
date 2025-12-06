@@ -1,7 +1,9 @@
-﻿using Application.Service.Reports;
-using Domain.Migrations;
+﻿using Application.Service.export;
+using Application.Service.Reports;
+using Application.Service.Riders;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using System.Text.Json;
 
 namespace Express_Service.Controllers;
 
@@ -11,6 +13,139 @@ public class ReportController(IReportService service) : ControllerBase
 {
     private readonly IReportService service = service;
 
+
+    [HttpGet("export/dashboard/excel")]
+    public async Task<IActionResult> ExportDashboardToExcelAsync(
+        DateOnly? startDate = null,
+        DateOnly? endDate = null,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await service.GetComprehensiveDashboardAsync(
+            startDate, endDate, cancellationToken);
+
+        if (!result.IsSuccess)
+            return result.ToProblem();
+
+        var exportService = new ReportExportService();
+        var excelBytes = await exportService.ExportToExcelAsync(
+            result.Value, "ComprehensiveDashboard");
+
+        var fileName = $"Dashboard_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx";
+        return File(excelBytes,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            fileName);
+    }
+
+    [HttpGet("export/dashboard/pdf")]
+    public async Task<IActionResult> ExportDashboardToPdfAsync(
+        DateOnly? startDate = null,
+        DateOnly? endDate = null,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await service.GetComprehensiveDashboardAsync(
+            startDate, endDate, cancellationToken);
+
+        if (!result.IsSuccess)
+            return result.ToProblem();
+
+        var exportService = new ReportExportService();
+        var pdfBytes = await exportService.ExportToPdfAsync(
+            result.Value, "ComprehensiveDashboard");
+
+        var fileName = $"Dashboard_{DateTime.Now:yyyyMMdd_HHmmss}.pdf";
+        return File(pdfBytes, "application/pdf", fileName);
+    }
+
+    [HttpGet("export/monthly/{WorkingId}/excel")]
+    public async Task<IActionResult> ExportMonthlyToExcelAsync(
+        [FromRoute] string WorkingId,
+        [FromQuery] int year,
+        [FromQuery] int month,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await service.GetMonthlyReportByWorkingIdAsync(
+            WorkingId, year, month, cancellationToken);
+
+        if (!result.IsSuccess)
+            return result.ToProblem();
+
+        var exportService = new ReportExportService();
+        var excelBytes = await exportService.ExportToExcelAsync(
+            result.Value, "MonthlyRiderReport");
+
+        var fileName = $"Monthly_{WorkingId}_{year}{month:D2}.xlsx";
+        return File(excelBytes,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            fileName);
+    }
+
+    [HttpGet("export/top-riders/pdf")]
+    public async Task<IActionResult> ExportTopRidersToPdfAsync(
+        [FromQuery] DateOnly startDate,
+        [FromQuery] DateOnly endDate,
+        [FromQuery] int topCount = 100,
+        CancellationToken cancellationToken = default)
+    {
+        var request = new TopRidersRequest(
+            StartDate: startDate,
+            EndDate: endDate,
+            TopCount: topCount
+        );
+
+        var result = await service.GetTopRidersInPeriodAsync(request, cancellationToken);
+
+        if (!result.IsSuccess)
+            return result.ToProblem();
+
+        var exportService = new ReportExportService();
+        var pdfBytes = await exportService.ExportToPdfAsync(
+            result.Value, "TopRidersReport");
+
+        var fileName = $"TopRiders_{startDate:yyyyMMdd}_{endDate:yyyyMMdd}.pdf";
+        return File(pdfBytes, "application/pdf", fileName);
+    }
+
+    [HttpGet("export/generic/excel")]
+    public async Task<IActionResult> ExportGenericToExcelAsync(
+        [FromQuery] string reportType,
+        [FromQuery] string reportDataJson)
+    {
+        // This allows frontend to pass any report data as JSON
+        try
+        {
+            var exportService = new ReportExportService();
+
+            // Deserialize based on report type
+            object reportData = reportType switch
+            {
+                "ComprehensiveDashboard" =>
+                    JsonSerializer.Deserialize<ComprehensiveDashboard>(reportDataJson),
+                "MonthlyRiderReport" =>
+                    JsonSerializer.Deserialize<MonthlyRiderReport>(reportDataJson),
+                "TopRidersReport" =>
+                    JsonSerializer.Deserialize<TopRidersReport>(reportDataJson),
+                _ => throw new NotSupportedException($"Report type {reportType} not supported")
+            };
+
+            var method = typeof(ReportExportService)
+                .GetMethod(nameof(ReportExportService.ExportToExcelAsync))
+                .MakeGenericMethod(reportData.GetType());
+
+            var task = (Task<byte[]>)method.Invoke(exportService,
+                new[] { reportData, reportType });
+
+            var excelBytes = await task;
+
+            var fileName = $"{reportType}_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx";
+            return File(excelBytes,
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                fileName);
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
 
     [HttpGet("")]
     public async Task<IActionResult> GetDashboard(DateOnly? startDate = null,
@@ -25,15 +160,15 @@ public class ReportController(IReportService service) : ControllerBase
 
 
 
-    [HttpGet("monthly/{workingId:int}")]
+    [HttpGet("monthly/{WorkingId}")]
     public async Task<IActionResult> GetMonthlyReportByWorkingIdAsync(
-        [FromRoute] int workingId,
+        [FromRoute] string WorkingId,
         [FromQuery] int year,
         [FromQuery] int month,
         CancellationToken cancellationToken = default)
     {
         var result = await service.GetMonthlyReportByWorkingIdAsync(
-            workingId,
+            WorkingId,
             year,
             month,
             cancellationToken);
@@ -58,14 +193,14 @@ public class ReportController(IReportService service) : ControllerBase
             : result.ToProblem();
     }
 
-    [HttpGet("yearly/{workingId:int}")]
+    [HttpGet("yearly/{WorkingId}")]
     public async Task<IActionResult> GetYearlyReportByWorkingIdAsync(
-        [FromRoute] int workingId,
+        [FromRoute] string WorkingId,
         [FromQuery] int year,
         CancellationToken cancellationToken = default)
     {
         var result = await service.GetYearlyReportByWorkingIdAsync(
-            workingId,
+            WorkingId,
             year,
             cancellationToken);
         return result.IsSuccess
@@ -86,15 +221,15 @@ public class ReportController(IReportService service) : ControllerBase
             : result.ToProblem();
     }
 
-    [HttpGet("riders/{workingId:int}/renge")]
+    [HttpGet("riders/{WorkingId}/renge")]
     public async Task<IActionResult> GetCustomDateRangeReportByWorkingIdAsync(
-        [FromRoute] int workingId,
+        [FromRoute] string WorkingId,
         [FromQuery] DateOnly startDate,
         [FromQuery] DateOnly endDate,
         CancellationToken cancellationToken = default)
     {
         var result = await service.GetCustomDateRangeReportByWorkingIdAsync(
-            workingId,
+            WorkingId,
             startDate,
             endDate,
             cancellationToken);
@@ -189,9 +324,9 @@ public class ReportController(IReportService service) : ControllerBase
             : result.ToProblem();
     }
 
-    [HttpGet("riders/compare/{workingId:int}")]
+    [HttpGet("riders/compare/{WorkingId}")]
     public async Task<IActionResult> CompareRiderPeriodsAsync(
-        [FromRoute] int workingId,
+        [FromRoute] string WorkingId,
         [FromQuery] DateOnly period1Start,
         [FromQuery] DateOnly period1End,
         [FromQuery] DateOnly period2Start,
@@ -199,7 +334,7 @@ public class ReportController(IReportService service) : ControllerBase
         CancellationToken cancellationToken = default)
     {
         var result = await service.CompareRiderPeriodsAsync(
-            workingId,
+            WorkingId,
             period1Start,
             period1End,
             period2Start,
@@ -210,9 +345,9 @@ public class ReportController(IReportService service) : ControllerBase
             : result.ToProblem();
     }
 
-    [HttpGet("riders/compare-monthly/{workingId:int}")]
+    [HttpGet("riders/compare-monthly/{WorkingId}")]
     public async Task<IActionResult> CompareRidersMonthlyAsync(
-        [FromRoute] int workingId,
+        [FromRoute] string WorkingId,
         [FromQuery] int year1,
         [FromQuery] int month1,
         [FromQuery] int Year2,
@@ -220,7 +355,7 @@ public class ReportController(IReportService service) : ControllerBase
         CancellationToken cancellationToken = default)
     {
         var result = await service.CompareRiderMonthsAsync(
-            workingId,
+            WorkingId,
             year1,
             month1,
             Year2,
@@ -231,15 +366,15 @@ public class ReportController(IReportService service) : ControllerBase
             : result.ToProblem();
     }
     
-    [HttpGet("riders/compare-yearly/{workingId:int}")]
+    [HttpGet("riders/compare-yearly/{WorkingId}")]
     public async Task<IActionResult> CompareRiderYearlyAsync(
-        [FromRoute] int workingId,
+        [FromRoute] string WorkingId,
         [FromQuery] int year1,
         [FromQuery] int Year2,
         CancellationToken cancellationToken = default)
     {
         var result = await service.CompareRiderYearsAsync(
-            workingId,
+            WorkingId,
             year1,
             Year2,
             cancellationToken);
@@ -335,7 +470,7 @@ public class ReportController(IReportService service) : ControllerBase
     }
 
     [HttpGet("stacked/{WorkingId}")]
-    public async Task<IActionResult> GetMonthlyStackedDeliveriesByWorkingIdAsync(int WorkingId,
+    public async Task<IActionResult> GetMonthlyStackedDeliveriesByWorkingIdAsync(string WorkingId,
         [FromQuery]   int year,
         [FromQuery]  int month,
         CancellationToken cancellationToken = default)

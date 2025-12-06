@@ -23,8 +23,8 @@ public class EmployeeController(IEmployeeService service) : ControllerBase
             response.ToProblem();
     }
     
-    [HttpGet("{IqamaNo:int}")]
-    public async Task<IActionResult> Get(int IqamaNo)
+    [HttpGet("{IqamaNo:long}")]
+    public async Task<IActionResult> Get(long IqamaNo)
     {
         var response = await service.Get(IqamaNo);
 
@@ -42,8 +42,8 @@ public class EmployeeController(IEmployeeService service) : ControllerBase
             response.ToProblem();
     }
 
-    [HttpPut("{IqamaNo:int}")]
-    public async Task<IActionResult> Update(int IqamaNo, [FromBody] UEmpolyeeRequest Request)
+    [HttpPut("{IqamaNo:long}")]
+    public async Task<IActionResult> Update(long IqamaNo, [FromBody] UEmpolyeeRequest Request)
     {
         var response = await service.UpdateAsync(IqamaNo, Request);
         return response.IsSuccess ?
@@ -52,8 +52,8 @@ public class EmployeeController(IEmployeeService service) : ControllerBase
     }
     
 
-    [HttpDelete("{IqamaNo:int}")]
-    public async Task<IActionResult> Delete(int IqamaNo)
+    [HttpDelete("{IqamaNo:long}")]
+    public async Task<IActionResult> Delete(long IqamaNo)
     {
         var response = await service.DeleteAsync(IqamaNo);
         return response.IsSuccess ?

@@ -13,6 +13,111 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
 {
     private readonly ApplicationDbcontext dbcontext = dbcontext;
 
+    // Add these methods to RiderShiftService class
+
+    public async Task<Result<IEnumerable<AcceptedOrdersResponse>>> GetAcceptedOrdersByDateAsync(
+        DateOnly shiftDate,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var shifts = await dbcontext.RiderShifts
+                .Include(s => s.Rider)
+                    .ThenInclude(r => r.Employee)
+                .Include(s => s.Rider)
+                    .ThenInclude(r => r.Company)
+                .Where(s => s.ShiftDate == shiftDate)
+                .OrderBy(s => s.WorkingId)
+                .AsNoTracking()
+                .ToListAsync(cancellationToken);
+
+            if (!shifts.Any())
+            {
+                return Result.Failure<IEnumerable<AcceptedOrdersResponse>>(
+                    new Error("NotFound", $"No shifts found for date {shiftDate}", 404));
+            }
+
+            var responses = shifts.Select(MapToAcceptedOrdersResponse);
+            return Result.Success(responses);
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<IEnumerable<AcceptedOrdersResponse>>(
+                new Error("ServerError", $"Error retrieving accepted orders: {ex.Message}", 500));
+        }
+    }
+
+    public async Task<Result<IEnumerable<AcceptedOrdersResponse>>> GetPreviousDayAcceptedOrdersAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var previousDay = DateOnly.FromDateTime(DateTime.Today.AddDays(-1));
+        return await GetAcceptedOrdersByDateAsync(previousDay, cancellationToken);
+    }
+
+    public async Task<Result<AcceptedOrdersResponse>> GetAcceptedOrdersByRiderAndDateAsync(
+        string workingId,
+        DateOnly shiftDate,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var shift = await dbcontext.RiderShifts
+                .Include(s => s.Rider)
+                    .ThenInclude(r => r.Employee)
+                .Include(s => s.Rider)
+                    .ThenInclude(r => r.Company)
+                .FirstOrDefaultAsync(s =>
+                    s.WorkingId == workingId &&
+                    s.ShiftDate == shiftDate,
+                    cancellationToken);
+
+            if (shift is null)
+            {
+                return Result.Failure<AcceptedOrdersResponse>(
+                    new Error("NotFound",
+                        $"No shift found for rider {workingId} on {shiftDate}", 404));
+            }
+
+            var response = MapToAcceptedOrdersResponse(shift);
+            return Result.Success(response);
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<AcceptedOrdersResponse>(
+                new Error("ServerError", $"Error retrieving accepted orders: {ex.Message}", 500));
+        }
+    }
+
+    public async Task<Result<AcceptedOrdersResponse>> GetPreviousDayAcceptedOrdersByRiderAsync(
+        string workingId,
+        CancellationToken cancellationToken = default)
+    {
+        var previousDay = DateOnly.FromDateTime(DateTime.Today.AddDays(-1));
+        return await GetAcceptedOrdersByRiderAndDateAsync(workingId, previousDay, cancellationToken);
+    }
+
+    // Helper mapping method
+    private static AcceptedOrdersResponse MapToAcceptedOrdersResponse(RiderShift shift)
+    {
+        var (hasRejectionProblem, penaltyAmount) = CalculateRejectionPenalty(shift.RealRejectedDailyOrders);
+
+        return new AcceptedOrdersResponse(
+            shift.RiderId,
+            shift.WorkingId,
+            shift.Rider?.Employee?.NameEN ?? "Unknown",
+            shift.Rider?.Company?.Name ?? "Unknown",
+            shift.ShiftDate,
+            shift.AcceptedDailyOrders,
+            shift.RejectedDailyOrders,
+            shift.RealRejectedDailyOrders,
+            shift.StackedDeliveries,
+            shift.WorkingHours,
+            shift.ShiftStatus,
+            hasRejectionProblem,
+            penaltyAmount,
+            shift.CreatedAt
+        );
+    }
 
     public async Task<Result<BulkImportResult>> ImportShiftsFromExcelAsync(
         Stream excelStream,
@@ -62,8 +167,8 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
                 .ToListAsync(cancellationToken);
 
             var ridersByWorkingId = allRiderDetails
-                .Where(r => r.WorkingId.HasValue)
-                .ToDictionary(r => r.WorkingId!.Value, r => r);
+            .Where(r => !string.IsNullOrEmpty(r.WorkingId))
+            .ToDictionary(r => r.WorkingId!, r => r);
 
             var shiftsToAdd = new List<RiderShift>();
             var rowNumber = 1;
@@ -77,7 +182,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
 
                     if (!shiftData.IsValid)
                     {
-                        errors.Add(new ImportError(rowNumber, shiftData.WorkingId?.ToString() ?? "N/A", shiftData.ErrorMessage!));
+                        errors.Add(new ImportError(rowNumber, shiftData.WorkingId ?? "N/A", shiftData.ErrorMessage!));
                         continue;
                     }
 
@@ -85,12 +190,12 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
                     RiderDetails? riderWhoWorked = null;
 
                     // Check if this WorkingId has an active substitution
-                    if (substitutionDict.TryGetValue(shiftData.WorkingId!.Value, out var substitution))
+                    if (substitutionDict.TryGetValue(shiftData.WorkingId!, out var substitution))
                     {
                         // Substitute is working under ActualRider's account
                         riderWhoWorked = substitution.SubstituteRider; // ✅ Use substitute rider
                     }
-                    else if (ridersByWorkingId.TryGetValue(shiftData.WorkingId!.Value, out var rider))
+                    else if (ridersByWorkingId.TryGetValue(shiftData.WorkingId!, out var rider))
                     {
                         // No substitution, regular rider worked
                         riderWhoWorked = rider;
@@ -100,7 +205,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
                     {
                         errors.Add(new ImportError(
                             rowNumber,
-                            shiftData.WorkingId!.Value.ToString(),
+                            shiftData.WorkingId!,
                             $"No rider found with working ID {shiftData.WorkingId}"));
                         continue;
                     }
@@ -112,7 +217,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
                     {
                         errors.Add(new ImportError(
                             rowNumber,
-                            shiftData.WorkingId!.Value.ToString(),
+                            shiftData.WorkingId!,
                             $"Duplicate shift in Excel file for rider {riderWhoWorked.WorkingId}"));
                         continue;
                     }
@@ -130,7 +235,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
                     var shift = new RiderShift
                     {
                         RiderId = riderWhoWorked.Id, // ✅ Substitute's ID
-                        WorkingId = riderWhoWorked.WorkingId!.Value, // ✅ Substitute's WorkingId
+                        WorkingId = riderWhoWorked.WorkingId!, // ✅ Substitute's WorkingId
                         ShiftDate = shiftDate,
                         AcceptedDailyOrders = shiftData.AcceptedDailyOrders!.Value,
                         RejectedDailyOrders = shiftData.RejectedDailyOrders!.Value,
@@ -149,7 +254,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
                     {
                         errors.Add(new ImportError(
                             rowNumber,
-                            riderWhoWorked.WorkingId!.Value.ToString(),
+                            riderWhoWorked.WorkingId!,
                             $"WARNING: Shift has {realRejectedOrders} rejections (exceeds threshold of {rejectionThreshold}). Penalty: {penaltyAmount} SAR"));
                     }
                 }
@@ -305,8 +410,8 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
                 .ToListAsync(cancellationToken);
 
             var ridersByWorkingId = allRiderDetails
-                .Where(r => r.WorkingId.HasValue)
-                .ToDictionary(r => r.WorkingId!.Value, r => r);
+            .Where(r => !string.IsNullOrWhiteSpace(r.WorkingId))
+             .ToDictionary(r => r.WorkingId!, r => r);
 
             var existingShifts = await dbcontext.RiderShifts
                 .Include(s => s.Rider)
@@ -352,10 +457,10 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
                     // ✅ Determine who actually worked
                     RiderDetails? riderWhoWorked = null;
                     bool isSubstitution = false;
-                    int? actualRiderWorkingId = null;  // ✅ Changed variable name for clarity
+                    string? actualRiderWorkingId = null;  // ✅ Changed variable name for clarity
 
                     // Check if this WorkingId has an active substitution
-                    if (substitutionDict.TryGetValue(shiftData.WorkingId!.Value, out var substitution))
+                    if (substitutionDict.TryGetValue(shiftData.WorkingId!, out var substitution))
                     {
                         // ✅ Substitute is working under ActualRider's account
                         riderWhoWorked = substitution.SubstituteRider;  // ✅ Use substitute rider
@@ -365,7 +470,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
                         //Console.WriteLine($"[SUBSTITUTION] Rider {riderWhoWorked.Employee.NameEN} (Substitute ID: {riderWhoWorked.WorkingId}) " +
                         //                $"working under actual rider's ID {shiftData.WorkingId}");
                     }
-                    else if (ridersByWorkingId.TryGetValue(shiftData.WorkingId!.Value, out var rider))
+                    else if (ridersByWorkingId.TryGetValue(shiftData.WorkingId!, out var rider))
                     {
                         // ✅ No substitution, regular rider worked
                         riderWhoWorked = rider;
@@ -377,7 +482,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
                     {
                         errors.Add(new ImportError(
                             rowNumber,
-                            shiftData.WorkingId!.Value.ToString(),
+                            shiftData.WorkingId!,
                             $"No rider found with working ID {shiftData.WorkingId}. " +
                             $"Check if rider exists or if there's an active substitution."));
                         continue;
@@ -392,7 +497,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
                     {
                         errors.Add(new ImportError(
                             rowNumber,
-                            shiftData.WorkingId!.Value.ToString(),
+                            shiftData.WorkingId!,
                             $"Duplicate entry in Excel for Working ID {shiftData.WorkingId} " +
                             $"(Rider: {riderWhoWorked.Employee.NameEN})"));
                         continue;
@@ -408,13 +513,13 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
 
                     // ✅ Look for existing shift using rider who worked's details
                     var existingShift = existingShiftDict
-                        .GetValueOrDefault((riderWhoWorked.Id, riderWhoWorked.WorkingId!.Value));
+                        .GetValueOrDefault((riderWhoWorked.Id, riderWhoWorked.WorkingId!));
 
                     // ✅ Create comparison for the rider who actually worked
                     var tempComparison = new TempRiderShiftComparison
                     {
                         RiderId = riderWhoWorked.Id,  // ✅ Substitute's ID
-                        WorkingId = riderWhoWorked.WorkingId!.Value,  // ✅ Substitute's WorkingId
+                        WorkingId = riderWhoWorked.WorkingId!,  // ✅ Substitute's WorkingId
                         ShiftDate = shiftDate,
                         CompanyId = riderWhoWorked.CompanyId,
 
@@ -452,7 +557,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
                     {
                         errors.Add(new ImportError(
                             rowNumber,
-                            shiftData.WorkingId!.Value.ToString(),
+                            shiftData.WorkingId!,
                             $"INFO: Rider {riderWhoWorked.Employee.NameEN} (Working ID: {riderWhoWorked.WorkingId}) " +
                             $"is substituting for rider with ID {actualRiderWorkingId}"));
                     }
@@ -888,7 +993,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
 
     private static (
         bool IsValid,
-        int? WorkingId,
+        string? WorkingId,
         int? AcceptedDailyOrders,
         int? RejectedDailyOrders,
         int? StackedDeliveries,         
@@ -898,7 +1003,8 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
         try
         {
             var workingIdCell = row.Cell(mapping.WorkingIdColumn).Value;
-            if (!int.TryParse(workingIdCell.ToString(), out var workingId))
+            var workingId = workingIdCell.ToString()?.Trim();
+            if (string.IsNullOrWhiteSpace(workingId))
                 return (false, null, null, null, null, null, "Invalid Working ID");
 
             var acceptedCell = row.Cell(mapping.AcceptedOrdersColumn).Value;
@@ -919,10 +1025,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
 
 
 
-            //var hoursCell = row.Cell(mapping.WorkingHoursColumn).Value;
-            //if (!float.TryParse(hoursCell.ToString(), out var workingHours) || workingHours < 0 || workingHours > 24)
-            //    return (false, workingId, acceptedOrders, rejectedOrders, realRejectedOrders, null, "Invalid Working Hours (must be 0-24)");
-
+ 
             return (true, workingId, acceptedOrders, rejectedOrders, stackedDeliveries, workingHours, null);
         }
         catch (Exception ex)
@@ -1086,7 +1189,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
     }
 
     public async Task<Result<RiderShiftResponse>> GetShiftAsync(
-        int workingId,
+        string WorkingId,
         DateOnly shiftDate,
         CancellationToken cancellationToken = default)
     {
@@ -1098,7 +1201,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
                 .Include(s => s.Rider)
                     .ThenInclude(r => r.Company)
                 .FirstOrDefaultAsync(s =>
-                                         s.WorkingId == workingId &&
+                                         s.WorkingId.Trim() == WorkingId.Trim() &&
                                          s.ShiftDate == shiftDate,
                                     cancellationToken);
 
@@ -1117,7 +1220,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
     }
 
     public async Task<Result<IEnumerable<RiderShiftResponse>>> GetShiftsByRiderAsync(
-        int WorkingId,
+        string WorkingId,
         CancellationToken cancellationToken = default)
     {
         try
@@ -1256,7 +1359,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
     }
 
     public async Task<Result> DeleteShiftAsync(
-        int workingId,
+        string WorkingId,
         DateOnly shiftDate,
         CancellationToken cancellationToken = default)
     {
@@ -1266,7 +1369,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
         {
             var shift = await dbcontext.RiderShifts
                 .FirstOrDefaultAsync(s =>
-                                         s.WorkingId == workingId &&
+                                         s.WorkingId == WorkingId &&
                                          s.ShiftDate == shiftDate,
                                     cancellationToken);
 
@@ -1286,22 +1389,22 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
         }
     }
 
-    private async Task<(int riderId, int? originalWorkingId, bool isSubstitution)> GetActualRiderAsync(
-        int workingId,
+    private async Task<(int riderId, string? originalWorkingId, bool isSubstitution)> GetActualRiderAsync(
+        string WorkingId,
         CancellationToken cancellationToken)
     {
         var substitution = await dbcontext.Set<RiderShiftSubstitution>()
             .Include(s => s.ActualRider)
-            .FirstOrDefaultAsync(s => s.SubstituteWorkingId == workingId && s.IsActive,
+            .FirstOrDefaultAsync(s => s.SubstituteWorkingId == WorkingId && s.IsActive,
                                 cancellationToken);
 
         if (substitution != null)
         {
-            return (substitution.ActualRiderId, workingId, true);
+            return (substitution.ActualRiderId, WorkingId   , true);
         }
 
         var rider = await dbcontext.RiderDetails
-            .FirstOrDefaultAsync(r => r.WorkingId == workingId, cancellationToken);
+            .FirstOrDefaultAsync(r => r.WorkingId == WorkingId, cancellationToken);
 
         return rider != null ? (rider.Id, null, false) : (0, null, false);
     }
@@ -1447,7 +1550,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
     }
 
     public async Task<Result<BulkDeleteResult>> DeleteShiftsByRiderAndDateRangeAsync(
-        int workingId,
+        string WorkingId,
         DateOnly startDate,
         DateOnly endDate,
         CancellationToken cancellationToken = default)
@@ -1462,7 +1565,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
 
             // Verify rider exists
             var riderExists = await dbcontext.RiderDetails
-                .AnyAsync(r => r.WorkingId == workingId, cancellationToken);
+                .AnyAsync(r => r.WorkingId == WorkingId, cancellationToken);
 
             if (!riderExists)
             {
@@ -1471,7 +1574,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
             }
 
             var shiftsToDelete = await dbcontext.RiderShifts
-                .Where(s => s.RiderId == workingId &&
+                .Where(s => s.WorkingId == WorkingId &&
                            s.ShiftDate >= startDate &&
                            s.ShiftDate <= endDate)
                 .Include(s => s.Rider)
@@ -1534,7 +1637,7 @@ public static class ExcelColumnConfig
 public class ShiftConflictDto
 {
     public int RiderId { get; set; }
-    public int WorkingId { get; set; }
+    public string WorkingId { get; set; }
     public DateOnly ShiftDate { get; set; }
     public int RowNumber { get; set; }
     public string RiderName { get; set; } = string.Empty;
@@ -1557,7 +1660,7 @@ public class ShiftDto
 public class ConflictResolutionChoice
 {
     public int RiderId { get; set; }
-    public int WorkingId { get; set; }
+    public string WorkingId { get; set; }
     public DateOnly ShiftDate { get; set; }
     public ConflictResolution Resolution { get; set; }
 }

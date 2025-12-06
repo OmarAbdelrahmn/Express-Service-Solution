@@ -5,7 +5,7 @@ using System.Text;
 namespace Application.Contracts.Employees;
 
 public record EmpolyeeResponse(
-    int IqamaNo,
+    long IqamaNo,
     DateOnly IqamaEndM,
     DateOnly IqamaEndH,
     string PassportNo,
@@ -24,7 +24,7 @@ public record EmpolyeeResponse(
     DateTime CreatedAt
     );
 public record EmpolyeeRequest(
-    int IqamaNo,
+    long IqamaNo,
     DateOnly? IqamaEndM,
     DateOnly? IqamaEndH,
     string PassportNo,
@@ -59,7 +59,7 @@ public record UEmpolyeeRequest(
     bool? INKSA
     );
 public record RiderResponse(
-    int IqamaNo,
+    long IqamaNo,
     DateOnly IqamaEndM,
     DateOnly IqamaEndH,
     string PassportNo,
@@ -77,8 +77,8 @@ public record RiderResponse(
     bool INKSA,
     DateTime CreatedAt,
     string HousingAddress,
-    int? WorkingId, 
-    int EmployeeIqamaNo,
+    string? WorkingId, 
+    long EmployeeIqamaNo,
     string? TshirtSize, 
     string? LicenseNumber, 
     string? CompanyName 

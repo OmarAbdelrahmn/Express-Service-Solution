@@ -18,17 +18,17 @@ public class ShiftController(IRiderShiftService service) : ControllerBase
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
 
-    [HttpGet("{workingId:int}")]
-    public async Task<IActionResult> GetShiftAsync(int workingId,[FromQuery] DateOnly shiftDate, CancellationToken cancellationToken)
+    [HttpGet("{WorkingId}")]
+    public async Task<IActionResult> GetShiftAsync(string WorkingId,[FromQuery] DateOnly shiftDate, CancellationToken cancellationToken)
     {
-        var result = await service.GetShiftAsync(workingId , shiftDate , cancellationToken);
+        var result = await service.GetShiftAsync(WorkingId , shiftDate , cancellationToken);
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
 
-    [HttpGet("rider/{workingId:int}")]
-    public async Task<IActionResult> GetShiftsByRiderAsync(int workingId, CancellationToken cancellationToken)
+    [HttpGet("rider/{WorkingId}")]
+    public async Task<IActionResult> GetShiftsByRiderAsync(string WorkingId, CancellationToken cancellationToken)
     {
-        var result = await service.GetShiftsByRiderAsync(workingId, cancellationToken);
+        var result = await service.GetShiftsByRiderAsync(WorkingId, cancellationToken);
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
 
@@ -46,10 +46,10 @@ public class ShiftController(IRiderShiftService service) : ControllerBase
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
 
-    [HttpDelete("{workingId:int}")]
-    public async Task<IActionResult> DeleteShiftAsync(int workingId,[FromQuery] DateOnly shiftDate, CancellationToken cancellationToken)
+    [HttpDelete("{WorkingId}")]
+    public async Task<IActionResult> DeleteShiftAsync(string WorkingId,[FromQuery] DateOnly shiftDate, CancellationToken cancellationToken)
     {
-        var result = await service.DeleteShiftAsync(workingId, shiftDate, cancellationToken);
+        var result = await service.DeleteShiftAsync(WorkingId, shiftDate, cancellationToken);
         return result.IsSuccess ? Ok() : result.ToProblem();
     }
 
@@ -86,10 +86,50 @@ public class ShiftController(IRiderShiftService service) : ControllerBase
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
 
-    [HttpDelete("rider/{workingId:int}/range")]
-    public async Task<IActionResult> DeleteShiftsByRiderAndDateRangeAsync(int workingId, [FromQuery] DateOnly startDate, [FromQuery] DateOnly endDate, CancellationToken cancellationToken)
+    // Add these endpoints to ShiftController class
+
+    [HttpGet("accepted/date")]
+    public async Task<IActionResult> GetAcceptedOrdersByDateAsync(
+        [FromQuery] DateOnly shiftDate,
+        CancellationToken cancellationToken)
     {
-        var result = await service.DeleteShiftsByRiderAndDateRangeAsync(workingId, startDate, endDate, cancellationToken);
+        var result = await service.GetAcceptedOrdersByDateAsync(shiftDate, cancellationToken);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    [HttpGet("accepted/previous-day")]
+    public async Task<IActionResult> GetPreviousDayAcceptedOrdersAsync(
+        CancellationToken cancellationToken)
+    {
+        var result = await service.GetPreviousDayAcceptedOrdersAsync(cancellationToken);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    [HttpGet("accepted/rider/{workingId}")]
+    public async Task<IActionResult> GetAcceptedOrdersByRiderAndDateAsync(
+        string workingId,
+        [FromQuery] DateOnly shiftDate,
+        CancellationToken cancellationToken)
+    {
+        var result = await service.GetAcceptedOrdersByRiderAndDateAsync(
+            workingId, shiftDate, cancellationToken);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    [HttpGet("accepted/rider/{workingId}/previous-day")]
+    public async Task<IActionResult> GetPreviousDayAcceptedOrdersByRiderAsync(
+        string workingId,
+        CancellationToken cancellationToken)
+    {
+        var result = await service.GetPreviousDayAcceptedOrdersByRiderAsync(
+            workingId, cancellationToken);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    [HttpDelete("rider/{WorkingId}/range")]
+    public async Task<IActionResult> DeleteShiftsByRiderAndDateRangeAsync(string WorkingId, [FromQuery] DateOnly startDate, [FromQuery] DateOnly endDate, CancellationToken cancellationToken)
+    {
+        var result = await service.DeleteShiftsByRiderAndDateRangeAsync(WorkingId, startDate, endDate, cancellationToken);
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
 

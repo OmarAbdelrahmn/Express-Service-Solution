@@ -56,10 +56,10 @@ public class RiderSub(ApplicationDbcontext dbcontext) : IRiderSub
             var substitution = new RiderShiftSubstitution
             {
                 ActualRiderId = actualRider.Id,
-                ActualRiderWorkingId = actualRider.WorkingId!.Value,
+                ActualRiderWorkingId = actualRider.WorkingId!,
                 SubstituteRiderId = substituteRider.Id,
-                SubstituteWorkingId = substituteRider.WorkingId!.Value,
-                StartDate = DateTime.UtcNow,
+                SubstituteWorkingId = substituteRider.WorkingId!,
+                StartDate = DateTime.UtcNow.AddHours(3),
                 Reason = request.Reason,
                 CreatedBy = request.CreatedBy ?? "System",
                 IsActive = true
@@ -73,7 +73,7 @@ public class RiderSub(ApplicationDbcontext dbcontext) : IRiderSub
             var response = new RiderSubstitutionResponse(
                 substitution.Id,
                 actualRider.Employee.NameEN,
-                actualRider.WorkingId!.Value,
+                actualRider.WorkingId!,
                 substituteRider.Employee.NameEN,
                 substitution.SubstituteWorkingId,
                 substitution.StartDate,
@@ -93,7 +93,7 @@ public class RiderSub(ApplicationDbcontext dbcontext) : IRiderSub
     }
 
     public async Task<Result<RiderSubstitutionResponse>> StopSubstitutionByWorkingId(
-        int workingId,
+        string WorkingId,
         CancellationToken cancellationToken = default)
     {
         using var transaction = await _dbcontext.Database.BeginTransactionAsync(cancellationToken);
@@ -105,14 +105,14 @@ public class RiderSub(ApplicationDbcontext dbcontext) : IRiderSub
                     .ThenInclude(r => r.Employee)
                 .Include(s => s.SubstituteRider)
                     .ThenInclude(r => r.Employee)
-                .FirstOrDefaultAsync(s => s.ActualRider.WorkingId == workingId && s.IsActive,
+                .FirstOrDefaultAsync(s => s.ActualRider.WorkingId == WorkingId && s.IsActive,
                     cancellationToken);
 
             if (substitution is null)
                 return Result.Failure<RiderSubstitutionResponse>(
                     new Error("NotFound", "No active substitution found for this working ID", 404));
 
-            substitution.EndDate = DateTime.UtcNow;
+            substitution.EndDate = DateTime.UtcNow.AddHours(3);
             substitution.IsActive = false;
 
             await _dbcontext.SaveChangesAsync(cancellationToken);
@@ -121,7 +121,7 @@ public class RiderSub(ApplicationDbcontext dbcontext) : IRiderSub
             var response = new RiderSubstitutionResponse(
                 substitution.Id,
                 substitution.ActualRider.Employee.NameEN,
-                substitution.ActualRider.WorkingId ?? 0,
+                substitution.ActualRider.WorkingId ?? "0",
                 substitution.SubstituteRider.Employee.NameEN,
                 substitution.SubstituteWorkingId,
                 substitution.StartDate,
@@ -154,7 +154,7 @@ public class RiderSub(ApplicationDbcontext dbcontext) : IRiderSub
                 .Select(s => new RiderSubstitutionResponse(
                     s.Id,
                     s.ActualRider.Employee.NameEN,
-                    s.ActualRider.WorkingId ?? 0,
+                    s.ActualRider.WorkingId ?? "0",
                     s.SubstituteRider.Employee.NameEN,
                     s.SubstituteWorkingId,
                     s.StartDate,
@@ -174,7 +174,7 @@ public class RiderSub(ApplicationDbcontext dbcontext) : IRiderSub
     }
 
     public async Task<Result<IEnumerable<RiderSubstitutionResponse>>> GetSubstitutionHistory(
-        int riderWorkingId,
+        string riderWorkingId,
         CancellationToken cancellationToken = default)
     {
         try
@@ -189,7 +189,7 @@ public class RiderSub(ApplicationDbcontext dbcontext) : IRiderSub
                 .Select(s => new RiderSubstitutionResponse(
                     s.Id,
                     s.ActualRider.Employee.NameEN,
-                    s.ActualRider.WorkingId ?? 0,
+                    s.ActualRider.WorkingId ?? "0",
                     s.SubstituteRider.Employee.NameEN,
                     s.SubstituteWorkingId,
                     s.StartDate,
@@ -223,7 +223,7 @@ public class RiderSub(ApplicationDbcontext dbcontext) : IRiderSub
                 .Select(s => new RiderSubstitutionResponse(
                     s.Id,
                     s.ActualRider.Employee.NameEN,
-                    s.ActualRider.WorkingId ?? 0,
+                    s.ActualRider.WorkingId ?? "0",
                     s.SubstituteRider.Employee.NameEN,
                     s.SubstituteWorkingId,
                     s.StartDate,
@@ -256,7 +256,7 @@ public class RiderSub(ApplicationDbcontext dbcontext) : IRiderSub
                 .Select(s => new RiderSubstitutionResponse(
                     s.Id,
                     s.ActualRider.Employee.NameEN,
-                    s.ActualRider.WorkingId ?? 0,
+                    s.ActualRider.WorkingId ?? "0",
                     s.SubstituteRider.Employee.NameEN,
                     s.SubstituteWorkingId,
                     s.StartDate,

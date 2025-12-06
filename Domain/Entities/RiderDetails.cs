@@ -7,8 +7,8 @@ namespace Domain.Entities;
 public class RiderDetails
 {
     public int Id { get; set; }
-    public int? WorkingId { get; set; }
-    public int EmployeeIqamaNo { get; set; }
+    public string? WorkingId { get; set; }
+    public long EmployeeIqamaNo { get; set; }
     public string? TshirtSize { get; set; }
     public string? LicenseNumber { get; set; }
     public int CompanyId { get; set; }

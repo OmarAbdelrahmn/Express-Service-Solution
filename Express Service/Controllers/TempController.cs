@@ -39,19 +39,19 @@ public class TempController(ITemp service , IEmployeeService service1 , IVehicle
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
 
-    [HttpPost("employee-request-enable/{iqamaNo:int}")]
-    public async Task<IActionResult> RequestEnableEmployee(int iqamaNo, string Reason, string RequestedBy)
+    [HttpPost("employee-request-enable/{IqamaNo:long}")]
+    public async Task<IActionResult> RequestEnableEmployee(long IqamaNo, string Reason, string RequestedBy)
     {
-        var response = await service1.RequestEnableEmployeeAsync(iqamaNo, Reason, RequestedBy);
+        var response = await service1.RequestEnableEmployeeAsync(IqamaNo, Reason, RequestedBy);
         return response.IsSuccess ?
             Ok(new Re("Enable request submitted successfully.")) :
             response.ToProblem();
     }
 
-    [HttpPut("employee-request-disable/{iqamaNo:int}")]
-    public async Task<IActionResult> RequestDisableEmployee(int iqamaNo, string Reason, string RequestedBy)
+    [HttpPut("employee-request-disable/{IqamaNo:long}")]
+    public async Task<IActionResult> RequestDisableEmployee(long IqamaNo, string Reason, string RequestedBy)
     {
-        var response = await service1.RequestDisableEmployeeAsync(iqamaNo, Reason, RequestedBy);
+        var response = await service1.RequestDisableEmployeeAsync(IqamaNo, Reason, RequestedBy);
         return response.IsSuccess ?
             Ok(new Re("Disable request submitted successfully.")) :
             response.ToProblem();

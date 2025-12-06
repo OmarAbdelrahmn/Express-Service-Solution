@@ -35,10 +35,10 @@ public class SubstitutionController(IRiderSub service) : ControllerBase
             ? Ok(result.Value)
             : result.ToProblem();
     }
-    [HttpGet("history/{RiderWorkingId:int}")]
-    public async Task<IActionResult> GetHistory(int RiderWorkingId)
+    [HttpGet("history/{RiderworkingId}")]
+    public async Task<IActionResult> GetHistory(string RiderworkingId)
     {
-        var result = await service.GetSubstitutionHistory(RiderWorkingId);
+        var result = await service.GetSubstitutionHistory(RiderworkingId);
         return result.IsSuccess
             ? Ok(result.Value)
             : result.ToProblem();
@@ -52,10 +52,10 @@ public class SubstitutionController(IRiderSub service) : ControllerBase
             : result.ToProblem();
     }
 
-    [HttpPut("{workingId}/stop")]
-    public async Task<IActionResult> StopSubstitution(int workingId)
+    [HttpPut("{WorkingId}/stop")]
+    public async Task<IActionResult> StopSubstitution(string WorkingId)
     {
-        var result = await service.StopSubstitutionByWorkingId(workingId);
+        var result = await service.StopSubstitutionByWorkingId(WorkingId);
         return result.IsSuccess
             ? Ok(result.Value)
             : result.ToProblem();

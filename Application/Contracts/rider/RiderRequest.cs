@@ -6,7 +6,7 @@ namespace Application.Contracts.rider;
 
 public record RiderRequest
 (
-    int IqamaNo,
+    long IqamaNo,
     DateOnly IqamaEndM,
     DateOnly IqamaEndH,
     string PassportNo,
@@ -22,7 +22,7 @@ public record RiderRequest
     string Status,
     string IBAN,
     bool INKSA,
-    int WorkingId,
+    string WorkingId,
     string TshirtSize,
     string LicenseNumber,
     string CompanyName
@@ -44,8 +44,8 @@ public record URiderRequest
     string? Status,
     string? IBAN,
     bool? INKSA,
-    int? WorkingId,
-    int? EmployeeIqamaNo,
+    string? WorkingId,
+    long? EmployeeIqamaNo,
     string? TshirtSize,
     string? LicenseNumber,
     string? CompanyName
@@ -53,7 +53,7 @@ public record URiderRequest
 
 public record EMTOR
 (
-    int? WorkingId,
+    string? WorkingId,
     string? TshirtSize,
     string? LicenseNumber,
     string? CompanyName,

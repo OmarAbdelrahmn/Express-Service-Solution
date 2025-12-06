@@ -169,7 +169,7 @@ namespace Domain.Migrations
                             IsDisable = false,
                             LockoutEnabled = false,
                             NormalizedUserName = "ADMIN",
-                            PasswordHash = "AQAAAAIAAYagAAAAEEkH8cY3D76gmouRUWAeRGYneTrEXJc9wycYlAph8qvFP4JMKVPGKtlHLSmr/2a1YA==",
+                            PasswordHash = "AQAAAAIAAYagAAAAEJmaWg42o3LN4b53Ugf9Lyx/dpHrMCbetjuC+kOmui/c6ctQMU5JB3j9NXzB6J67yw==",
                             PhoneNumberConfirmed = false,
                             SecurityStamp = "9FABB58491024B7BB140E4D6658B5BDA",
                             TwoFactorEnabled = false,
@@ -186,41 +186,12 @@ namespace Domain.Migrations
                             IsDisable = false,
                             LockoutEnabled = false,
                             NormalizedUserName = "MASTER",
-                            PasswordHash = "AQAAAAIAAYagAAAAEKTZdzjYQMLzgTGf389LMUOLsQjFA2VKbU1r8JK8PUTb/J5LgUsXzkSnGynBJo4OpQ==",
+                            PasswordHash = "AQAAAAIAAYagAAAAEJVMSrwscEutv0axNqQUZiX8dm3+F6bj55iCGDtfRbC6xDq/mnk99wy2WkJy0oHDYg==",
                             PhoneNumberConfirmed = false,
                             SecurityStamp = "9FABB58491024B7BB140E4D6658B5BDA",
                             TwoFactorEnabled = false,
                             UserName = "Master"
                         });
-                });
-
-            modelBuilder.Entity("Domain.Entities.ArchivedRiderShift", b =>
-                {
-                    b.Property<int>("id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("id"));
-
-                    b.Property<int>("DailyOrders")
-                        .HasColumnType("int");
-
-                    b.Property<int>("RiderId")
-                        .HasColumnType("int");
-
-                    b.Property<DateOnly>("ShiftDate")
-                        .HasColumnType("date");
-
-                    b.Property<string>("ShiftStatus")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<int>("WorkingId")
-                        .HasColumnType("int");
-
-                    b.HasKey("id");
-
-                    b.ToTable("ArchivedRiderShifts");
                 });
 
             modelBuilder.Entity("Domain.Entities.Company", b =>
@@ -301,8 +272,8 @@ namespace Domain.Migrations
                     b.Property<DateOnly>("IqamaEndM")
                         .HasColumnType("date");
 
-                    b.Property<int>("IqamaNo")
-                        .HasColumnType("int");
+                    b.Property<long>("IqamaNo")
+                        .HasColumnType("bigint");
 
                     b.Property<string>("JobTitle")
                         .IsRequired()
@@ -342,8 +313,8 @@ namespace Domain.Migrations
                     b.Property<int?>("VehicleId")
                         .HasColumnType("int");
 
-                    b.Property<int?>("WorkingId")
-                        .HasColumnType("int");
+                    b.Property<string>("WorkingId")
+                        .HasColumnType("nvarchar(max)");
 
                     b.HasKey("Id");
 
@@ -373,8 +344,8 @@ namespace Domain.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
-                    b.Property<int>("EmployeeIqamaNo")
-                        .HasColumnType("int");
+                    b.Property<long>("EmployeeIqamaNo")
+                        .HasColumnType("bigint");
 
                     b.Property<string>("IqamaImagePath")
                         .HasColumnType("nvarchar(max)");
@@ -401,8 +372,8 @@ namespace Domain.Migrations
 
             modelBuilder.Entity("Domain.Entities.Employees", b =>
                 {
-                    b.Property<int>("IqamaNo")
-                        .HasColumnType("int");
+                    b.Property<long>("IqamaNo")
+                        .HasColumnType("bigint");
 
                     b.Property<string>("Country")
                         .IsRequired()
@@ -499,8 +470,8 @@ namespace Domain.Migrations
                     b.Property<int>("Capacity")
                         .HasColumnType("int");
 
-                    b.Property<int?>("ManagerId")
-                        .HasColumnType("int");
+                    b.Property<long?>("ManagerIqamaNo")
+                        .HasColumnType("bigint");
 
                     b.Property<string>("Name")
                         .IsRequired()
@@ -558,8 +529,8 @@ namespace Domain.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
-                    b.Property<int>("EmployeeIqamaNo")
-                        .HasColumnType("int");
+                    b.Property<long>("EmployeeIqamaNo")
+                        .HasColumnType("bigint");
 
                     b.Property<string>("LicenseNumber")
                         .HasColumnType("nvarchar(max)");
@@ -570,8 +541,8 @@ namespace Domain.Migrations
                     b.Property<string>("VehicleNumber")
                         .HasColumnType("nvarchar(450)");
 
-                    b.Property<int?>("WorkingId")
-                        .HasColumnType("int");
+                    b.Property<string>("WorkingId")
+                        .HasColumnType("nvarchar(max)");
 
                     b.HasKey("Id");
 
@@ -592,8 +563,8 @@ namespace Domain.Migrations
                     b.Property<DateOnly>("ShiftDate")
                         .HasColumnType("date");
 
-                    b.Property<int>("WorkingId")
-                        .HasColumnType("int");
+                    b.Property<string>("WorkingId")
+                        .HasColumnType("nvarchar(450)");
 
                     b.Property<int>("AcceptedDailyOrders")
                         .HasColumnType("int");
@@ -647,8 +618,9 @@ namespace Domain.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("int");
 
-                    b.Property<int>("ActualRiderWorkingId")
-                        .HasColumnType("int");
+                    b.Property<string>("ActualRiderWorkingId")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("CreatedBy")
                         .IsRequired()
@@ -674,9 +646,10 @@ namespace Domain.Migrations
                     b.Property<int>("SubstituteRiderId")
                         .HasColumnType("int");
 
-                    b.Property<int>("SubstituteWorkingId")
+                    b.Property<string>("SubstituteWorkingId")
+                        .IsRequired()
                         .HasMaxLength(50)
-                        .HasColumnType("int");
+                        .HasColumnType("nvarchar(50)");
 
                     b.HasKey("Id");
 
@@ -695,8 +668,8 @@ namespace Domain.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
-                    b.Property<int?>("EmployeeIqamaNo")
-                        .HasColumnType("int");
+                    b.Property<long?>("EmployeeIqamaNo")
+                        .HasColumnType("bigint");
 
                     b.Property<bool>("IsActive")
                         .HasColumnType("bit");
@@ -737,8 +710,8 @@ namespace Domain.Migrations
                     b.Property<string>("AdminNotes")
                         .HasColumnType("nvarchar(max)");
 
-                    b.Property<int>("EmployeeIqamaNo")
-                        .HasColumnType("int");
+                    b.Property<long>("EmployeeIqamaNo")
+                        .HasColumnType("bigint");
 
                     b.Property<bool>("IsResolved")
                         .HasColumnType("bit");
@@ -784,8 +757,8 @@ namespace Domain.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
-                    b.Property<int>("IqamaNo")
-                        .HasColumnType("int");
+                    b.Property<long>("IqamaNo")
+                        .HasColumnType("bigint");
 
                     b.Property<bool>("IsNewEmployee")
                         .HasColumnType("bit");
@@ -970,8 +943,8 @@ namespace Domain.Migrations
                     b.Property<float?>("OldWorkingHours")
                         .HasColumnType("real");
 
-                    b.Property<int?>("OriginalRiderWorkingId")
-                        .HasColumnType("int");
+                    b.Property<string>("OriginalRiderWorkingId")
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<int>("RiderId")
                         .HasColumnType("int");
@@ -982,8 +955,9 @@ namespace Domain.Migrations
                     b.Property<DateTime>("UploadedAt")
                         .HasColumnType("datetime2");
 
-                    b.Property<int>("WorkingId")
-                        .HasColumnType("int");
+                    b.Property<string>("WorkingId")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(450)");
 
                     b.HasKey("Id");
 
@@ -1036,8 +1010,8 @@ namespace Domain.Migrations
                     b.Property<string>("ResolvedBy")
                         .HasColumnType("nvarchar(max)");
 
-                    b.Property<int>("RiderIqamaNo")
-                        .HasColumnType("int");
+                    b.Property<long>("RiderIqamaNo")
+                        .HasColumnType("bigint");
 
                     b.Property<string>("VehicleNumber")
                         .IsRequired()
