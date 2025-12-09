@@ -32,6 +32,61 @@ public class EmployeeController(IEmployeeService service) : ControllerBase
             Ok(response.Value) :
             response.ToProblem();
     }
+    
+    [HttpGet("one/{IqamaNo:long}")]
+    public async Task<IActionResult> Get1(long IqamaNo)
+    {
+        var response = await service.Get1(IqamaNo);
+
+        return response.IsSuccess ?
+            Ok(response.Value) :
+            response.ToProblem();
+    }
+
+    [HttpGet("history/{iqamaNo}")]
+    public async Task<IActionResult> GetEmployeeHistory(long iqamaNo)
+    {
+        var response = await service.GetEmployeeStatusHistoryAsync(iqamaNo);
+
+        return response.IsSuccess ?
+            Ok(response.Value) :
+            response.ToProblem();
+    }
+
+    [HttpGet("date-range")]
+    public async Task<IActionResult> GetStatusChangesByDateRange(
+       [FromQuery] DateTime startDate,
+       [FromQuery] DateTime endDate)
+    {
+        if (startDate > endDate)
+            return BadRequest(new { error = "Start date must be before or equal to end date." });
+
+        if ((endDate - startDate).TotalDays > 365)
+            return BadRequest(new { error = "Date range cannot exceed 365 days." });
+
+        var result = await service.GetStatusChangesByDateRangeAsync(startDate, endDate);
+
+        if (result.IsFailure)
+            return StatusCode(404, new { result.Error.Code });
+
+        return Ok(new
+        {
+            startDate = startDate.ToString("yyyy-MM-dd"),
+            endDate = endDate.ToString("yyyy-MM-dd"),
+            totalRecords = result.Value?.Count() ?? 0,
+            data = result.Value
+        });
+    }
+    [HttpGet("statistics")]
+    public async Task<IActionResult> GetStatistics()
+    {
+        var result = await service.GetStatusChangeStatisticsAsync();
+
+        if (result.IsFailure)
+            return StatusCode(404, new { result.Error.Code });
+
+        return Ok(result.Value);
+    }
 
     [HttpPost("")]
     public async Task<IActionResult> Create([FromBody] EmpolyeeRequest Request)

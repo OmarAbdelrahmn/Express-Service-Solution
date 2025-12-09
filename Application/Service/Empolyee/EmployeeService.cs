@@ -39,7 +39,7 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
        emp.IqamaEndH,
        emp.PassportNo!,
        emp.PassportEnd ?? default,
-       emp.SponsorNo,
+       emp.sponsorNo,
        emp.Sponsor,
        emp.JobTitle,
        emp.NameAR,
@@ -55,6 +55,45 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
 
 
         return Result.Success<IEnumerable<EmpolyeeResponse>>(res);
+    }
+    public async Task<Result<EmpolyeeResponse>> Get1(long IqamaNo)
+    {
+        var isexist = await dbcontext
+            .Employees
+            .AsNoTracking()
+            .Where(e => e.IqamaNo == IqamaNo)
+            .Include(e => e.Housing)
+            .SingleOrDefaultAsync();
+
+        if (isexist == null)
+            return Result.Failure<EmpolyeeResponse>(
+                new Error("No Employees Found", "no employees", 400)
+            );
+
+        var emp = isexist; // since it's already ONE
+
+        var res = new EmpolyeeResponse(
+            emp.IqamaNo,
+            emp.IqamaEndM,
+            emp.IqamaEndH,
+            emp.PassportNo!,
+            emp.PassportEnd ?? default,
+            emp.sponsorNo,
+            emp.Sponsor,
+            emp.JobTitle,
+            emp.NameAR,
+            emp.NameEN,
+            emp.Country,
+            emp.Phone,
+            emp.DateOfBirth,
+            emp.Status,
+            emp.IBAN!,
+            emp.INKSA,
+            emp.CreatedAt
+        );
+
+
+        return Result.Success(res);
     }
 
     public async Task<Result<IEnumerable<EmpolyeeResponse>>> GetAllEmployee()
@@ -77,7 +116,7 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
        emp.IqamaEndH,
        emp.PassportNo!,
        emp.PassportEnd ?? default,
-       emp.SponsorNo,
+       emp.sponsorNo,
        emp.Sponsor,
        emp.JobTitle,
        emp.NameAR,
@@ -151,8 +190,8 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
         if (request.Sponsor is not null)
             employee.Sponsor = request.Sponsor;
 
-        if (request.SponsorNo.HasValue)
-            employee.SponsorNo = request.SponsorNo.Value;
+        if (request.sponsorNo.HasValue)
+            employee.sponsorNo = request.sponsorNo.Value;
 
         if (request.JobTitle is not null)
             employee.JobTitle = request.JobTitle;
@@ -282,8 +321,8 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
         if (!string.IsNullOrWhiteSpace(filter.Sponsor))
             query = query.Where(e => e.Sponsor.Contains(filter.Sponsor));
 
-        if (filter.SponsorNo.HasValue)
-            query = query.Where(e => e.SponsorNo == filter.SponsorNo.Value);
+        if (filter.sponsorNo.HasValue)
+            query = query.Where(e => e.sponsorNo == filter.sponsorNo.Value);
 
         if (filter.PassportEnd is not null)
             query = query.Where(e => e.PassportEnd == filter.PassportEnd);
@@ -317,7 +356,7 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
            emp.IqamaEndH,
            emp.PassportNo!,
            emp.PassportEnd ?? default,
-           emp.SponsorNo,
+           emp.sponsorNo,
            emp.Sponsor,
            emp.JobTitle,
            emp.NameAR,
@@ -354,7 +393,7 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
             IBAN: employee.IBAN,
             CreatedAt: employee.CreatedAt,
             INKSA: employee.INKSA,
-            SponsorNo: employee.SponsorNo
+            sponsorNo: employee.sponsorNo
         );
     }
 
@@ -369,8 +408,8 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
         if (filter.Sponsor?.Any() == true)
             query = query.Where(e => filter.Sponsor!.Contains(e.Sponsor));
 
-        if (filter.SponsorNo?.ToString().Any() == true)
-            query = query.Where(e => filter.SponsorNo!.ToString().Contains(e.SponsorNo.ToString()));
+        if (filter.sponsorNo?.ToString().Any() == true)
+            query = query.Where(e => filter.sponsorNo!.ToString().Contains(e.sponsorNo.ToString()));
 
         if (filter.JobTitle?.Any() == true)
             query = query.Where(e => filter.JobTitle!.Contains(e.JobTitle));
@@ -410,8 +449,8 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
                 "Sponsor" => descending ? query.OrderByDescending(e => e.Sponsor)
                                              : query.OrderBy(e => e.Sponsor),
 
-                "SponsorNo" => descending ? query.OrderByDescending(e => e.SponsorNo)
-                                             : query.OrderBy(e => e.SponsorNo),
+                "sponsorNo" => descending ? query.OrderByDescending(e => e.sponsorNo)
+                                             : query.OrderBy(e => e.sponsorNo),
 
                 "JobTitle" => descending ? query.OrderByDescending(e => e.JobTitle)
                                              : query.OrderBy(e => e.JobTitle),
@@ -434,7 +473,7 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
                    emp.IqamaEndH,
                    emp.PassportNo!,
                    emp.PassportEnd ?? default,
-                     emp.SponsorNo,
+                     emp.sponsorNo,
                    emp.Sponsor,
                    emp.JobTitle,
                    emp.NameAR,
@@ -465,7 +504,7 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
                 e.NameEN.ToLower().Contains(keyword) ||
                 e.Country.ToLower().Contains(keyword) ||
                 e.Sponsor.ToLower().Contains(keyword) ||
-                e.SponsorNo.ToString().Contains(keyword) ||
+                e.sponsorNo.ToString().Contains(keyword) ||
                 e.JobTitle.ToLower().Contains(keyword)
             );
 
@@ -476,7 +515,7 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
            emp.IqamaEndH,
            emp.PassportNo!,
            emp.PassportEnd ?? default,
-                  emp.SponsorNo,
+                  emp.sponsorNo,
            emp.Sponsor,
            emp.JobTitle,
            emp.NameAR,
@@ -491,10 +530,19 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
                 )).ToListAsync();
     }
 
-    public async Task<Result> RequestEnableEmployeeAsync(long IqamaNo, string reason, string requestedBy)
+    public async Task<Result> RequestStatusChangeAsync(long IqamaNo, string newStatus, string reason, string requestedBy)
     {
         try
         {
+            // Validate status
+            if (!EmployeeStatus.IsValid(newStatus))
+            {
+                return Result.Failure(
+                    new Error("InvalidStatus",
+                        $"Invalid status. Valid statuses are: {string.Join(", ", EmployeeStatus.ValidStatuses)}",
+                        400));
+            }
+
             var employee = await dbcontext.Employees
                 .Include(e => e.RiderDetails)
                 .FirstOrDefaultAsync(e => e.IqamaNo == IqamaNo);
@@ -512,10 +560,16 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
                     new Error("PendingRequest",
                         "There is already a pending status change request for this employee", 400));
 
+            // Check if the status is already set to the requested status
+            if (employee.Status.ToLower() == newStatus.ToLower())
+                return Result.Failure(
+                    new Error("SameStatus",
+                        $"Employee status is already set to '{newStatus}'", 400));
+
             var statusChange = new TempEmployeeStatusChange
             {
                 EmployeeIqamaNo = IqamaNo,
-                Action = "enable",
+                Action = newStatus.ToLower(),
                 Reason = reason,
                 RequestedBy = requestedBy,
                 RequestedAt = DateTime.Now,
@@ -530,63 +584,23 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
         catch (Exception ex)
         {
             return Result.Failure(
-                new Error("RequestError", $"Failed to request enable employee: {ex.Message}", 500));
-        }
-    }
-
-    public async Task<Result> RequestDisableEmployeeAsync(long IqamaNo, string reason, string requestedBy)
-    {
-        try
-        {
-            var employee = await dbcontext.Employees
-                .Include(e => e.RiderDetails)
-                .FirstOrDefaultAsync(e => e.IqamaNo == IqamaNo);
-
-            if (employee == null)
-                return Result.Failure(
-                    new Error("NotFound", "Employee not found", 404));
-
-            var existingRequest = await dbcontext.TempEmployeeStatusChanges
-                .AnyAsync(t => t.EmployeeIqamaNo == IqamaNo && !t.IsResolved);
-
-            if (existingRequest)
-                return Result.Failure(
-                    new Error("PendingRequest",
-                        "There is already a pending status change request for this employee", 400));
-
-            var statusChange = new TempEmployeeStatusChange
-            {
-                EmployeeIqamaNo = IqamaNo,
-                Action = "Disable",
-                Reason = reason,
-                RequestedBy = requestedBy,
-                RequestedAt = DateTime.Now,
-                IsResolved = false
-            };
-
-            await dbcontext.TempEmployeeStatusChanges.AddAsync(statusChange);
-            await dbcontext.SaveChangesAsync();
-
-            return Result.Success();
-        }
-        catch (Exception ex)
-        {
-            return Result.Failure(
-                new Error("RequestError", $"Failed to request disable employee: {ex.Message}", 500));
+                new Error("RequestError", $"Failed to request status change: {ex.Message}", 500));
         }
     }
 
     public async Task<Result<IEnumerable<TempEmployeeStatusChangeResponse>>> GetPendingStatusChangesAsync()
+
     {
         try
         {
             var pendingChanges = await dbcontext.TempEmployeeStatusChanges
                 .Where(t => !t.IsResolved)
                 .Include(t => t.Employee)
+                    .ThenInclude(e => e.RiderDetails)
                 .OrderBy(t => t.RequestedAt)
                 .ToListAsync();
 
-            var responses = pendingChanges.Select(MapToResponse).ToList();
+            var responses = pendingChanges.Select(MapToResponse1).ToList();
 
             return Result.Success<IEnumerable<TempEmployeeStatusChangeResponse>>(responses);
         }
@@ -597,92 +611,114 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
         }
     }
 
-    public async Task<Result> ResolveStatusChangesAsync(EBulkResolutionRequest request)
+    public async Task<Result> ResolveStatusChangeAsync(long IqamaNo, string resolution, string resolvedBy, string? adminNotes = null)
     {
         using var transaction = await dbcontext.Database.BeginTransactionAsync();
         try
         {
-            if (request.Resolution != "Approved" && request.Resolution != "Rejected")
-                return Result.Failure<BulkResolutionResponse>(
+            if (resolution != "Approved" && resolution != "Rejected")
+                return Result.Failure(
                     new Error("InvalidResolution", "Resolution must be 'Approved' or 'Rejected'", 400));
 
-            var statusChanges = await dbcontext.TempEmployeeStatusChanges
-                .Where(t => request.IqamaNo == t.EmployeeIqamaNo && !t.IsResolved)
+            var statusChange = await dbcontext.TempEmployeeStatusChanges
+                .Where(t => t.EmployeeIqamaNo == IqamaNo && !t.IsResolved)
                 .Include(t => t.Employee)
-                .SingleOrDefaultAsync();
+                .FirstOrDefaultAsync();
 
-            if (statusChanges is null)
-                return Result.Failure<BulkResolutionResponse>(
-                    new Error("NoChanges", "No pending status changes found with IqamaNo", 404));
+            if (statusChange is null)
+                return Result.Failure(
+                    new Error("NoChanges", "No pending status change found for this employee", 404));
 
-            try
+            // Validate the new status
+            if (!EmployeeStatus.IsValid(statusChange.Action))
+                return Result.Failure(
+                    new Error("InvalidStatus", $"Invalid status in request: {statusChange.Action}", 400));
+
+            if (resolution == "Approved")
             {
-                if (request.Resolution == "Approved")
+                var employee = await dbcontext.Employees
+                    .FirstOrDefaultAsync(e => e.IqamaNo == statusChange.EmployeeIqamaNo);
+
+                if (employee == null)
                 {
-                    var employee = await dbcontext.Employees
-                        .FirstOrDefaultAsync(u => u.IqamaNo == statusChanges.EmployeeIqamaNo);
-
-                    if (employee == null)
-                    {
-                        return Result.Failure(new Error(
-                            "not_found",
-                            $"Warning: No Employee found for {statusChanges.EmployeeIqamaNo}",
-                            404
-                        ));
-                    }
-
-                    employee.Status = statusChanges.Action == "enable" ? "enable" : "disable";
-                    dbcontext.Employees.Update(employee);
-
-                    statusChanges.IsResolved = true;
-                    statusChanges.Resolution = request.Resolution;   // "Approved" or "Rejected"
-                    statusChanges.ResolvedBy = request.ResolvedBy;
-                    statusChanges.ResolvedAt = DateTime.Now;
-
-                    await dbcontext.SaveChangesAsync();
-                    await transaction.CommitAsync();
-
-                    return Result.Success();
-                }
-                else
-                {
-                    statusChanges.AdminNotes = request.AdminNot ?? "Request was rejected";
-                    // Always update statusChanges
-                    statusChanges.IsResolved = true;
-                    statusChanges.Resolution = request.Resolution;   // "Approved" or "Rejected"
-                    statusChanges.ResolvedBy = request.ResolvedBy;
-                    statusChanges.ResolvedAt = DateTime.Now;
-
-                    await dbcontext.SaveChangesAsync();
-                    await transaction.CommitAsync();
-
-                    return Result.Success();
+                    return Result.Failure(new Error(
+                        "NotFound",
+                        $"Employee not found: {statusChange.EmployeeIqamaNo}",
+                        404
+                    ));
                 }
 
-                
+                // Update employee status
+                employee.Status = statusChange.Action;
+                dbcontext.Employees.Update(employee);
             }
-            catch (Exception ex)
-            {
-                await transaction.RollbackAsync();
-                return Result.Failure(new Error(
-                    "error",
-                    $"Something went wrong: {ex.Message}",
-                    500
-                ));
-            }
+
+            // Mark status change as resolved
+            statusChange.IsResolved = true;
+            statusChange.Resolution = resolution;
+            statusChange.ResolvedBy = resolvedBy;
+            statusChange.ResolvedAt = DateTime.Now;
+            statusChange.AdminNotes = adminNotes ?? (resolution == "Rejected" ? "Request was rejected" : null);
+
+            await dbcontext.SaveChangesAsync();
+            await transaction.CommitAsync();
+
+            return Result.Success();
         }
-
         catch (Exception ex)
         {
             await transaction.RollbackAsync();
-            return Result.Failure<BulkResolutionResponse>(
-                new Error("ResolveError", $"Failed to resolve status changes: {ex.Message}", 500));
+            return Result.Failure(
+                new Error("ResolveError", $"Failed to resolve status change: {ex.Message}", 500));
         }
-        }
-        
-    private TempEmployeeStatusChangeResponse MapToResponse(TempEmployeeStatusChange statusChange)
+    }
+
+    private TempEmployeeStatusChangeResponse MapToResponse1(TempEmployeeStatusChange statusChange)
     {
+        var isRider = statusChange.Employee?.RiderDetails != null;
+        var employeeType = isRider ? "Rider" : "Employee";
+
         return new TempEmployeeStatusChangeResponse(
+            Id: statusChange.Id,
+            EmployeeIqamaNo: statusChange.EmployeeIqamaNo,
+            EmployeeNameAR: statusChange.Employee?.NameAR ?? "N/A",
+            EmployeeNameEN: statusChange.Employee?.NameEN ?? "N/A",
+            EmployeeType: employeeType,
+            CurrentStatus: statusChange.Employee?.Status ?? "N/A",
+            RequestedStatus: statusChange.Action,
+            Reason: statusChange.Reason,
+            RequestedBy: statusChange.RequestedBy,
+            RequestedAt: statusChange.RequestedAt,
+            IsResolved: statusChange.IsResolved,
+            Resolution: statusChange.Resolution,
+            ResolvedBy: statusChange.ResolvedBy,
+            ResolvedAt: statusChange.ResolvedAt,
+            AdminNotes: statusChange.AdminNotes
+        );
+    }
+
+    // Updated response record
+    public record TempEmployeeStatusChangeResponse(
+        int Id,
+        long EmployeeIqamaNo,
+        string EmployeeNameAR,
+        string EmployeeNameEN,
+        string EmployeeType,
+        string CurrentStatus,
+        string RequestedStatus,
+        string? Reason,
+        string RequestedBy,
+        DateTime RequestedAt,
+        bool IsResolved,
+        string? Resolution,
+        string? ResolvedBy,
+        DateTime? ResolvedAt,
+        string? AdminNotes
+    );
+
+    private TempEmployeeStatusChangeResponse1 MapToResponse(TempEmployeeStatusChange statusChange)
+    {
+        return new TempEmployeeStatusChangeResponse1(
             Id: statusChange.Id,
             EmployeeIqamaNo: statusChange.EmployeeIqamaNo,
             EmployeeNameAR: statusChange.Employee?.NameAR ?? "N/A",
@@ -709,11 +745,185 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
 
         return Result.Success<IEnumerable<DeletedEmployees>>(employees);
     }
+
+    public async Task<Result<EmployeeStatusHistoryResponse>> GetEmployeeStatusHistoryAsync(long IqamaNo)
+    {
+        try
+        {
+            // Get employee/rider details
+            var employee = await dbcontext.Employees
+                .Include(e => e.RiderDetails)
+                    .ThenInclude(rd => rd.Company)
+                .Include(e => e.Housing)
+                .AsNoTracking()
+                .FirstOrDefaultAsync(e => e.IqamaNo == IqamaNo);
+
+            if (employee == null)
+                return Result.Failure<EmployeeStatusHistoryResponse>(
+                    new Error("NotFound", "Employee or Rider not found", 404));
+
+            // Get all status change history for this employee
+            var statusChanges = await dbcontext.TempEmployeeStatusChanges
+                .Where(t => t.EmployeeIqamaNo == IqamaNo)
+                .OrderByDescending(t => t.RequestedAt)
+                .AsNoTracking()
+                .ToListAsync();
+
+            var historyItems = statusChanges.Select(sc => new StatusChangeHistoryDto(
+                Id: sc.Id,
+                RequestedStatus: sc.Action,
+                Reason: sc.Reason,
+                RequestedBy: sc.RequestedBy,
+                RequestedAt: sc.RequestedAt,
+                IsResolved: sc.IsResolved,
+                Resolution: sc.Resolution,
+                ResolvedBy: sc.ResolvedBy,
+                ResolvedAt: sc.ResolvedAt,
+                AdminNotes: sc.AdminNotes
+            )).ToList();
+
+            var response = new EmployeeStatusHistoryResponse(
+                IqamaNo: employee.IqamaNo,
+                NameAR: employee.NameAR,
+                NameEN: employee.NameEN,
+                CurrentStatus: employee.Status,
+                EmployeeType: employee.RiderDetails != null ? "Rider" : "Employee",
+                CompanyName: employee.RiderDetails?.Company?.Name,
+                HousingName: employee.Housing?.Name,
+                TotalStatusChanges: historyItems.Count,
+                PendingRequests: historyItems.Count(h => !h.IsResolved),
+                ApprovedChanges: historyItems.Count(h => h.IsResolved && h.Resolution == "Approved"),
+                RejectedChanges: historyItems.Count(h => h.IsResolved && h.Resolution == "Rejected"),
+                StatusChangeHistory: historyItems
+            );
+
+            return Result.Success(response);
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<EmployeeStatusHistoryResponse>(
+                new Error("ServerError", $"Failed to get status history: {ex.Message}", 500));
+        }
+    }
+
+
+    public async Task<Result<IEnumerable<StatusChangeHistoryDto>>> GetStatusChangesByDateRangeAsync(DateTime startDate, DateTime endDate)
+    {
+        try
+        {
+            var statusChanges = await dbcontext.TempEmployeeStatusChanges
+                .Where(t => t.RequestedAt >= startDate && t.RequestedAt <= endDate)
+                .Include(t => t.Employee)
+                .OrderByDescending(t => t.RequestedAt)
+                .AsNoTracking()
+                .Select(sc => new StatusChangeHistoryDto(
+                    Id: sc.Id,
+                    IqamaNo: sc.EmployeeIqamaNo,
+                    EmployeeNameAR: sc.Employee.NameAR,
+                    EmployeeNameEN: sc.Employee.NameEN,
+                    RequestedStatus: sc.Action,
+                    Reason: sc.Reason,
+                    RequestedBy: sc.RequestedBy,
+                    RequestedAt: sc.RequestedAt,
+                    IsResolved: sc.IsResolved,
+                    Resolution: sc.Resolution,
+                    ResolvedBy: sc.ResolvedBy,
+                    ResolvedAt: sc.ResolvedAt,
+                    AdminNotes: sc.AdminNotes
+                ))
+                .ToListAsync();
+
+            return Result.Success<IEnumerable<StatusChangeHistoryDto>>(statusChanges);
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<IEnumerable<StatusChangeHistoryDto>>(
+                new Error("ServerError", $"Failed to get status changes by date range: {ex.Message}", 500));
+        }
+    }
+
+    public async Task<Result<StatusChangeStatisticsDto>> GetStatusChangeStatisticsAsync()
+    {
+        try
+        {
+            var allChanges = await dbcontext.TempEmployeeStatusChanges
+                .AsNoTracking()
+                .ToListAsync();
+
+            var statistics = new StatusChangeStatisticsDto(
+                TotalRequests: allChanges.Count,
+                PendingRequests: allChanges.Count(sc => !sc.IsResolved),
+                ApprovedRequests: allChanges.Count(sc => sc.IsResolved && sc.Resolution == "Approved"),
+                RejectedRequests: allChanges.Count(sc => sc.IsResolved && sc.Resolution == "Rejected"),
+                StatusBreakdown: allChanges
+                    .GroupBy(sc => sc.Action)
+                    .ToDictionary(g => g.Key, g => g.Count()),
+                RequestsByMonth: allChanges
+                    .GroupBy(sc => new { sc.RequestedAt.Year, sc.RequestedAt.Month })
+                    .OrderByDescending(g => g.Key.Year)
+                    .ThenByDescending(g => g.Key.Month)
+                    .Take(12)
+                    .ToDictionary(
+                        g => $"{g.Key.Year}-{g.Key.Month:D2}",
+                        g => g.Count()
+                    )
+            );
+
+            return Result.Success(statistics);
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<StatusChangeStatisticsDto>(
+                new Error("ServerError", $"Failed to get statistics: {ex.Message}", 500));
+        }
+    }
 }
 
+// DTOs
+public record EmployeeStatusHistoryResponse(
+    long IqamaNo,
+    string NameAR,
+    string NameEN,
+    string CurrentStatus,
+    string EmployeeType,
+    string? CompanyName,
+    string? HousingName,
+    int TotalStatusChanges,
+    int PendingRequests,
+    int ApprovedChanges,
+    int RejectedChanges,
+    List<StatusChangeHistoryDto> StatusChangeHistory
+);
+
+public record StatusChangeHistoryDto(
+    int Id,
+    long? IqamaNo = null,
+    string? EmployeeNameAR = null,
+    string? EmployeeNameEN = null,
+    string RequestedStatus = "",
+    string? Reason = null,
+    string RequestedBy = "",
+    DateTime RequestedAt = default,
+    bool IsResolved = false,
+    string? Resolution = null,
+    string? ResolvedBy = null,
+    DateTime? ResolvedAt = null,
+    string? AdminNotes = null
+);
+
+public record StatusChangeStatisticsDto(
+    int TotalRequests,
+    int PendingRequests,
+    int ApprovedRequests,
+    int RejectedRequests,
+    Dictionary<string, int> StatusBreakdown,
+    Dictionary<string, int> RequestsByMonth
+);
 
 
-public record TempEmployeeStatusChangeResponse(
+
+
+public record TempEmployeeStatusChangeResponse1(
     int Id,
     long EmployeeIqamaNo,
     string EmployeeNameAR,

@@ -240,7 +240,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
                         AcceptedDailyOrders = shiftData.AcceptedDailyOrders!.Value,
                         RejectedDailyOrders = shiftData.RejectedDailyOrders!.Value,
                         RealRejectedDailyOrders = realRejectedOrders,
-                        StackedDeliveries = shiftData.StackedDeliveries!.Value,
+                        StackedDeliveries = shiftData.StackedDeliveries.GetValueOrDefault(),
                         WorkingHours = shiftData.WorkingHours!.Value,
                         CompanyId = riderWhoWorked.CompanyId,
                         ShiftStatus = shiftStatus,
@@ -1612,16 +1612,16 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
 public static class ExcelColumnConfig
 {
     public static readonly string[] WorkingIdColumns =
-        { "Rider Id", "Working_ID", "Working ID", "ID", "RiderID", "Rider_ID", "EmployeeID" };
+        { "Rider Id", "Working_ID", "معرّف السائق", "ID", "RiderID", "Rider_ID", "EmployeeID" };
 
     //public static readonly string[] ShiftDateColumns =
     //    { "ShiftDate", "Shift_Date", "Shift Date", "Date", "WorkDate", "Work_Date" };
 
     public static readonly string[] AcceptedOrdersColumns =
-        { "Completed Deliveries", "Accepted_Orders", "Accepted Orders", "Accepted", "AcceptedDaily", "Accepted_Daily" };
+        { "Completed Deliveries", "Accepted_Orders", "Accepted Orders", "المهام التي تم تسليمها", "AcceptedDaily", "Accepted_Daily" };
 
     public static readonly string[] RejectedOrdersColumns =
-        { "Declined Deliveries", "Rejected_Orders", "Rejected Orders", "Rejected", "RejectedDaily", "Rejected_Daily" };
+        { "Declined Deliveries", "Rejected_Orders", "المهام المرفوضة", "Rejected", "RejectedDaily", "Rejected_Daily" };
 
     //public static readonly string[] RealRejectedOrdersColumns =
     //    { "RealRejectedOrders", "Real_Rejected_Orders", "Real Rejected Orders", "Real Rejected", "ActualRejected", "Actual_Rejected" };
@@ -1631,7 +1631,7 @@ public static class ExcelColumnConfig
 
 
     public static readonly string[] WorkingHoursColumns =
-        { "Actual Working Hours", "Working_Hours", "Working Hours", "Hours", "TotalHours", "Total_Hours" };
+        { "Actual Working Hours", "Working_Hours", "Working Hours", "وقت اتصال السائقين عبر تطبيق السائق.", "وقت اتصال السائقين عبر تطبيق السائق", "Total_Hours" };
 }
 
 public class ShiftConflictDto

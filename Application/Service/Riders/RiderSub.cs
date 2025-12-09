@@ -60,6 +60,7 @@ public class RiderSub(ApplicationDbcontext dbcontext) : IRiderSub
                 SubstituteRiderId = substituteRider.Id,
                 SubstituteWorkingId = substituteRider.WorkingId!,
                 StartDate = DateTime.UtcNow.AddHours(3),
+                EndDate = null,
                 Reason = request.Reason,
                 CreatedBy = request.CreatedBy ?? "System",
                 IsActive = true

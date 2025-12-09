@@ -52,7 +52,7 @@ public class Temp(ApplicationDbcontext dbcontext) : ITemp
                 var newPassportNo = GetStringValue(worksheet, row, columnMapping, "PassportNo");
                 var newPassportEnd = GetDateValue(worksheet, row, columnMapping, "PassportEnd");
                 var newSponsor = GetStringValue(worksheet, row, columnMapping, "Sponsor");
-                var newSponsorNo = GetIntValue(worksheet, row, columnMapping, "SponsorNo");
+                var newSponsorNo = GetLongValue(worksheet, row, columnMapping, "SponsorNo");
                 var newJobTitle = GetStringValue(worksheet, row, columnMapping, "JobTitle");
                 var newNameAR = GetStringValue(worksheet, row, columnMapping, "NameAR");
                 var newNameEN = GetStringValue(worksheet, row, columnMapping, "NameEN");
@@ -138,9 +138,9 @@ public class Temp(ApplicationDbcontext dbcontext) : ITemp
                     hasChanges = true;
                 }
 
-                if (HasChanged(existingEmployee.SponsorNo, newSponsorNo))
+                if (HasChanged(existingEmployee.sponsorNo, newSponsorNo))
                 {
-                    tempUpdateExisting.OldSponsorNo = existingEmployee.SponsorNo;
+                    tempUpdateExisting.OldSponsorNo = existingEmployee.sponsorNo;
                     tempUpdateExisting.NewSponsorNo = newSponsorNo;
                     hasChanges = true;
                 }
@@ -306,7 +306,7 @@ public class Temp(ApplicationDbcontext dbcontext) : ITemp
                                 PassportNo = update.NewPassportNo,
                                 PassportEnd = update.NewPassportEnd,
                                 Sponsor = update.NewSponsor ?? string.Empty,
-                                SponsorNo = update.NewSponsorNo ?? 0,
+                                sponsorNo = update.NewSponsorNo ?? 0,
                                 JobTitle = update.NewJobTitle ?? string.Empty,
                                 NameAR = update.NewNameAR ?? string.Empty,
                                 NameEN = update.NewNameEN ?? string.Empty,
@@ -337,7 +337,7 @@ public class Temp(ApplicationDbcontext dbcontext) : ITemp
                                 if (update.NewPassportNo != null) { employee.PassportNo = update.NewPassportNo; changedFields++; }
                                 if (update.NewPassportEnd.HasValue) { employee.PassportEnd = update.NewPassportEnd; changedFields++; }
                                 if (update.NewSponsor != null) { employee.Sponsor = update.NewSponsor; changedFields++; }
-                                if (update.NewSponsorNo.HasValue) { employee.SponsorNo = update.NewSponsorNo.Value; changedFields++; }
+                                if (update.NewSponsorNo.HasValue) { employee.sponsorNo = update.NewSponsorNo.Value; changedFields++; }
                                 if (update.NewJobTitle != null) { employee.JobTitle = update.NewJobTitle; changedFields++; }
                                 if (update.NewNameAR != null) { employee.NameAR = update.NewNameAR; changedFields++; }
                                 if (update.NewNameEN != null) { employee.NameEN = update.NewNameEN; changedFields++; }
@@ -462,6 +462,20 @@ public class Temp(ApplicationDbcontext dbcontext) : ITemp
 
         return null;
     }
+
+    private long? GetLongValue(IXLWorksheet ws, int row, Dictionary<string, int> mapping, string columnName)
+    {
+        if (!mapping.ContainsKey(columnName)) return null;
+
+        var value = ws.Cell(row, mapping[columnName]).Value.ToString()?.Trim();
+
+        if (string.IsNullOrWhiteSpace(value)) return null;
+
+        if (long.TryParse(value, out long result)) return result;
+
+        return null;
+    }
+
 
     private DateOnly? GetDateValue(IXLWorksheet ws, int row, Dictionary<string, int> mapping, string columnName)
     {

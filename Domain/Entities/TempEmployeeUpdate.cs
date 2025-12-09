@@ -15,7 +15,7 @@ public class TempEmployeeUpdate
     public string? OldPassportNo { get; set; }
     public DateOnly? OldPassportEnd { get; set; }
     public string? OldSponsor { get; set; }
-    public int? OldSponsorNo { get; set; }
+    public long? OldSponsorNo { get; set; }
     public string? OldJobTitle { get; set; }
     public string? OldNameAR { get; set; }
     public string? OldNameEN { get; set; }
@@ -32,7 +32,7 @@ public class TempEmployeeUpdate
     public string? NewPassportNo { get; set; }
     public DateOnly? NewPassportEnd { get; set; }
     public string? NewSponsor { get; set; }
-    public int? NewSponsorNo { get; set; }
+    public long? NewSponsorNo { get; set; }
     public string? NewJobTitle { get; set; }
     public string? NewNameAR { get; set; }
     public string? NewNameEN { get; set; }

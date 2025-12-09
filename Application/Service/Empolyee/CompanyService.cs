@@ -76,10 +76,13 @@ public class CompanyService(ApplicationDbcontext dbcontext) : ICompanyService
 
         if (companies == null)
             return Result.Failure<CompanyResponse>(new Error("Company.NotFound", $"Company with name {CompanyName} was not found.", 404));
-
+        companies.Name = Request.Name;
         companies.Address = Request.Address;
         companies.Phone = Request.Phone;
         companies.Email = Request.Email;
+        companies.Details = Request.Details;
+
+        dbcontext.Companies.Update(companies);
         await dbcontext.SaveChangesAsync();
 
         var companyResponses = companies.Adapt<CompanyResponse>();

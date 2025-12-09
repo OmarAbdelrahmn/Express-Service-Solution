@@ -39,22 +39,18 @@ public class TempController(ITemp service , IEmployeeService service1 , IVehicle
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
 
-    [HttpPost("employee-request-enable/{IqamaNo:long}")]
-    public async Task<IActionResult> RequestEnableEmployee(long IqamaNo, string Reason, string RequestedBy)
+    [HttpPost("request-change")]
+    public async Task<IActionResult> RequestStatusChange([FromBody] StatusChangeRequest request)
     {
-        var response = await service1.RequestEnableEmployeeAsync(IqamaNo, Reason, RequestedBy);
-        return response.IsSuccess ?
-            Ok(new Re("Enable request submitted successfully.")) :
-            response.ToProblem();
-    }
+        var result = await service1.RequestStatusChangeAsync(
+            request.IqamaNo,
+            request.NewStatus,
+            request.Reason,
+            request.RequestedBy
+        );
 
-    [HttpPut("employee-request-disable/{IqamaNo:long}")]
-    public async Task<IActionResult> RequestDisableEmployee(long IqamaNo, string Reason, string RequestedBy)
-    {
-        var response = await service1.RequestDisableEmployeeAsync(IqamaNo, Reason, RequestedBy);
-        return response.IsSuccess ?
-            Ok(new Re("Disable request submitted successfully.")) :
-            response.ToProblem();
+        return result.IsSuccess ? Ok() : result.ToProblem();
+
     }
 
     [HttpGet("employee-pending-status-changes")]
@@ -67,12 +63,17 @@ public class TempController(ITemp service , IEmployeeService service1 , IVehicle
     }
 
     [HttpPost("employee-resolve-status-changes")]
-    public async Task<IActionResult> ResolveStatusChanges([FromBody] EBulkResolutionRequest request)
+    public async Task<IActionResult> ResolveStatusChange([FromBody] ResolveStatusChangeRequest request)
     {
-        var response = await service1.ResolveStatusChangesAsync(request);
-        return response.IsSuccess ?
-            Ok(new Re("done ....")) :
-            response.ToProblem();
+        var result = await service1.ResolveStatusChangeAsync(
+            request.IqamaNo,
+            request.Resolution,
+            request.ResolvedBy,
+            request.AdminNotes
+        );
+
+        return result.IsSuccess ? Ok() : result.ToProblem();
+
     }
 
     [HttpPost("vehicle-request-return")]
@@ -125,3 +126,17 @@ public class TempController(ITemp service , IEmployeeService service1 , IVehicle
 
 
 }
+
+public record StatusChangeRequest(
+    long IqamaNo,
+    string NewStatus,
+    string Reason,
+    string RequestedBy
+);
+
+public record ResolveStatusChangeRequest(
+    long IqamaNo,
+    string Resolution, // "Approved" or "Rejected"
+    string ResolvedBy,
+    string? AdminNotes = null
+);

@@ -41,7 +41,7 @@ public class RiderService(ApplicationDbcontext dbcontext) : IRiderService
        emp.PassportNo!,
        emp.PassportEnd ?? default,
        emp.Sponsor,
-       emp.SponsorNo,
+       emp.sponsorNo,
        emp.JobTitle,
        emp.NameAR,
        emp.NameEN,
@@ -86,7 +86,7 @@ public class RiderService(ApplicationDbcontext dbcontext) : IRiderService
        emp.PassportNo!,
        emp.PassportEnd ?? default,
        emp.Sponsor,
-       emp.SponsorNo,
+       emp.sponsorNo,
        emp.JobTitle,
        emp.NameAR,
        emp.NameEN,
@@ -132,7 +132,7 @@ public class RiderService(ApplicationDbcontext dbcontext) : IRiderService
                 PassportNo = Request.PassportNo,
                 PassportEnd = Request.PassportEnd,
                 Sponsor = Request.Sponsor,
-                SponsorNo = Request.SponsorNo,
+                sponsorNo = Request.sponsorNo,
                 JobTitle = Request.JobTitle,
                 NameAR = Request.NameAR,
                 NameEN = Request.NameEN,
@@ -243,8 +243,8 @@ public class RiderService(ApplicationDbcontext dbcontext) : IRiderService
             if (request.Sponsor is not null)
                 employee.Sponsor = request.Sponsor;
             
-            if (request.SponsorNo is not null)
-                employee.SponsorNo = request.SponsorNo ?? 0;
+            if (request.sponsorNo is not null)
+                employee.sponsorNo = request.sponsorNo ?? 0;
 
             if (request.JobTitle is not null)
                 employee.JobTitle = request.JobTitle;
@@ -319,7 +319,7 @@ public class RiderService(ApplicationDbcontext dbcontext) : IRiderService
                 e.Sponsor.ToLower().Contains(keyword) ||
                 e.JobTitle.ToLower().Contains(keyword) ||
                 e.IBAN.ToLower().Contains(keyword) ||
-                e.SponsorNo.ToString().ToLower().Contains(keyword)
+                e.sponsorNo.ToString().ToLower().Contains(keyword)
             )
             .Select(emp => new RiderResponse(
                 emp.IqamaNo,
@@ -328,7 +328,7 @@ public class RiderService(ApplicationDbcontext dbcontext) : IRiderService
                 emp.PassportNo,
                 emp.PassportEnd ?? default,
                 emp.Sponsor,
-                emp.SponsorNo,
+                emp.sponsorNo,
                 emp.JobTitle,
                 emp.NameAR,
                 emp.NameEN,
@@ -362,7 +362,7 @@ public class RiderService(ApplicationDbcontext dbcontext) : IRiderService
             PassportNo: employee.PassportNo,
             PassportEnd: employee.PassportEnd ?? default,
             Sponsor: employee.Sponsor,
-            SponsorNo: employee.SponsorNo,
+            sponsorNo: employee.sponsorNo,
             JobTitle: employee.JobTitle,
             NameAR: employee.NameAR,
             NameEN: employee.NameEN,
@@ -455,7 +455,7 @@ public class RiderService(ApplicationDbcontext dbcontext) : IRiderService
             rider.PassportNo!,
             rider.PassportEnd ?? default,
             rider.Sponsor,
-            rider.SponsorNo,
+            rider.sponsorNo,
             rider.JobTitle,
             rider.NameAR,
             rider.NameEN,
@@ -499,7 +499,7 @@ public class RiderService(ApplicationDbcontext dbcontext) : IRiderService
        emp.PassportNo!,
        emp.PassportEnd ?? default,
        emp.Sponsor,
-       emp.SponsorNo,
+       emp.sponsorNo,
        emp.JobTitle,
        emp.NameAR,
        emp.NameEN,

@@ -12,7 +12,7 @@ public class Employees
     public string? PassportNo { get; set; } = string.Empty;
     public DateOnly? PassportEnd { get; set; }
     public string Sponsor { get; set; } = string.Empty;
-    public int SponsorNo { get; set; }
+    public long sponsorNo { get; set; }
     public string JobTitle { get; set; } = string.Empty;
     public string NameAR { get; set; } = string.Empty;
     public string NameEN { get; set; } = string.Empty;

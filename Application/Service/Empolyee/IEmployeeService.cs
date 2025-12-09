@@ -6,6 +6,7 @@ using Domain.Entities;
 using System;
 using System.Collections.Generic;
 using System.Text;
+using static Application.Service.Empolyee.EmployeeService;
 
 namespace Application.Service.Empolyee;
 
@@ -14,6 +15,7 @@ public interface IEmployeeService
     Task<Result<IEnumerable<EmpolyeeResponse>>>GetAllEmployee();
     Task<Result<IEnumerable<DeletedEmployees>>>GetAlldeletedEmployee();
     Task<Result<IEnumerable<EmpolyeeResponse>>>Get(long IqamaNo);
+    Task<Result<EmpolyeeResponse>>Get1(long IqamaNo);
     Task<Result<EmpolyeeResponse>> CreateAsync(EmpolyeeRequest Request);
     Task<Result<EmpolyeeResponse>> UpdateAsync(long IqamaNo, UEmpolyeeRequest Request);
     Task<Result> DeleteAsync(long IqamaNo, CancellationToken cancellationToken = default);
@@ -23,10 +25,13 @@ public interface IEmployeeService
     Task<Result<PagedList<EmpolyeeResponse>>> Filter2(EmployeeFilter2 filter);
     Task<List<EmpolyeeResponse>> SmartSearch(string keyword);
 
-    Task<Result> RequestEnableEmployeeAsync(long IqamaNo, string reason, string requestedBy);
-    Task<Result> RequestDisableEmployeeAsync(long IqamaNo, string reason, string requestedBy);
+    Task<Result> RequestStatusChangeAsync(long IqamaNo, string newStatus, string reason, string requestedBy);
     Task<Result<IEnumerable<TempEmployeeStatusChangeResponse>>> GetPendingStatusChangesAsync();
-    Task<Result> ResolveStatusChangesAsync(EBulkResolutionRequest request);
+    Task<Result> ResolveStatusChangeAsync(long IqamaNo, string resolution, string resolvedBy, string? adminNotes = null);
+
+    Task<Result<StatusChangeStatisticsDto>> GetStatusChangeStatisticsAsync();
+    Task<Result<IEnumerable<StatusChangeHistoryDto>>> GetStatusChangesByDateRangeAsync(DateTime startDate, DateTime endDate);
+    Task<Result<EmployeeStatusHistoryResponse>> GetEmployeeStatusHistoryAsync(long IqamaNo);
 
 
 }
@@ -34,7 +39,7 @@ public record EmployeeFilter(
     DateOnly? IqamaEndH = null,
     DateOnly? IqamaEndM = null,
     string? Sponsor = null,
-    int? SponsorNo = null,
+    long? sponsorNo = null,
     DateOnly? PassportEnd = null,
     string? JobTitle = null,
     string? NameAR = null,
@@ -49,7 +54,7 @@ public sealed record EmployeeFilter2(
     DateOnly? IqamaEndH,
     DateOnly? IqamaEndM,
     string? Sponsor,
-    int? SponsorNo,
+    long? sponsorNo,
     DateOnly? PassportEndH,
     DateOnly? PassportEndM,
     string? JobTitle,
@@ -79,5 +84,25 @@ public class PagedList<T>
         TotalCount = totalCount;
         Page = page;
         PageSize = pageSize;
+    }
+}
+
+public static class EmployeeStatus
+{
+    public const string Enable = "enable";
+    public const string Disable = "disable";
+    public const string Fleeing = "fleeing";
+    public const string Vacation = "vacation";
+    public const string Accident = "accident";
+    public const string Sick = "sick";
+
+    public static readonly string[] ValidStatuses =
+    {
+        Enable, Disable, Fleeing, Vacation, Accident, Sick
+    };
+
+    public static bool IsValid(string status)
+    {
+        return ValidStatuses.Contains(status.ToLower());
     }
 }
