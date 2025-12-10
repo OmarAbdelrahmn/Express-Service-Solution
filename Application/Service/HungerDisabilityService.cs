@@ -17,6 +17,7 @@ public class HungerDisabilityService(ApplicationDbcontext dbcontext) : IHungerDi
 
     public async Task<Result<HungerDisabilityImportResult>> ImportFromExcelAsync(
         Stream excelStream,
+        DateOnly shiftDate, // NEW PARAMETER
         CancellationToken cancellationToken = default)
     {
         var errors = new List<ImportError>();
@@ -103,7 +104,7 @@ public class HungerDisabilityService(ApplicationDbcontext dbcontext) : IHungerDi
                     // Check for existing record
                     var existingRecord = await dbcontext.Set<HungerDisability>()
                         .AnyAsync(h => h.ActualRiderId == actualRider.Id &&
-                                      h.ShiftDate == rowData.ShiftDate,
+                                      h.ShiftDate == shiftDate,
                                  cancellationToken);
 
                     if (existingRecord)
@@ -111,18 +112,18 @@ public class HungerDisabilityService(ApplicationDbcontext dbcontext) : IHungerDi
                         errors.Add(new ImportError(
                             rowNumber,
                             rowData.ActualWorkingId!,
-                            $"Record already exists for rider {actualRider.Employee.NameEN} on {rowData.ShiftDate}"));
+                            $"Record already exists for rider {actualRider.Employee.NameEN} on {shiftDate}"));
                         continue;
                     }
 
                     // Check for duplicate in current batch
                     if (recordsToAdd.Any(r => r.ActualRiderId == actualRider.Id &&
-                                             r.ShiftDate == rowData.ShiftDate))
+                                             r.ShiftDate == shiftDate))
                     {
                         errors.Add(new ImportError(
                             rowNumber,
                             rowData.ActualWorkingId!,
-                            $"Duplicate entry in Excel for rider {actualRider.Employee.NameEN} on {rowData.ShiftDate}"));
+                            $"Duplicate entry in Excel for rider {actualRider.Employee.NameEN} on {shiftDate}"));
                         continue;
                     }
 
@@ -140,7 +141,7 @@ public class HungerDisabilityService(ApplicationDbcontext dbcontext) : IHungerDi
                         ActualWorkingId = actualRider.WorkingId!,
                         SubstituteRiderId = substituteRider?.Id,
                         SubstituteWorkingId = substituteRider?.WorkingId,
-                        ShiftDate = rowData.ShiftDate!.Value,
+                        ShiftDate = shiftDate,
                         Days = rowData.Days!.Value,
                         CompanyId = actualRider.CompanyId,
                         AcceptedDailyOrders = rowData.AcceptedDailyOrders!.Value,
@@ -559,7 +560,6 @@ public class HungerDisabilityService(ApplicationDbcontext dbcontext) : IHungerDi
         var headerCells = headerRow.CellsUsed().ToList();
 
         mapping.ActualWorkingIdColumn = FindColumn(headerCells, HungerExcelColumns.ActualWorkingIdColumns);
-        mapping.ShiftDateColumn = FindColumn(headerCells, HungerExcelColumns.ShiftDateColumns);
         mapping.DaysColumn = FindColumn(headerCells, HungerExcelColumns.DaysColumns);
         mapping.AcceptedOrdersColumn = FindColumn(headerCells, HungerExcelColumns.AcceptedOrdersColumns);
 
@@ -567,8 +567,6 @@ public class HungerDisabilityService(ApplicationDbcontext dbcontext) : IHungerDi
 
         if (mapping.ActualWorkingIdColumn == 0)
             missingColumns.Add($"ActualWorkingId (tried: {string.Join(", ", HungerExcelColumns.ActualWorkingIdColumns)})");
-        if (mapping.ShiftDateColumn == 0)
-            missingColumns.Add($"ShiftDate (tried: {string.Join(", ", HungerExcelColumns.ShiftDateColumns)})");
         if (mapping.DaysColumn == 0)
             missingColumns.Add($"Days (tried: {string.Join(", ", HungerExcelColumns.DaysColumns)})");
         if (mapping.AcceptedOrdersColumn == 0)
@@ -604,7 +602,6 @@ public class HungerDisabilityService(ApplicationDbcontext dbcontext) : IHungerDi
     private static (
         bool IsValid,
         string? ActualWorkingId,
-        DateOnly? ShiftDate,
         int? Days,
         int? AcceptedDailyOrders,
         string? ErrorMessage) ParseExcelRow(IXLRow row, ExcelColumnMapping mapping, int rowNumber)
@@ -615,39 +612,23 @@ public class HungerDisabilityService(ApplicationDbcontext dbcontext) : IHungerDi
             var workingIdCell = row.Cell(mapping.ActualWorkingIdColumn).Value;
             var workingId = workingIdCell.ToString()?.Trim();
             if (string.IsNullOrWhiteSpace(workingId))
-                return (false, null, null, null, null, "Invalid Working ID");
-
-            // Parse ShiftDate
-            var dateCell = row.Cell(mapping.ShiftDateColumn).Value;
-            DateOnly shiftDate;
-            if (dateCell.IsDateTime)
-            {
-                shiftDate = DateOnly.FromDateTime(dateCell.GetDateTime());
-            }
-            else if (DateOnly.TryParse(dateCell.ToString(), out var parsedDate))
-            {
-                shiftDate = parsedDate;
-            }
-            else
-            {
-                return (false, workingId, null, null, null, "Invalid Shift Date format");
-            }
+                return (false, null, null, null, "Invalid Working ID");
 
             // Parse Days
             var daysCell = row.Cell(mapping.DaysColumn).Value;
             if (!int.TryParse(daysCell.ToString(), out var days) || days <= 0)
-                return (false, workingId, shiftDate, null, null, "Invalid Days (must be > 0)");
+                return (false, workingId, null, null, "Invalid Days (must be > 0)");
 
             // Parse AcceptedOrders
             var ordersCell = row.Cell(mapping.AcceptedOrdersColumn).Value;
             if (!int.TryParse(ordersCell.ToString(), out var acceptedOrders) || acceptedOrders < 0)
-                return (false, workingId, shiftDate, days, null, "Invalid Accepted Orders (must be >= 0)");
+                return (false, workingId, days, null, "Invalid Accepted Orders (must be >= 0)");
 
-            return (true, workingId, shiftDate, days, acceptedOrders, null);
+            return (true, workingId, days, acceptedOrders, null);
         }
         catch (Exception ex)
         {
-            return (false, null, null, null, null, $"Error parsing row: {ex.Message}");
+            return (false, null, null, null, $"Error parsing row: {ex.Message}");
         }
     }
 }

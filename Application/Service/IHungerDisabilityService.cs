@@ -10,6 +10,7 @@ public interface IHungerDisabilityService
 {
     Task<Result<HungerDisabilityImportResult>> ImportFromExcelAsync(
         Stream excelStream,
+        DateOnly shiftDate,
         CancellationToken cancellationToken = default);
 
     Task<Result<IEnumerable<HungerDisabilityReportResponse>>> GetAllReportsAsync(
@@ -116,7 +117,6 @@ public class ExcelColumnMapping
     public bool IsValid { get; set; }
     public string? ErrorMessage { get; set; }
     public int ActualWorkingIdColumn { get; set; }
-    public int ShiftDateColumn { get; set; }
     public int DaysColumn { get; set; }
     public int AcceptedOrdersColumn { get; set; }
 }
