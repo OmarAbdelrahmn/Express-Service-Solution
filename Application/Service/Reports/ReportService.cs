@@ -22,7 +22,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
     {
         try
         {
-            var effectiveEndDate = endDate ?? DateOnly.FromDateTime(DateTime.UtcNow);
+            var effectiveEndDate = endDate ?? DateOnly.FromDateTime(DateTime.Now);
             var effectiveStartDate = startDate ?? effectiveEndDate.AddDays(-30);
 
             if (effectiveEndDate < effectiveStartDate)
@@ -75,7 +75,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
 
 
             var dashboard = new ComprehensiveDashboard(
-                GeneratedAt: DateTime.UtcNow,
+                GeneratedAt: DateTime.Now,
                 PeriodStart: effectiveStartDate,
                 PeriodEnd: effectiveEndDate,
                 Companies: companies,
@@ -103,7 +103,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
     DateOnly startDate,
     DateOnly endDate)
     {
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = DateOnly.FromDateTime(DateTime.Now);
 
         // Total vehicles count
         var totalVehicles = vehicles.Count;
@@ -137,7 +137,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
         var unassignedVehicles = totalVehicles - assignedVehicles;
 
         // Average vehicle age
-        var currentYear = DateTime.UtcNow.Year;
+        var currentYear = DateTime.Now.Year;
         var averageAge = vehicles.Any()
             ? vehicles.Average(v => currentYear - v.ManufactureYear)
             : 0;

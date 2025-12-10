@@ -244,7 +244,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
                         WorkingHours = shiftData.WorkingHours!.Value,
                         CompanyId = riderWhoWorked.CompanyId,
                         ShiftStatus = shiftStatus,
-                        CreatedAt = DateTime.UtcNow,
+                        CreatedAt = DateTime.Now,
                         Rider = null
                     };
 
@@ -313,7 +313,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
                             RealRejectedOrders = newShift.RealRejectedDailyOrders,
                             WorkingHours = newShift.WorkingHours,
                             ShiftStatus = newShift.ShiftStatus,
-                            CreatedAt = DateTime.UtcNow
+                            CreatedAt = DateTime.Now
                         }
                     };
                     conflicts.Add(conflict);
@@ -542,7 +542,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
                         NewStackedDeliveries = shiftData.StackedDeliveries.Value,
                         NewShiftStatus = newShiftStatus,
 
-                        UploadedAt = DateTime.UtcNow,
+                        UploadedAt = DateTime.Now,
                         IsResolved = false,
                     };
 
@@ -850,7 +850,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
                             WorkingHours = temp.NewWorkingHours,
                             CompanyId = temp.CompanyId,
                             ShiftStatus = temp.NewShiftStatus,
-                            CreatedAt = DateTime.UtcNow
+                            CreatedAt = DateTime.Now
                         };
 
                         await dbcontext.RiderShifts.AddAsync(newShift, cancellationToken);
@@ -1151,7 +1151,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
                 ShiftStatus = shiftStatus.ToString(),
                 RealRejectedDailyOrders = realRejectedOrders,  
                 StackedDeliveries = request.StackedDeliveries,
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = DateTime.Now
             };
 
             await dbcontext.RiderShifts.AddAsync(shift, cancellationToken);

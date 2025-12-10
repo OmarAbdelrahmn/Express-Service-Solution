@@ -1,4 +1,5 @@
 ﻿using Application.Contracts.rider;
+using Application.Service.Empolyee;
 using Application.Service.Riders;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -98,6 +99,16 @@ public class RiderController(IRiderService service) : ControllerBase
         var result = await service.SmartSearch(keyword);
         
         return Ok(result);
+    }
+
+
+    [HttpGet("search")]
+    public async Task<IActionResult> Search([FromQuery] EmployeeFilterr Request)
+    {
+        var response = await service.Filter(Request);
+        return response.IsSuccess ?
+            Ok(response.Value) :
+            response.ToProblem();
     }
 
 

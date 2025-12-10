@@ -49,6 +49,22 @@ public record EmployeeFilter(
     bool? INKSA = null,
     string? HousingName = null
 );
+public record EmployeeFilterr(
+    DateOnly? IqamaEndH = null,
+    DateOnly? IqamaEndM = null,
+    string? Sponsor = null,
+    long? sponsorNo = null,
+    DateOnly? PassportEnd = null,
+    string? JobTitle = null,
+    string? NameAR = null,
+    string? NameEN = null,
+    string? Country = null,
+    string? Status = null,
+    bool? INKSA = null,
+    string? HousingName = null,
+    string? WorkingId = null,
+    string? CompanyName = null
+);
 
 public sealed record EmployeeFilter2(
     DateOnly? IqamaEndH,

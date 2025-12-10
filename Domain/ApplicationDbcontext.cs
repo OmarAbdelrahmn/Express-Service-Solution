@@ -158,6 +158,63 @@ public class ApplicationDbcontext(DbContextOptions<ApplicationDbcontext> options
 
         base.OnModelCreating(modelBuilder);
 
+        modelBuilder.Entity<HungerDisability>(entity =>
+        {
+            entity.HasKey(h => h.Id);
+
+            entity.Property(h => h.ActualWorkingId)
+                .IsRequired()
+                .HasMaxLength(50);
+
+            entity.Property(h => h.SubstituteWorkingId)
+                .HasMaxLength(50);
+
+            entity.Property(h => h.ShiftDate)
+                .IsRequired();
+
+            entity.Property(h => h.Days)
+                .IsRequired();
+
+            entity.Property(h => h.AcceptedDailyOrders)
+                .IsRequired();
+
+            entity.Property(h => h.CreatedAt)
+                .IsRequired();
+
+            // Relationship with ActualRider (the disabled rider)
+            entity.HasOne(h => h.Rider)
+                .WithMany()
+                .HasForeignKey(h => h.ActualRiderId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Relationship with Company
+            entity.HasOne(h => h.Company)
+                .WithMany()
+                .HasForeignKey(h => h.CompanyId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Composite unique index to prevent duplicate records for same rider on same date
+            entity.HasIndex(h => new { h.ActualRiderId, h.ShiftDate })
+                .IsUnique()
+                .HasDatabaseName("IX_HungerDisability_ActualRider_ShiftDate");
+
+            // Index for performance on common queries
+            entity.HasIndex(h => h.ActualWorkingId)
+                .HasDatabaseName("IX_HungerDisability_ActualWorkingId");
+
+            entity.HasIndex(h => h.ShiftDate)
+                .HasDatabaseName("IX_HungerDisability_ShiftDate");
+
+            entity.HasIndex(h => h.CompanyId)
+                .HasDatabaseName("IX_HungerDisability_CompanyId");
+
+            entity.HasIndex(h => h.SubstituteRiderId)
+                .HasDatabaseName("IX_HungerDisability_SubstituteRiderId");
+
+            entity.ToTable("HungerDisabilities");
+        });
+    
+
     }
 
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)

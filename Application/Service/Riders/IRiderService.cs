@@ -1,6 +1,7 @@
 ﻿using Application.Abstraction;
 using Application.Contracts.Employees;
 using Application.Contracts.rider;
+using Application.Service.Empolyee;
 using System;
 using System.Collections.Generic;
 using System.Text;
@@ -19,5 +20,6 @@ public interface IRiderService
     Task<List<RiderResponse>> SmartSearch(string keyword);
     Task<Result> ChangeWorkinId(string OldWorkinId, string NewWorkingId);
     Task<Result> AddETOR(long IqamaNo, EMTOR request );
+    Task<Result<IEnumerable<RiderResponse>>> Filter(EmployeeFilterr filter);
 
 }

@@ -1,6 +1,7 @@
 ﻿using Application.Abstraction;
 using Application.Contracts.Employees;
 using Application.Contracts.rider;
+using Application.Service.Empolyee;
 using Azure.Core;
 using Domain;
 using Domain.Entities;
@@ -350,6 +351,87 @@ public class RiderService(ApplicationDbcontext dbcontext) : IRiderService
             ));
 
         return await query.ToListAsync();
+    }
+    public async Task<Result<IEnumerable<RiderResponse>>> Filter(EmployeeFilterr filter)
+    {
+        var query = dbcontext.Employees
+            .Where(e => e.RiderDetails != null)
+            .Include(e => e.RiderDetails)
+                .ThenInclude(rd => rd.Company)
+            .Include(e => e.Housing)
+            .AsQueryable();
+
+        if (filter.IqamaEndH is not null)
+            query = query.Where(e => e.IqamaEndH == filter.IqamaEndH);
+
+        if (filter.IqamaEndM is not null)
+            query = query.Where(e => e.IqamaEndM == filter.IqamaEndM);
+
+        if (!string.IsNullOrWhiteSpace(filter.Sponsor))
+            query = query.Where(e => e.Sponsor.Contains(filter.Sponsor));
+
+        if (filter.sponsorNo.HasValue)
+            query = query.Where(e => e.sponsorNo == filter.sponsorNo.Value);
+
+        if (filter.PassportEnd is not null)
+            query = query.Where(e => e.PassportEnd == filter.PassportEnd);
+
+        if (!string.IsNullOrWhiteSpace(filter.JobTitle))
+            query = query.Where(e => e.JobTitle.Contains(filter.JobTitle));
+
+        if (!string.IsNullOrWhiteSpace(filter.NameAR))
+            query = query.Where(e => e.NameAR.Contains(filter.NameAR));
+
+        if (!string.IsNullOrWhiteSpace(filter.NameEN))
+            query = query.Where(e => e.NameEN.Contains(filter.NameEN));
+
+        if (!string.IsNullOrWhiteSpace(filter.Country))
+            query = query.Where(e => e.Country.Contains(filter.Country));
+
+        if (!string.IsNullOrWhiteSpace(filter.Status))
+            query = query.Where(e => e.Status.Contains(filter.Status));
+
+        if (!string.IsNullOrWhiteSpace(filter.WorkingId))
+            query = query.Where(e => e.RiderDetails.WorkingId.Contains(filter.WorkingId));
+       
+        if (!string.IsNullOrWhiteSpace(filter.CompanyName))
+            query = query.Where(e => e.RiderDetails.Company.Name.Contains(filter.CompanyName));
+
+        if (filter.INKSA is not null)
+            query = query.Where(e => e.INKSA == filter.INKSA);
+
+        if (!string.IsNullOrWhiteSpace(filter.HousingName))
+            query = query.Where(e => e.Housing != null &&
+                                     e.Housing.Name.Contains(filter.HousingName));
+
+        var res = query.Select(emp => new RiderResponse(
+       emp.IqamaNo,
+       emp.IqamaEndM,
+       emp.IqamaEndH,
+       emp.PassportNo!,
+       emp.PassportEnd ?? default,
+       emp.Sponsor,
+       emp.sponsorNo,
+       emp.JobTitle,
+       emp.NameAR,
+       emp.NameEN,
+       emp.Country,
+       emp.Phone,
+       emp.DateOfBirth,
+       emp.Status,
+       emp.IBAN!,
+       emp.INKSA,
+       emp.CreatedAt,
+       emp.Housing.Name ?? "none",
+       emp.RiderDetails.WorkingId!,
+         emp.IqamaNo,
+            emp.RiderDetails.TshirtSize!,
+            emp.RiderDetails.LicenseNumber!,
+            emp.RiderDetails.Company.Name
+            )).ToList();
+
+
+        return Result.Success<IEnumerable<RiderResponse>>(res);
     }
 
 

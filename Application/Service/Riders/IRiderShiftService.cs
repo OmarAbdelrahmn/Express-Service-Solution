@@ -309,8 +309,8 @@ public class CompanyShiftConfiguration
 {
     public static readonly Dictionary<string, int> CompanyDailyOrderTargets = new()
     {
-        { "Jahez", 15 },
-        { "Mrsool", 15 },
+        { "Hunger", 15 },
+        { "Keta", 12 },
         { "HungerStation", 14 },
         { "Careem", 14 },
         { "ToYou", 15 }
