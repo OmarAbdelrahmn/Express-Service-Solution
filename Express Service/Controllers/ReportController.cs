@@ -14,138 +14,138 @@ public class ReportController(IReportService service) : ControllerBase
     private readonly IReportService service = service;
 
 
-    [HttpGet("export/dashboard/excel")]
-    public async Task<IActionResult> ExportDashboardToExcelAsync(
-        DateOnly? startDate = null,
-        DateOnly? endDate = null,
-        CancellationToken cancellationToken = default)
-    {
-        var result = await service.GetComprehensiveDashboardAsync(
-            startDate, endDate, cancellationToken);
+    //[HttpGet("export/dashboard/excel")]
+    //public async Task<IActionResult> ExportDashboardToExcelAsync(
+    //    DateOnly? startDate = null,
+    //    DateOnly? endDate = null,
+    //    CancellationToken cancellationToken = default)
+    //{
+    //    var result = await service.GetComprehensiveDashboardAsync(
+    //        startDate, endDate, cancellationToken);
 
-        if (!result.IsSuccess)
-            return result.ToProblem();
+    //    if (!result.IsSuccess)
+    //        return result.ToProblem();
 
-        var exportService = new ReportExportService();
-        var excelBytes = await exportService.ExportToExcelAsync(
-            result.Value, "ComprehensiveDashboard");
+    //    var exportService = new ReportExportService();
+    //    var excelBytes = await exportService.ExportToExcelAsync(
+    //        result.Value, "ComprehensiveDashboard");
 
-        var fileName = $"Dashboard_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx";
-        return File(excelBytes,
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            fileName);
-    }
+    //    var fileName = $"Dashboard_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx";
+    //    return File(excelBytes,
+    //        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    //        fileName);
+    //}
 
-    [HttpGet("export/dashboard/pdf")]
-    public async Task<IActionResult> ExportDashboardToPdfAsync(
-        DateOnly? startDate = null,
-        DateOnly? endDate = null,
-        CancellationToken cancellationToken = default)
-    {
-        var result = await service.GetComprehensiveDashboardAsync(
-            startDate, endDate, cancellationToken);
+    //[HttpGet("export/dashboard/pdf")]
+    //public async Task<IActionResult> ExportDashboardToPdfAsync(
+    //    DateOnly? startDate = null,
+    //    DateOnly? endDate = null,
+    //    CancellationToken cancellationToken = default)
+    //{
+    //    var result = await service.GetComprehensiveDashboardAsync(
+    //        startDate, endDate, cancellationToken);
 
-        if (!result.IsSuccess)
-            return result.ToProblem();
+    //    if (!result.IsSuccess)
+    //        return result.ToProblem();
 
-        var exportService = new ReportExportService();
-        var pdfBytes = await exportService.ExportToPdfAsync(
-            result.Value, "ComprehensiveDashboard");
+    //    var exportService = new ReportExportService();
+    //    var pdfBytes = await exportService.ExportToPdfAsync(
+    //        result.Value, "ComprehensiveDashboard");
 
-        var fileName = $"Dashboard_{DateTime.Now:yyyyMMdd_HHmmss}.pdf";
-        return File(pdfBytes, "application/pdf", fileName);
-    }
+    //    var fileName = $"Dashboard_{DateTime.Now:yyyyMMdd_HHmmss}.pdf";
+    //    return File(pdfBytes, "application/pdf", fileName);
+    //}
 
-    [HttpGet("export/monthly/{WorkingId}/excel")]
-    public async Task<IActionResult> ExportMonthlyToExcelAsync(
-        [FromRoute] string WorkingId,
-        [FromQuery] int year,
-        [FromQuery] int month,
-        CancellationToken cancellationToken = default)
-    {
-        var result = await service.GetMonthlyReportByWorkingIdAsync(
-            WorkingId, year, month, cancellationToken);
+    //[HttpGet("export/monthly/{WorkingId}/excel")]
+    //public async Task<IActionResult> ExportMonthlyToExcelAsync(
+    //    [FromRoute] string WorkingId,
+    //    [FromQuery] int year,
+    //    [FromQuery] int month,
+    //    CancellationToken cancellationToken = default)
+    //{
+    //    var result = await service.GetMonthlyReportByWorkingIdAsync(
+    //        WorkingId, year, month, cancellationToken);
 
-        if (!result.IsSuccess)
-            return result.ToProblem();
+    //    if (!result.IsSuccess)
+    //        return result.ToProblem();
 
-        var exportService = new ReportExportService();
-        var excelBytes = await exportService.ExportToExcelAsync(
-            result.Value, "MonthlyRiderReport");
+    //    var exportService = new ReportExportService();
+    //    var excelBytes = await exportService.ExportToExcelAsync(
+    //        result.Value, "MonthlyRiderReport");
 
-        var fileName = $"Monthly_{WorkingId}_{year}{month:D2}.xlsx";
-        return File(excelBytes,
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            fileName);
-    }
+    //    var fileName = $"Monthly_{WorkingId}_{year}{month:D2}.xlsx";
+    //    return File(excelBytes,
+    //        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    //        fileName);
+    //}
 
-    [HttpGet("export/top-riders/pdf")]
-    public async Task<IActionResult> ExportTopRidersToPdfAsync(
-        [FromQuery] DateOnly startDate,
-        [FromQuery] DateOnly endDate,
-        [FromQuery] int topCount = 100,
-        CancellationToken cancellationToken = default)
-    {
-        var request = new TopRidersRequest(
-            StartDate: startDate,
-            EndDate: endDate,
-            TopCount: topCount
-        );
+    //[HttpGet("export/top-riders/pdf")]
+    //public async Task<IActionResult> ExportTopRidersToPdfAsync(
+    //    [FromQuery] DateOnly startDate,
+    //    [FromQuery] DateOnly endDate,
+    //    [FromQuery] int topCount = 100,
+    //    CancellationToken cancellationToken = default)
+    //{
+    //    var request = new TopRidersRequest(
+    //        StartDate: startDate,
+    //        EndDate: endDate,
+    //        TopCount: topCount
+    //    );
 
-        var result = await service.GetTopRidersInPeriodAsync(request, cancellationToken);
+    //    var result = await service.GetTopRidersInPeriodAsync(request, cancellationToken);
 
-        if (!result.IsSuccess)
-            return result.ToProblem();
+    //    if (!result.IsSuccess)
+    //        return result.ToProblem();
 
-        var exportService = new ReportExportService();
-        var pdfBytes = await exportService.ExportToPdfAsync(
-            result.Value, "TopRidersReport");
+    //    var exportService = new ReportExportService();
+    //    var pdfBytes = await exportService.ExportToPdfAsync(
+    //        result.Value, "TopRidersReport");
 
-        var fileName = $"TopRiders_{startDate:yyyyMMdd}_{endDate:yyyyMMdd}.pdf";
-        return File(pdfBytes, "application/pdf", fileName);
-    }
+    //    var fileName = $"TopRiders_{startDate:yyyyMMdd}_{endDate:yyyyMMdd}.pdf";
+    //    return File(pdfBytes, "application/pdf", fileName);
+    //}
 
-    [HttpGet("export/generic/excel")]
-    public async Task<IActionResult> ExportGenericToExcelAsync(
-        [FromQuery] string reportType,
-        [FromQuery] string reportDataJson)
-    {
-        // This allows frontend to pass any report data as JSON
-        try
-        {
-            var exportService = new ReportExportService();
+    //[HttpGet("export/generic/excel")]
+    //public async Task<IActionResult> ExportGenericToExcelAsync(
+    //    [FromQuery] string reportType,
+    //    [FromQuery] string reportDataJson)
+    //{
+    //    // This allows frontend to pass any report data as JSON
+    //    try
+    //    {
+    //        var exportService = new ReportExportService();
 
-            // Deserialize based on report type
-            object reportData = reportType switch
-            {
-                "ComprehensiveDashboard" =>
-                    JsonSerializer.Deserialize<ComprehensiveDashboard>(reportDataJson),
-                "MonthlyRiderReport" =>
-                    JsonSerializer.Deserialize<MonthlyRiderReport>(reportDataJson),
-                "TopRidersReport" =>
-                    JsonSerializer.Deserialize<TopRidersReport>(reportDataJson),
-                _ => throw new NotSupportedException($"Report type {reportType} not supported")
-            };
+    //        // Deserialize based on report type
+    //        object reportData = reportType switch
+    //        {
+    //            "ComprehensiveDashboard" =>
+    //                JsonSerializer.Deserialize<ComprehensiveDashboard>(reportDataJson),
+    //            "MonthlyRiderReport" =>
+    //                JsonSerializer.Deserialize<MonthlyRiderReport>(reportDataJson),
+    //            "TopRidersReport" =>
+    //                JsonSerializer.Deserialize<TopRidersReport>(reportDataJson),
+    //            _ => throw new NotSupportedException($"Report type {reportType} not supported")
+    //        };
 
-            var method = typeof(ReportExportService)
-                .GetMethod(nameof(ReportExportService.ExportToExcelAsync))
-                .MakeGenericMethod(reportData.GetType());
+    //        var method = typeof(ReportExportService)
+    //            .GetMethod(nameof(ReportExportService.ExportToExcelAsync))
+    //            .MakeGenericMethod(reportData.GetType());
 
-            var task = (Task<byte[]>)method.Invoke(exportService,
-                new[] { reportData, reportType });
+    //        var task = (Task<byte[]>)method.Invoke(exportService,
+    //            new[] { reportData, reportType });
 
-            var excelBytes = await task;
+    //        var excelBytes = await task;
 
-            var fileName = $"{reportType}_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx";
-            return File(excelBytes,
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                fileName);
-        }
-        catch (Exception ex)
-        {
-            return BadRequest(new { error = ex.Message });
-        }
-    }
+    //        var fileName = $"{reportType}_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx";
+    //        return File(excelBytes,
+    //            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    //            fileName);
+    //    }
+    //    catch (Exception ex)
+    //    {
+    //        return BadRequest(new { error = ex.Message });
+    //    }
+    //}
 
     [HttpGet("")]
     public async Task<IActionResult> GetDashboard(DateOnly? startDate = null,

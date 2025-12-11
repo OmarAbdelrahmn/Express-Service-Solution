@@ -83,9 +83,9 @@ public class HousingService(ApplicationDbcontext dbcontext) : IHousingService
         return Result.Success(companyResponses);
     }
 
-    public async Task<Result<UHousingResponse>> UpdateAsync(HousingRequest Request)
+    public async Task<Result<UHousingResponse>> UpdateAsync(string editHousingName ,HousingRequest Request)
     {
-        var companies = await dbcontext.Housings.Where(c => c.Name == Request.Name).FirstOrDefaultAsync();
+        var companies = await dbcontext.Housings.Where(c => c.Name == editHousingName).FirstOrDefaultAsync();
 
         if (companies == null)
             return Result.Failure<UHousingResponse>(new Error("house.NotFound", $"Housing with name {Request.Name} was not found.", 404));

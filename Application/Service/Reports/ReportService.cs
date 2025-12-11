@@ -592,7 +592,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
             : 0;
 
         var problematicShifts = shifts
-            .Where(s => HasRejectionProblem(s) || s.ShiftStatus != ShiftStatus.Completed.ToString())
+            .Where(s => HasRejectionProblem(s) || s.ShiftStatus == ShiftStatus.Failed.ToString())
             .Select(CreateProblemShiftDetail)
             .ToList();
 
@@ -798,7 +798,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
             : 0;
 
         var problematicShifts = shifts
-            .Where(s => HasRejectionProblem(s) || s.ShiftStatus != ShiftStatus.Completed.ToString())
+            .Where(s => HasRejectionProblem(s) || s.ShiftStatus == ShiftStatus.Failed.ToString())
             .Select(CreateProblemShiftDetail)
             .ToList();
 

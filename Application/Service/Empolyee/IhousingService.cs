@@ -12,6 +12,6 @@ public interface IHousingService
     Task<Result<IEnumerable<HousingResponse>>> Get(string Name);
     Task<Result<IEnumerable<HousingResponse>>> GetWithManagerIqama(long ManagerIqamaNo);
     Task<Result<HousingResponse>> CreateAsync(HousingRequest Request);
-    Task<Result<UHousingResponse>> UpdateAsync(HousingRequest  Request);
+    Task<Result<UHousingResponse>> UpdateAsync(string editHousingName ,HousingRequest  Request);
     Task<Result> DeleteAsync(string Name, CancellationToken cancellationToken = default);
 }

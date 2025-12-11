@@ -954,7 +954,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
         var thresholds = new Dictionary<string, (int Failed, int Incomplete, int Completed)>
     {
         { "Keta", (8, 12, 16) },
-        { "Hunger", (8, 12, 16) },
+        { "Hunger", (8, 14, 18) },
         { "Toyou", (8, 12, 16) },
         { "Amazon", (8, 12, 16) }
     };
@@ -962,7 +962,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
         var (failed, incomplete, completed) =
             thresholds.TryGetValue(companyName, out var t)
                 ? t
-                : (10, 15, 20);
+                : (10, 14, 18);
 
         if (acceptedOrders >= completed)
             return ShiftStatus.Completed.ToString();
