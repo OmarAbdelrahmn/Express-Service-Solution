@@ -9,7 +9,7 @@ namespace Application.Service;
 
 public class HungerDisabilityService(ApplicationDbcontext dbcontext) : IHungerDisabilityService
 {
-    private const int DAILY_TARGET = 15;
+    private const int DAILY_TARGET = 14;
 
     public async Task<Result<HungerDisabilityImportResult>> ImportFromExcelAsync(
         Stream excelStream,
@@ -37,6 +37,7 @@ public class HungerDisabilityService(ApplicationDbcontext dbcontext) : IHungerDi
 
             var allRiders = await dbcontext.RiderDetails
                 .Include(r => r.Employee)
+                    .ThenInclude(e => e.Housing)
                 .Include(r => r.Company)
                 .AsNoTracking()
                 .ToListAsync(cancellationToken);
@@ -77,13 +78,6 @@ public class HungerDisabilityService(ApplicationDbcontext dbcontext) : IHungerDi
                             $"Rider with Working ID {rowData.ActualWorkingId} not found in database"));
                         continue;
                     }
-
-                    //if (actualRider.Employee.Status != "disable")
-                    //{
-                    //    errors.Add(new ImportError(rowNumber, rowData.ActualWorkingId!,
-                    //        $"Rider {actualRider.Employee.NameEN} is not disabled (Status: {actualRider.Employee.Status})"));
-                    //    continue;
-                    //}
 
                     var existingRecord = await dbcontext.Set<HungerDisability>()
                         .AnyAsync(h => h.ActualRiderId == actualRider.Id && h.ShiftDate == shiftDate, cancellationToken);
@@ -167,6 +161,7 @@ public class HungerDisabilityService(ApplicationDbcontext dbcontext) : IHungerDi
             var records = await dbcontext.Set<HungerDisability>()
                 .Include(h => h.Rider)
                     .ThenInclude(r => r.Employee)
+                        .ThenInclude(e => e.Housing)
                 .Include(h => h.Company)
                 .Where(h => h.ShiftDate >= startDate && h.ShiftDate <= endDate)
                 .AsNoTracking()
@@ -188,26 +183,42 @@ public class HungerDisabilityService(ApplicationDbcontext dbcontext) : IHungerDi
                 .AsNoTracking()
                 .ToDictionaryAsync(r => r.Id, r => r, cancellationToken);
 
-            // Group by rider and aggregate
+            // Calculate the last shift date (one day before endDate)
+            var lastShiftDate = endDate.AddDays(-1);
+
+            // Get last day orders for all riders
+            var lastDayOrders = await dbcontext.Set<HungerDisability>()
+                .Where(h => h.ShiftDate == lastShiftDate &&
+                           records.Select(r => r.ActualRiderId).Contains(h.ActualRiderId))
+                .AsNoTracking()
+                .ToDictionaryAsync(h => h.ActualRiderId, h => h.AcceptedDailyOrders, cancellationToken);
+
+            // Group by rider and housing
             var aggregated = records.GroupBy(r => new
             {
                 r.ActualRiderId,
                 r.ActualWorkingId,
                 RiderNameEN = r.Rider.Employee.NameEN,
                 RiderNameAR = r.Rider.Employee.NameAR,
+                HousingId = r.Rider.Employee.HousingId,
+                HousingName = r.Rider.Employee.Housing?.Name,
                 r.CompanyId,
                 CompanyName = r.Company.Name,
-                r.SubstituteRiderId,  // Add this to grouping key
+                r.SubstituteRiderId,
                 r.SubstituteWorkingId
             }).Select(g =>
             {
                 var totalDays = g.Sum(x => x.Days);
                 var totalOrders = g.Sum(x => x.AcceptedDailyOrders);
-                var target = totalDays * DAILY_TARGET;
+                var days = (endDate.DayNumber - startDate.DayNumber);
+
+                var target = days * DAILY_TARGET;
+
+
                 var difference = totalOrders - target;
                 var performancePercentage = target > 0 ? Math.Round((decimal)totalOrders / target * 100, 2) : 0;
 
-                // Get substitute info (use first substitution found)
+                // Get substitute info
                 var firstRecord = g.First();
                 string? substituteNameEN = null;
                 string? substituteNameAR = null;
@@ -217,6 +228,9 @@ public class HungerDisabilityService(ApplicationDbcontext dbcontext) : IHungerDi
                     substituteNameEN = sub.Employee.NameEN;
                     substituteNameAR = sub.Employee.NameAR;
                 }
+
+                // Get last day orders
+                var lastDayOrderCount = lastDayOrders.TryGetValue(g.Key.ActualRiderId, out var orders) ? orders : 0;
 
                 return new HungerDisabilityAggregatedResponse(
                     ActualRiderId: g.Key.ActualRiderId,
@@ -228,24 +242,20 @@ public class HungerDisabilityService(ApplicationDbcontext dbcontext) : IHungerDi
                     SubstituteRiderNameEN: substituteNameEN,
                     SubstituteRiderNameAR: substituteNameAR,
                     HasSubstitute: firstRecord.SubstituteRiderId.HasValue,
-                    CompanyId: g.Key.CompanyId,
-                    CompanyName: g.Key.CompanyName,
+                    HousingId: g.Key.HousingId,
+                    HousingName: g.Key.HousingName ?? "No Housing",
                     TotalDays: totalDays,
                     TotalOrders: totalOrders,
                     Target: target,
                     DifferenceFromTarget: difference,
                     PerformancePercentage: performancePercentage,
-                    IsAboveTarget: difference >= 0,
                     PerformanceStatus: difference >= 0 ? "✅ Above or Met Target" : "❌ Below Target",
-                    PerformanceNote: difference >= 0
-                        ? $"Exceeded target by {difference} orders"
-                        : $"Short by {Math.Abs(difference)} orders",
-                    RecordCount: g.Count(),
-                    StartDate: g.Min(x => x.ShiftDate),
-                    EndDate: g.Max(x => x.ShiftDate)
+                    LastDayOrders: lastDayOrderCount,
+                    RecordCount: g.Count()
                 );
-            }).OrderBy(x => x.ActualWorkingId)
-            .ThenBy(x => x.HasSubstitute)
+            })
+            .OrderBy(x => x.HousingName)
+            .ThenBy(x => x.ActualWorkingId)
             .ToList();
 
             return Result.Success<IEnumerable<HungerDisabilityAggregatedResponse>>(aggregated);
@@ -311,6 +321,7 @@ public class HungerDisabilityService(ApplicationDbcontext dbcontext) : IHungerDi
             var records = await dbcontext.Set<HungerDisability>()
                 .Include(h => h.Rider)
                     .ThenInclude(r => r.Employee)
+                        .ThenInclude(e => e.Housing)
                 .Include(h => h.Company)
                 .Where(h => h.ActualWorkingId == actualWorkingId &&
                            h.ShiftDate >= startDate &&
@@ -333,9 +344,15 @@ public class HungerDisabilityService(ApplicationDbcontext dbcontext) : IHungerDi
                     .FirstOrDefaultAsync(r => r.Id == firstRecord.SubstituteRiderId.Value, cancellationToken);
             }
 
+            // Calculate the last shift date (one day before endDate)
+            var lastShiftDate = endDate.AddDays(-1);
+            var lastDayRecord = records.FirstOrDefault(r => r.ShiftDate == lastShiftDate);
+            var lastDayOrders = lastDayRecord?.AcceptedDailyOrders ?? 0;
+
             var totalDays = records.Sum(x => x.Days);
             var totalOrders = records.Sum(x => x.AcceptedDailyOrders);
-            var target = totalDays * DAILY_TARGET;
+            var days = (endDate.DayNumber - startDate.DayNumber);
+            var target = days * DAILY_TARGET;
             var difference = totalOrders - target;
             var performancePercentage = target > 0 ? Math.Round((decimal)totalOrders / target * 100, 2) : 0;
 
@@ -349,21 +366,16 @@ public class HungerDisabilityService(ApplicationDbcontext dbcontext) : IHungerDi
                 SubstituteRiderNameEN: substituteRider?.Employee.NameEN,
                 SubstituteRiderNameAR: substituteRider?.Employee.NameAR,
                 HasSubstitute: firstRecord.SubstituteRiderId.HasValue,
-                CompanyId: firstRecord.CompanyId,
-                CompanyName: firstRecord.Company.Name,
+                HousingId: firstRecord.Rider.Employee.HousingId,
+                HousingName: firstRecord.Rider.Employee.Housing?.Name ?? "No Housing",
                 TotalDays: totalDays,
                 TotalOrders: totalOrders,
                 Target: target,
                 DifferenceFromTarget: difference,
                 PerformancePercentage: performancePercentage,
-                IsAboveTarget: difference >= 0,
                 PerformanceStatus: difference >= 0 ? "✅ Above or Met Target" : "❌ Below Target",
-                PerformanceNote: difference >= 0
-                    ? $"Exceeded target by {difference} orders"
-                    : $"Short by {Math.Abs(difference)} orders",
-                RecordCount: records.Count,
-                StartDate: records.Min(x => x.ShiftDate),
-                EndDate: records.Max(x => x.ShiftDate)
+                LastDayOrders: lastDayOrders,
+                RecordCount: records.Count
             );
 
             return Result.Success(response);
@@ -397,7 +409,7 @@ public class HungerDisabilityService(ApplicationDbcontext dbcontext) : IHungerDi
             var totalTarget = reports.Sum(r => r.Target);
             var totalDifference = totalOrders - totalTarget;
 
-            var ridersAboveTarget = reports.Count(r => r.IsAboveTarget);
+            var ridersAboveTarget = reports.Count(r => r.DifferenceFromTarget >= 0);
             var ridersBelowTarget = totalRiders - ridersAboveTarget;
 
             var ridersWithSubstitutes = reports.Count(r => r.HasSubstitute);
@@ -406,12 +418,13 @@ public class HungerDisabilityService(ApplicationDbcontext dbcontext) : IHungerDi
             var averageOrdersPerRider = totalRiders > 0 ? Math.Round((decimal)totalOrders / totalRiders, 2) : 0;
             var averageOrdersPerDay = totalDays > 0 ? Math.Round((decimal)totalOrders / totalDays, 2) : 0;
 
-            var companyBreakdown = reports.GroupBy(r => r.CompanyName)
-                .Select(g => new CompanySummaryDetail(
+
+            var housingBreakdown = reports.GroupBy(r => r.HousingName)
+                .Select(g => new HousingSummaryDetail(
                     g.Key,
                     g.Count(),
                     g.Sum(r => r.TotalOrders),
-                    g.Count(r => r.IsAboveTarget)
+                    g.Count(r => r.DifferenceFromTarget >= 0)
                 )).ToList();
 
             var summary = new HungerDisabilityOverallSummary(
@@ -427,9 +440,7 @@ public class HungerDisabilityService(ApplicationDbcontext dbcontext) : IHungerDi
                 AverageOrdersPerRider: averageOrdersPerRider,
                 AverageOrdersPerDay: averageOrdersPerDay,
                 OverallPerformanceRate: totalTarget > 0 ? Math.Round((decimal)totalOrders / totalTarget * 100, 2) : 0,
-                StartDate: startDate,
-                EndDate: endDate,
-                CompanyBreakdown: companyBreakdown,
+                HousingBreakdown: housingBreakdown,
                 TopPerformers: reports.OrderByDescending(r => r.DifferenceFromTarget).Take(5).ToList(),
                 BottomPerformers: reports.OrderBy(r => r.DifferenceFromTarget).Take(5).ToList()
             );

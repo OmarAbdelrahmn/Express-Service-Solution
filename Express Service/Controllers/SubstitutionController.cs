@@ -1,4 +1,5 @@
 ﻿using Application.Service.Riders;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
@@ -6,6 +7,7 @@ namespace Express_Service.Controllers;
 
 [Route("api/[controller]")]
 [ApiController]
+[Authorize(Roles = "Master,Admin")]
 public class SubstitutionController(IRiderSub service) : ControllerBase
 {
     private readonly IRiderSub service = service;

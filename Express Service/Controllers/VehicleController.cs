@@ -1,5 +1,6 @@
 ﻿using Application.Contracts.Employees;
 using Application.Service.Empolyee;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Express_Service.Controllers;
@@ -16,6 +17,7 @@ public class VehicleController : ControllerBase
     }
 
     [HttpPost]
+    [Authorize(Roles = "Master,Admin")]
     public async Task<IActionResult> Create([FromBody] VehicleRequest request)
     {
         var result = await _service.CreateAsync(request);
@@ -23,6 +25,7 @@ public class VehicleController : ControllerBase
     }
 
     [HttpPut("{plateNumber}")]
+    [Authorize(Roles = "Master,Admin")]
     public async Task<IActionResult> Update([FromRoute] string plateNumber, [FromBody] UVehicleRequest request)
     {
         var result = await _service.UpdateAsync(plateNumber, request);
@@ -30,6 +33,7 @@ public class VehicleController : ControllerBase
     }
 
     [HttpDelete("{vehicleNumber}")]
+    [Authorize(Roles = "Master,Admin")]
     public async Task<IActionResult> Delete([FromRoute] string vehicleNumber, CancellationToken cancellationToken)
     {
         var result = await _service.DeleteAsync(vehicleNumber, cancellationToken);
@@ -37,6 +41,7 @@ public class VehicleController : ControllerBase
     }
 
     [HttpGet]
+    [Authorize(Roles = "Master,Admin,Member")]
     public async Task<IActionResult> GetAll()
     {
         var result = await _service.GetAllEmployee();
@@ -44,6 +49,7 @@ public class VehicleController : ControllerBase
     }
 
     [HttpGet("chase/{vehicleNumber}")]
+    [Authorize(Roles = "Master,Admin,Member")]
     public async Task<IActionResult> GetByNumber([FromRoute] string vehicleNumber)
     {
         var result = await _service.Get(vehicleNumber);
@@ -51,6 +57,7 @@ public class VehicleController : ControllerBase
     }
 
     [HttpGet("serial/{serial:int}")]
+    [Authorize(Roles = "Master,Admin,Member")]
     public async Task<IActionResult> GetBySerial([FromRoute] int serial)
     {
         var result = await _service.GetSerial(serial);
@@ -58,6 +65,7 @@ public class VehicleController : ControllerBase
     }
 
     [HttpGet("plate/{plate}")]
+    [Authorize(Roles = "Master,Admin,Member")]
     public async Task<IActionResult> GetByPlate([FromRoute] string plate)
     {
         var result = await _service.Getplate(plate);
@@ -65,24 +73,28 @@ public class VehicleController : ControllerBase
     }
 
     [HttpGet("available")]
+    [Authorize(Roles = "Master,Admin,Member")]
     public async Task<IActionResult> GetAvailableVehicles()
     {
         var result = await _service.GetAvailableVehiclesAsync();
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
     [HttpGet("stolen")]
+    [Authorize(Roles = "Master,Admin,Member")]
     public async Task<IActionResult> GetAvaieVehicles()
     {
         var result = await _service.GetStolenVehiclesAsync();
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
     [HttpGet("problem")]
+    [Authorize(Roles = "Master,Admin,Member")]
     public async Task<IActionResult> GetAVehicles()
     {
         var result = await _service.GetProblemVehiclesAsync();
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
     [HttpGet("breakup")]
+    [Authorize(Roles = "Master,Admin,Member")]
     public async Task<IActionResult> GetAvableVehicles()
     {
         var result = await _service.GetBreackupVehiclesAsync();
@@ -90,6 +102,7 @@ public class VehicleController : ControllerBase
     }
 
     [HttpGet("taken")]
+    [Authorize(Roles = "Master,Admin,Member")]
     public async Task<IActionResult> GetTakenVehicles()
     {
         var result = await _service.GetUnavailableVehiclesAsync();
@@ -97,6 +110,7 @@ public class VehicleController : ControllerBase
     }
 
     [HttpGet("vehicle-history/{plate}")]
+    [Authorize(Roles = "Master,Admin,Member")]
     public async Task<IActionResult> GetVehicleHistory([FromRoute] string plate)
     {
         var result = await _service.GetVehicleHistoryAsync1(plate);
@@ -104,6 +118,7 @@ public class VehicleController : ControllerBase
     }
 
     [HttpGet("is-available/{plate}")]
+    [Authorize(Roles = "Master,Admin,Member")]
     public async Task<IActionResult> IsVehicleAvailable([FromRoute] string plate)
     {
         var result = await _service.IsVehicleAvailableAsync(plate);
@@ -111,6 +126,7 @@ public class VehicleController : ControllerBase
     }
 
     [HttpPost("take")]
+    [Authorize(Roles = "Master,Admin")]
     public async Task<IActionResult> TakeVehicle(
         [FromQuery] long IqamaNo,
         [FromQuery] string vehicleNumber,
@@ -121,6 +137,7 @@ public class VehicleController : ControllerBase
     }
 
     [HttpPost("return")]
+    [Authorize(Roles = "Master,Admin")]
     public async Task<IActionResult> ReturnVehicle(
         [FromQuery] long IqamaNo,
         [FromQuery] string vehicleNumber,
@@ -131,6 +148,7 @@ public class VehicleController : ControllerBase
     }
 
     [HttpPut("change-location/{plate}")]
+    [Authorize(Roles = "Master,Admin,Member")]
     public async Task<IActionResult> ChangeVehicleLocation(
         [FromRoute] string plate,
         [FromQuery] string newLocation)
@@ -140,6 +158,7 @@ public class VehicleController : ControllerBase
     }
 
     [HttpPost("report-problem")]
+    [Authorize(Roles = "Master,Admin,Member")]
     public async Task<IActionResult> ReportProblem(
         [FromQuery] long riderIqamaNo,
         [FromQuery] string plate,
@@ -150,6 +169,7 @@ public class VehicleController : ControllerBase
     }
 
     [HttpPost("fix-problem")]
+    [Authorize(Roles = "Master,Admin,Member")]
     public async Task<IActionResult> FixProblem(
         [FromQuery] string plate,
         [FromQuery] string reason)
@@ -159,6 +179,7 @@ public class VehicleController : ControllerBase
     }
 
     [HttpPost("stolen")]
+    [Authorize(Roles = "Master,Admin,Member")]
     public async Task<IActionResult> ReportStolen(
         [FromQuery] string plate,
         [FromQuery] int? reportedByIqamaNo,
@@ -169,6 +190,8 @@ public class VehicleController : ControllerBase
     }
 
     [HttpPost("break-up")]
+    [Authorize(Roles = "Master,Admin,Member")]
+
     public async Task<IActionResult> MarkBroken(
         [FromQuery] string plate,
         [FromQuery] string reason)
@@ -178,6 +201,7 @@ public class VehicleController : ControllerBase
     }
 
     [HttpPut("recover-stolen")]
+    [Authorize(Roles = "Master,Admin,Member")]
     public async Task<IActionResult> RecoverStolen(
         [FromQuery] string plate,
         [FromQuery] string reason)
@@ -187,6 +211,7 @@ public class VehicleController : ControllerBase
     }
 
     [HttpGet("with-riders")]
+    [Authorize(Roles = "Master,Admin,Member")]
     public async Task<IActionResult> GetAllVehiclesWithRiders()
     {
         var result = await _service.GetAllVehiclesWithRidersAsync();
@@ -194,6 +219,7 @@ public class VehicleController : ControllerBase
     }
 
     [HttpGet("with-rider/{plate}")]
+    [Authorize(Roles = "Master,Admin,Member")]
     public async Task<IActionResult> GetVehicleWithRider([FromRoute] string plate)
     {
         var result = await _service.GetVehicleWithRiderByVehicleNumberAsync(plate);
@@ -201,6 +227,7 @@ public class VehicleController : ControllerBase
     }
 
     [HttpGet("group-by-status")]
+    [Authorize(Roles = "Master,Admin,Member")]
     public async Task<IActionResult> GetVehiclesGroupedByStatus()
     {
         var result = await _service.GetVehiclesGroupedByStatusAsync();

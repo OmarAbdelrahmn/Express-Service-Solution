@@ -58,63 +58,11 @@ public interface IHungerDisabilityService
 /// Aggregated response for disabled riders - sums orders across multiple days
 /// Target = TotalDays × 15 orders/day
 /// </summary>
-public record HungerDisabilityAggregatedResponse(
-    int ActualRiderId,
-    string ActualWorkingId,
-    string ActualRiderNameEN,
-    string ActualRiderNameAR,
-    int? SubstituteRiderId,
-    string? SubstituteWorkingId,
-    string? SubstituteRiderNameEN,
-    string? SubstituteRiderNameAR,
-    bool HasSubstitute,
-    int CompanyId,
-    string CompanyName,
-    int TotalDays,              // Sum of all days worked
-    int TotalOrders,            // Sum of all orders
-    int Target,                 // TotalDays × 15
-    int DifferenceFromTarget,   // TotalOrders - Target
-    decimal PerformancePercentage,  // (TotalOrders / Target) × 100
-    bool IsAboveTarget,         // Difference >= 0
-    string PerformanceStatus,   // "✅ Above or Met Target" or "❌ Below Target"
-    string PerformanceNote,     // Detailed message
-    int RecordCount,            // Number of shift records aggregated
-    DateOnly StartDate,         // First shift date in range
-    DateOnly EndDate            // Last shift date in range
-);
-
 /// <summary>
 /// Overall summary with top and bottom performers
 /// </summary>
-public record HungerDisabilityOverallSummary(
-    int TotalRiders,
-    int TotalDays,
-    int TotalOrders,
-    int TotalTarget,
-    int TotalDifference,
-    int RidersAboveTarget,
-    int RidersBelowTarget,
-    int RidersWithSubstitutes,
-    int RidersWithoutSubstitutes,
-    decimal AverageOrdersPerRider,
-    decimal AverageOrdersPerDay,
-    decimal OverallPerformanceRate,
-    DateOnly StartDate,
-    DateOnly EndDate,
-    List<CompanySummaryDetail> CompanyBreakdown,
-    List<HungerDisabilityAggregatedResponse> TopPerformers,
-    List<HungerDisabilityAggregatedResponse> BottomPerformers
-);
 
-/// <summary>
-/// Company breakdown summary
-/// </summary>
-public record CompanySummaryDetail(
-    string CompanyName,
-    int TotalRiders,
-    int TotalOrders,
-    int RidersAboveTarget
-);
+
 
 /// <summary>
 /// Excel import result
@@ -152,3 +100,61 @@ public static class HungerExcelColumns
     public static readonly string[] AcceptedOrdersColumns =
         { "Completed Deliveries", "إجمالي الطلبات", "Total Orders", "Accepted_Orders", "المهام التي تم تسليمها", "Orders" };
 }
+
+// Updated HungerDisabilityAggregatedResponse
+public record HungerDisabilityAggregatedResponse(
+    int ActualRiderId,
+    string ActualWorkingId,
+    string ActualRiderNameEN,
+    string ActualRiderNameAR,
+    int? SubstituteRiderId,
+    string? SubstituteWorkingId,
+    string? SubstituteRiderNameEN,
+    string? SubstituteRiderNameAR,
+    bool HasSubstitute,
+    int? HousingId,
+    string HousingName,
+    int TotalDays,
+    int TotalOrders,
+    int Target,
+    int DifferenceFromTarget,
+    decimal PerformancePercentage,
+    string PerformanceStatus,
+    int LastDayOrders,
+    int RecordCount
+);
+
+// Updated HungerDisabilityOverallSummary
+public record HungerDisabilityOverallSummary(
+    int TotalRiders,
+    int TotalDays,
+    int TotalOrders,
+    int TotalTarget,
+    int TotalDifference,
+    int RidersAboveTarget,
+    int RidersBelowTarget,
+    int RidersWithSubstitutes,
+    int RidersWithoutSubstitutes,
+    decimal AverageOrdersPerRider,
+    decimal AverageOrdersPerDay,
+    decimal OverallPerformanceRate,
+    List<HousingSummaryDetail> HousingBreakdown,
+    List<HungerDisabilityAggregatedResponse> TopPerformers,
+    List<HungerDisabilityAggregatedResponse> BottomPerformers
+);
+
+// New Housing Summary Detail
+public record HousingSummaryDetail(
+    string HousingName,
+    int RiderCount,
+    int TotalOrders,
+    int RidersAboveTarget
+);
+
+// Existing Company Summary Detail (unchanged)
+public record CompanySummaryDetail(
+    string CompanyName,
+    int RiderCount,
+    int TotalOrders,
+    int RidersAboveTarget
+);

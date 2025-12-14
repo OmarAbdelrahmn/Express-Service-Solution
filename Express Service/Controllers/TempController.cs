@@ -1,5 +1,6 @@
 ﻿using Application.Service;
 using Application.Service.Empolyee;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
@@ -14,6 +15,7 @@ public class TempController(ITemp service , IEmployeeService service1 , IVehicle
     private readonly IVehicleService service2 = service2;
 
     [HttpGet("employees")]
+    [Authorize(Roles = "Master,Admin")]
     public async Task<IActionResult> GetTempData()
     {
         var result = await service.GetPendingUpdatesAsync();
@@ -21,6 +23,7 @@ public class TempController(ITemp service , IEmployeeService service1 , IVehicle
     }
 
     [HttpPut("employees")]
+    [Authorize(Roles = "Master,Admin")]
     public async Task<IActionResult> ResolveTempData([FromBody] BulkResolutionRequest request)
     {
         var result = await service.ResolveUpdatesAsync(request);
@@ -28,6 +31,8 @@ public class TempController(ITemp service , IEmployeeService service1 , IVehicle
     }
 
     [HttpPost("import-employees")]
+    [Authorize(Roles = "Master,Admin")]
+
     public async Task<IActionResult> CreateTempData(IFormFile excelFile)
     {
         if (excelFile == null || excelFile.Length == 0)
@@ -40,6 +45,8 @@ public class TempController(ITemp service , IEmployeeService service1 , IVehicle
     }
 
     [HttpPost("request-change")]
+    [Authorize(Roles = "Member")]
+
     public async Task<IActionResult> RequestStatusChange([FromBody] StatusChangeRequest request)
     {
         var result = await service1.RequestStatusChangeAsync(
@@ -54,6 +61,7 @@ public class TempController(ITemp service , IEmployeeService service1 , IVehicle
     }
 
     [HttpGet("employee-pending-status-changes")]
+    [Authorize(Roles = "Master,Admin")]
     public async Task<IActionResult> GetPendingStatusChanges()
     {
         var response = await service1.GetPendingStatusChangesAsync();
@@ -63,6 +71,7 @@ public class TempController(ITemp service , IEmployeeService service1 , IVehicle
     }
 
     [HttpPost("employee-resolve-status-changes")]
+    [Authorize(Roles = "Master,Admin")]
     public async Task<IActionResult> ResolveStatusChange([FromBody] ResolveStatusChangeRequest request)
     {
         var result = await service1.ResolveStatusChangeAsync(
@@ -77,6 +86,7 @@ public class TempController(ITemp service , IEmployeeService service1 , IVehicle
     }
 
     [HttpPost("vehicle-request-return")]
+    [Authorize(Roles = "Member")]
     public async Task<IActionResult> Vehicleretrunrequest(SVehicleResolutionRequest request, string reason = "leave the work")
     {
         var response = await service2.RequestReturnVehicleAsync(request,reason);
@@ -87,6 +97,7 @@ public class TempController(ITemp service , IEmployeeService service1 , IVehicle
     
     
     [HttpPost("vehicle-request-take")]
+    [Authorize(Roles = "Member")]
     public async Task<IActionResult> VehicleTakerequest(SVehicleResolutionRequest request, string reason = "work")
     {
         var response = await service2.RequestTakeVehicleAsync(request,reason);
@@ -97,6 +108,7 @@ public class TempController(ITemp service , IEmployeeService service1 , IVehicle
 
 
     [HttpPost("vehicle-request-problem")]
+    [Authorize(Roles = "Member")]
     public async Task<IActionResult> Vehicleproblemrequest(SVehicleResolutionRequest request, string reason = "problem at vichle")
     {
         var response = await service2.RequestReportProblemAsync(request,reason);
@@ -106,6 +118,7 @@ public class TempController(ITemp service , IEmployeeService service1 , IVehicle
     }
 
     [HttpGet("vehicles")]
+    [Authorize(Roles = "Master,Admin")]
     public async Task<IActionResult> getv()
     {
         var response = await service2.GetPendingOperationsAsync();
@@ -116,6 +129,7 @@ public class TempController(ITemp service , IEmployeeService service1 , IVehicle
     
     
     [HttpPut("vehicle-resolve")]
+    [Authorize(Roles = "Master,Admin")]
     public async Task<IActionResult> resolvev(VehicleResolutionRequest request, string? note)
     {
         var response = await service2.ResolveOperationAsync(request,note);

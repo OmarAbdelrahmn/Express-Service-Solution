@@ -1,5 +1,6 @@
 ﻿using Application.Contracts.Employees;
 using Application.Service.Empolyee;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
@@ -14,6 +15,7 @@ public class HousingController(IHousingService service , IEmployeeService servic
 
 
     [HttpPut("{IqamaNo}/add/{HousingName}")]
+    [Authorize(Roles = "Master,Admin,Member")]
     public async Task<IActionResult> add(long IqamaNo, string HousingName)
     {
         var response = await service1.AddEmployeeToHousing(IqamaNo, HousingName);
@@ -23,6 +25,7 @@ public class HousingController(IHousingService service , IEmployeeService servic
     }
 
     [HttpPut("{IqamaNo}/change/{oldHousingName}/{NewHousingName}")]
+    [Authorize(Roles = "Master,Admin,Member")]
     public async Task<IActionResult> Update(long IqamaNo, string oldHousingName, string NewHousingName)
     {
         var response = await service1.ChangeEmployeeToHousing(IqamaNo, oldHousingName, NewHousingName);
@@ -32,6 +35,7 @@ public class HousingController(IHousingService service , IEmployeeService servic
     }
 
     [HttpGet("")]
+    [Authorize(Roles = "Master,Admin,Member")]
     public async Task<IActionResult> GetAll()
     {
         var response = await service.GetAllEmployee();
@@ -41,6 +45,7 @@ public class HousingController(IHousingService service , IEmployeeService servic
     }
 
     [HttpGet("{Name}")]
+    [Authorize(Roles = "Master,Admin,Member")]
     public async Task<IActionResult> Get(string Name)
     {
         var response = await service.Get(Name);
@@ -50,6 +55,7 @@ public class HousingController(IHousingService service , IEmployeeService servic
     }
 
     [HttpGet("manager/{ManagerIqamaNo}")]
+    [Authorize(Roles = "Master,Admin,Member")]
     public async Task<IActionResult> GetWithManagerIqama(int ManagerIqamaNo)
     {
         var response = await service.GetWithManagerIqama(ManagerIqamaNo);
@@ -59,6 +65,7 @@ public class HousingController(IHousingService service , IEmployeeService servic
     }
 
     [HttpPost("")]
+    [Authorize(Roles = "Master")]
     public async Task<IActionResult> Create([FromBody]HousingRequest request)
     {
         var response = await service.CreateAsync(request);
@@ -68,6 +75,7 @@ public class HousingController(IHousingService service , IEmployeeService servic
     }
 
     [HttpDelete("{Name}")]
+    [Authorize(Roles = "Master")]
     public async Task<IActionResult> Delete(string Name)
     {
         var response = await service.DeleteAsync(Name);
@@ -77,6 +85,7 @@ public class HousingController(IHousingService service , IEmployeeService servic
     }
 
     [HttpPut("{editHousingName}")]
+    [Authorize(Roles = "Master")]
     public async Task<IActionResult> Update(string editHousingName ,[FromBody] HousingRequest request)
     {
         var response = await service.UpdateAsync(editHousingName,request);

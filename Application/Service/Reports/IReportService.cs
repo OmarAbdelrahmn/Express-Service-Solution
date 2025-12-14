@@ -164,8 +164,87 @@ public interface IReportService
         DateOnly endDate,
         int topCountPerCompany = 100,
         CancellationToken cancellationToken = default);
+
+    // Add these methods to the IReportService interface
+
+    /// <summary>
+    /// Compare orders between two time periods
+    /// Period 1 is automatically calculated as the previous month of Period 2
+    /// </summary>
+    Task<Result<PeriodOrdersComparison>> ComparePeriodOrdersAsync(
+        DateOnly period2Start,
+        DateOnly period2End,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Get daily summary report grouped by housing
+    /// </summary>
+    Task<Result<HousingDailySummaryReport>> GetHousingDailySummaryAsync(
+        DateOnly reportDate,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Get detailed daily report with individual riders grouped by housing
+    /// </summary>
+    Task<Result<HousingDailyDetailedReport>> GetHousingDailyDetailedReportAsync(
+        DateOnly reportDate,
+        CancellationToken cancellationToken = default);
 }
 
+public record PeriodOrdersComparison(
+    DateOnly Period1Start,
+    DateOnly Period1End,
+    DateOnly Period2Start,
+    DateOnly Period2End,
+    int Period1TotalOrders,
+    int Period2TotalOrders,
+    int OrdersDifference,
+    decimal ChangePercentage,
+    string TrendDescription
+);
+
+// 2. Housing Daily Summary Report
+public record HousingDailySummaryReport(
+    DateOnly ReportDate,
+    List<HousingDailySummary> HousingSummaries,
+    int TotalOrders,
+    int TotalRiders,
+    decimal AverageOrdersPerRider
+);
+
+public record HousingDailySummary(
+    int HousingId,
+    string HousingName,
+    int TotalOrders,
+    int ActiveRiders,
+    decimal AverageOrdersPerRider,
+    decimal PercentageOfTotalOrders
+);
+
+// 3. Housing Daily Detailed Report
+public record HousingDailyDetailedReport(
+    DateOnly ReportDate,
+    List<HousingDailyDetails> HousingDetails,
+    int GrandTotalOrders,
+    int GrandTotalRiders
+);
+
+public record HousingDailyDetails(
+    int HousingId,
+    string HousingName,
+    List<RiderDailyPerformance> Riders,
+    int HousingTotalOrders,
+    int HousingRiderCount,
+    decimal PercentageOfCompanyTotal
+);
+
+public record RiderDailyPerformance(
+    int RiderId,
+    string RiderName,
+    string WorkingId,
+    int AcceptedOrders,
+    DateOnly ShiftDate
+);
 public record RiderPeriodComparison(
     int RiderId,
     string RiderName,

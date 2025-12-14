@@ -1,5 +1,6 @@
 ﻿using Application.Service.Riders;
 using Domain.Entities;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
@@ -7,6 +8,7 @@ namespace Express_Service.Controllers;
 
 [Route("api/[controller]")]
 [ApiController]
+[Authorize(Roles = "Master,Admin")]
 public class ShiftController(IRiderShiftService service) : ControllerBase
 {
     private readonly IRiderShiftService service = service;

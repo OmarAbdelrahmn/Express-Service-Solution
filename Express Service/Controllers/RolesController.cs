@@ -1,6 +1,7 @@
 ﻿using Application.Contracts.Roles;
 using Application.Roles;
 using Express_Service;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 
@@ -13,6 +14,7 @@ public class RolesController(IRoleService roleService) : ControllerBase
     private readonly IRoleService roleService = roleService;
 
     [HttpGet("")]
+    [Authorize(Roles = "Master")]
     public async Task<IActionResult> GetAllRoles()
     {
         var response = await roleService.GetRolesAsync();
@@ -24,6 +26,7 @@ public class RolesController(IRoleService roleService) : ControllerBase
     }
 
     [HttpPut("")]
+    [Authorize(Roles = "Master")]
     public async Task<IActionResult> Updaterole(RoleRequest request)
     {
         var response = await roleService.UpdateRoleAsync(request);
@@ -34,7 +37,8 @@ public class RolesController(IRoleService roleService) : ControllerBase
     }
 
 
-    [HttpPut("RoleName/toggle-status")]
+    [HttpPut("toggle-status")]
+    [Authorize(Roles = "Master")]
     public async Task<IActionResult> ToggleStatus(string RoleName)
     {
         var response = await roleService.ToggleStatusAsync(RoleName);

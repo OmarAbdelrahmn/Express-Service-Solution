@@ -8,7 +8,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace Express_Service.Controllers;
 [Route("api/me")]
 [ApiController]
-//[Authorize]
+[Authorize]
 public class AccountController(IUserService service) : ControllerBase
 {
     private readonly IUserService service = service;

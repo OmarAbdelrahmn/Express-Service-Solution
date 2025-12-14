@@ -1,6 +1,7 @@
 ﻿using Application.Contracts.rider;
 using Application.Service.Empolyee;
 using Application.Service.Riders;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
@@ -8,11 +9,14 @@ namespace Express_Service.Controllers;
 
 [Route("api/[controller]")]
 [ApiController]
+[Authorize(Roles = "Master")]
+
 public class RiderController(IRiderService service) : ControllerBase
 {
     private readonly IRiderService service = service;
     
     [HttpGet("")]
+    [Authorize(Roles = "Master,Admin,Member")]
     public async Task<IActionResult> GetAllRiders()
     {
         var result = await service.GetAllEmployee();
@@ -22,6 +26,7 @@ public class RiderController(IRiderService service) : ControllerBase
     }
     
     [HttpGet("inactive")]
+    [Authorize(Roles = "Master,Admin,Member")]
     public async Task<IActionResult> GetAlRiders()
     {
         var result = await service.GetAllEmployeeNO();
@@ -31,6 +36,7 @@ public class RiderController(IRiderService service) : ControllerBase
     }
 
     [HttpGet("id/{id:int}")]
+    [Authorize(Roles = "Master,Admin,Member")]
     public async Task<IActionResult> GetRiderById(int id)
     {
         var result = await service.Getbyid(id);
@@ -40,6 +46,7 @@ public class RiderController(IRiderService service) : ControllerBase
     }
 
     [HttpGet("iqama/{IqamaNo:long}")]
+    [Authorize(Roles = "Master,Admin,Member")]
     public async Task<IActionResult> GetRiderByIqama(long IqamaNo)
     {
         var result = await service.Get(IqamaNo);
@@ -49,6 +56,7 @@ public class RiderController(IRiderService service) : ControllerBase
     }
 
     [HttpPost("")]
+    [Authorize(Roles = "Master,Admin")]
     public async Task<IActionResult> CreateRider([FromBody] RiderRequest request)
     {
         var result = await service.CreateAsync(request);
@@ -58,6 +66,7 @@ public class RiderController(IRiderService service) : ControllerBase
     }
 
     [HttpPut("{IqamaNo:long}")]
+    [Authorize(Roles = "Master,Admin")]
     public async Task<IActionResult> UpdateRider(long IqamaNo, [FromBody] URiderRequest request)
     {
         var result = await service.UpdateAsync(IqamaNo, request);
@@ -67,6 +76,7 @@ public class RiderController(IRiderService service) : ControllerBase
     }
 
     [HttpDelete("{IqamaNo:long}")]
+    [Authorize(Roles = "Master,Admin")]
     public async Task<IActionResult> DeleteRider(long IqamaNo)
     {
         var result = await service.DeleteAsync(IqamaNo);
@@ -76,6 +86,7 @@ public class RiderController(IRiderService service) : ControllerBase
     }
 
     [HttpPost("change-working-id")]
+    [Authorize(Roles = "Master,Admin")]
     public async Task<IActionResult> ChangeWorkingId([FromQuery] string oldWorkingId, [FromQuery] string newWorkingId)
     {
         var result = await service.ChangeWorkinId(oldWorkingId, newWorkingId);
@@ -85,6 +96,7 @@ public class RiderController(IRiderService service) : ControllerBase
     }
 
     [HttpPost("{IqamaNo:long}/add-employee")]
+    [Authorize(Roles = "Master,Admin")]
     public async Task<IActionResult> AddETOR(long IqamaNo, [FromBody] EMTOR request)
     {
         var result = await service.AddETOR(IqamaNo, request);
@@ -94,6 +106,7 @@ public class RiderController(IRiderService service) : ControllerBase
     }
 
     [HttpGet("smart-search")]
+    [Authorize(Roles = "Master,Admin,Member")]
     public async Task<IActionResult> SmartSearch([FromQuery] string keyword)
     {
         var result = await service.SmartSearch(keyword);
@@ -103,6 +116,7 @@ public class RiderController(IRiderService service) : ControllerBase
 
 
     [HttpGet("search")]
+    [Authorize(Roles = "Master,Admin,Member")]
     public async Task<IActionResult> Search([FromQuery] EmployeeFilterr Request)
     {
         var response = await service.Filter(Request);

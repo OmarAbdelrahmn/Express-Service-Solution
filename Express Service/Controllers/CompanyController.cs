@@ -13,6 +13,7 @@ public class CompanyController(ICompanyService service) : ControllerBase
     private readonly ICompanyService service = service;
 
     [HttpGet("{CompanyName}")]
+    [Authorize(Roles = "Master,Admin")]
     public async Task<IActionResult> Get(string CompanyName)
     {
         var response = await service.Get(CompanyName);
@@ -22,6 +23,8 @@ public class CompanyController(ICompanyService service) : ControllerBase
     }
 
     [HttpPost("")]
+    [Authorize(Roles = "Master")]
+
     public async Task<IActionResult> Create([FromBody] CompanyRequest Request)
     {
         var response = await service.CreateAsync(Request);
@@ -31,6 +34,7 @@ public class CompanyController(ICompanyService service) : ControllerBase
     }
 
     [HttpDelete("{CompanyName}")]
+    [Authorize(Roles = "Master")]
     public async Task<IActionResult> Delete(string CompanyName)
     {
         var response = await service.DeleteAsync(CompanyName);
@@ -40,6 +44,7 @@ public class CompanyController(ICompanyService service) : ControllerBase
     }
 
     [HttpGet("")]
+    [Authorize(Roles = "Master,Admin")]
     public async Task<IActionResult> GetAllEmployee()
     {
         var response = await service.GetAllEmployee();
@@ -49,6 +54,7 @@ public class CompanyController(ICompanyService service) : ControllerBase
     }
 
     [HttpPut("{CompanyName}")]
+    [Authorize(Roles = "Master")]
     public async Task<IActionResult> Update(string CompanyName, [FromBody] CompanyRequest Request)
     {
         var response = await service.UpdateAsync(CompanyName, Request);

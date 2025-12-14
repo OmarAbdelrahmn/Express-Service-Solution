@@ -1,5 +1,6 @@
 ﻿using Application.Admin;
 using Application.User;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR.Protocol;
 
@@ -14,6 +15,7 @@ public class AdminController(IAdminService service,IUserService service1) : Cont
     private readonly IUserService service1 = service1;
 
     [HttpGet("users")]
+    [Authorize(Roles = "Master")]
     public async Task<IActionResult> GetUsers()
     {
         var users = await service.GetAllUsers();
@@ -24,14 +26,16 @@ public class AdminController(IAdminService service,IUserService service1) : Cont
     }
 
     [HttpPost("users/role")]
-    public async Task<IActionResult> ChangeRoles([FromQuery]string UserName,[FromQuery] string NewRole)
+    [Authorize(Roles = "Master")]
+    public async Task<IActionResult> ChangeRoles([FromBody] Rer request)
     {
-        var result = await service1.ChangeRoleForUser(UserName, NewRole);
+        var result = await service1.ChangeRoleForUser(request.UserName, request.NewRole);
 
         return result.IsSuccess ? Ok(new Re("Role updated successfully")) : result.ToProblem();
     }
 
     [HttpGet("users/id/{Id}")]
+    [Authorize(Roles = "Master")]
     public async Task<IActionResult> GetUser(string Id)
     {
         var user = await service.GetUserAsync(Id);
@@ -42,6 +46,7 @@ public class AdminController(IAdminService service,IUserService service1) : Cont
     }
     
     [HttpGet("users/name/{UserName}")]
+    [Authorize(Roles = "Master")]
     public async Task<IActionResult> GetUser2(string UserName)
     {
         var user = await service.GetUser2Async(UserName);
@@ -52,6 +57,7 @@ public class AdminController(IAdminService service,IUserService service1) : Cont
     }
 
     [HttpPut("users/{UserName}/toggle-status")]
+    [Authorize(Roles = "Master")]
     public async Task<IActionResult> ToggleStatusAsync(string UserName)
     {
         var user = await service.ToggleStatusAsync(UserName);
@@ -62,3 +68,6 @@ public class AdminController(IAdminService service,IUserService service1) : Cont
 
  
 }
+
+
+public record Rer(string UserName,string NewRole);

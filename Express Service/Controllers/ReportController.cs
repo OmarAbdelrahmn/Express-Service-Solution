@@ -1,6 +1,7 @@
 ﻿using Application.Service.export;
 using Application.Service.Reports;
 using Application.Service.Riders;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using System.Text.Json;
@@ -14,140 +15,107 @@ public class ReportController(IReportService service) : ControllerBase
     private readonly IReportService service = service;
 
 
-    //[HttpGet("export/dashboard/excel")]
-    //public async Task<IActionResult> ExportDashboardToExcelAsync(
-    //    DateOnly? startDate = null,
-    //    DateOnly? endDate = null,
+    //[HttpGet("spicial")]
+    //public async Task<IActionResult> ComparePeriodOrdersAsync(
+    //    [FromQuery] DateOnly period2Start,
+    //    [FromQuery] DateOnly period2End,
     //    CancellationToken cancellationToken = default)
     //{
-    //    var result = await service.GetComprehensiveDashboardAsync(
-    //        startDate, endDate, cancellationToken);
+    //    var result = await service.ComparePeriodOrdersAsync(
+    //        period2Start,
+    //        period2End,
+    //        cancellationToken);
 
-    //    if (!result.IsSuccess)
-    //        return result.ToProblem();
-
-    //    var exportService = new ReportExportService();
-    //    var excelBytes = await exportService.ExportToExcelAsync(
-    //        result.Value, "ComprehensiveDashboard");
-
-    //    var fileName = $"Dashboard_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx";
-    //    return File(excelBytes,
-    //        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    //        fileName);
+    //    return result.IsSuccess
+    //        ? Ok(result.Value)
+    //        : result.ToProblem();
     //}
 
-    //[HttpGet("export/dashboard/pdf")]
-    //public async Task<IActionResult> ExportDashboardToPdfAsync(
-    //    DateOnly? startDate = null,
-    //    DateOnly? endDate = null,
+    //[HttpGet("spicial1")]
+    //public async Task<IActionResult> GetHousingDailySummaryAsync(
+    //    [FromQuery] DateOnly reportDate,
     //    CancellationToken cancellationToken = default)
     //{
-    //    var result = await service.GetComprehensiveDashboardAsync(
-    //        startDate, endDate, cancellationToken);
+    //    var result = await service.GetHousingDailySummaryAsync(
+    //        reportDate,
+    //        cancellationToken);
 
-    //    if (!result.IsSuccess)
-    //        return result.ToProblem();
-
-    //    var exportService = new ReportExportService();
-    //    var pdfBytes = await exportService.ExportToPdfAsync(
-    //        result.Value, "ComprehensiveDashboard");
-
-    //    var fileName = $"Dashboard_{DateTime.Now:yyyyMMdd_HHmmss}.pdf";
-    //    return File(pdfBytes, "application/pdf", fileName);
+    //    return result.IsSuccess
+    //        ? Ok(result.Value)
+    //        : result.ToProblem();
     //}
 
-    //[HttpGet("export/monthly/{WorkingId}/excel")]
-    //public async Task<IActionResult> ExportMonthlyToExcelAsync(
-    //    [FromRoute] string WorkingId,
-    //    [FromQuery] int year,
-    //    [FromQuery] int month,
+
+    //[HttpGet("housing-daily-detailed")]
+    //public async Task<IActionResult> GetHousingDailyDetailedReportAsync(
+    //    [FromQuery] DateOnly reportDate,
     //    CancellationToken cancellationToken = default)
     //{
-    //    var result = await service.GetMonthlyReportByWorkingIdAsync(
-    //        WorkingId, year, month, cancellationToken);
+    //    var result = await service.GetHousingDailyDetailedReportAsync(
+    //        reportDate,
+    //        cancellationToken);
 
-    //    if (!result.IsSuccess)
-    //        return result.ToProblem();
-
-    //    var exportService = new ReportExportService();
-    //    var excelBytes = await exportService.ExportToExcelAsync(
-    //        result.Value, "MonthlyRiderReport");
-
-    //    var fileName = $"Monthly_{WorkingId}_{year}{month:D2}.xlsx";
-    //    return File(excelBytes,
-    //        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    //        fileName);
+    //    return result.IsSuccess
+    //        ? Ok(result.Value)
+    //        : result.ToProblem();
     //}
 
-    //[HttpGet("export/top-riders/pdf")]
-    //public async Task<IActionResult> ExportTopRidersToPdfAsync(
-    //    [FromQuery] DateOnly startDate,
-    //    [FromQuery] DateOnly endDate,
-    //    [FromQuery] int topCount = 100,
-    //    CancellationToken cancellationToken = default)
-    //{
-    //    var request = new TopRidersRequest(
-    //        StartDate: startDate,
-    //        EndDate: endDate,
-    //        TopCount: topCount
-    //    );
 
-    //    var result = await service.GetTopRidersInPeriodAsync(request, cancellationToken);
+    [HttpGet("special")]
+    [Authorize(Roles = "Master,Admin")]
+    public async Task<IActionResult> CompareMonthOverMonthAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var today = DateOnly.FromDateTime(DateTime.Now);
+        var yesterday = today.AddDays(-1);
 
-    //    if (!result.IsSuccess)
-    //        return result.ToProblem();
+        var period2Start = new DateOnly(yesterday.Year, yesterday.Month, 1);
+        var period2End = yesterday;
 
-    //    var exportService = new ReportExportService();
-    //    var pdfBytes = await exportService.ExportToPdfAsync(
-    //        result.Value, "TopRidersReport");
+        var result = await service.ComparePeriodOrdersAsync(
+            period2Start,
+            period2End,
+            cancellationToken);
 
-    //    var fileName = $"TopRiders_{startDate:yyyyMMdd}_{endDate:yyyyMMdd}.pdf";
-    //    return File(pdfBytes, "application/pdf", fileName);
-    //}
+        return result.IsSuccess
+            ? Ok(result.Value)
+            : result.ToProblem();
+    }
 
-    //[HttpGet("export/generic/excel")]
-    //public async Task<IActionResult> ExportGenericToExcelAsync(
-    //    [FromQuery] string reportType,
-    //    [FromQuery] string reportDataJson)
-    //{
-    //    // This allows frontend to pass any report data as JSON
-    //    try
-    //    {
-    //        var exportService = new ReportExportService();
+    [HttpGet("special1")]
+    [Authorize(Roles = "Master,Admin")]
+    public async Task<IActionResult> GetHousingYesterdaySummaryAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var yesterday = DateOnly.FromDateTime(DateTime.Now.AddDays(-1));
 
-    //        // Deserialize based on report type
-    //        object reportData = reportType switch
-    //        {
-    //            "ComprehensiveDashboard" =>
-    //                JsonSerializer.Deserialize<ComprehensiveDashboard>(reportDataJson),
-    //            "MonthlyRiderReport" =>
-    //                JsonSerializer.Deserialize<MonthlyRiderReport>(reportDataJson),
-    //            "TopRidersReport" =>
-    //                JsonSerializer.Deserialize<TopRidersReport>(reportDataJson),
-    //            _ => throw new NotSupportedException($"Report type {reportType} not supported")
-    //        };
+        var result = await service.GetHousingDailySummaryAsync(
+            yesterday,
+            cancellationToken);
 
-    //        var method = typeof(ReportExportService)
-    //            .GetMethod(nameof(ReportExportService.ExportToExcelAsync))
-    //            .MakeGenericMethod(reportData.GetType());
+        return result.IsSuccess
+            ? Ok(result.Value)
+            : result.ToProblem();
+    }
 
-    //        var task = (Task<byte[]>)method.Invoke(exportService,
-    //            new[] { reportData, reportType });
+    [HttpGet("special2")]
+    [Authorize(Roles = "Master,Admin")]
+    public async Task<IActionResult> GetHousingYesterdayDetailedAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var yesterday = DateOnly.FromDateTime(DateTime.Now.AddDays(-1));
 
-    //        var excelBytes = await task;
+        var result = await service.GetHousingDailyDetailedReportAsync(
+            yesterday,
+            cancellationToken);
 
-    //        var fileName = $"{reportType}_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx";
-    //        return File(excelBytes,
-    //            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    //            fileName);
-    //    }
-    //    catch (Exception ex)
-    //    {
-    //        return BadRequest(new { error = ex.Message });
-    //    }
-    //}
+        return result.IsSuccess
+            ? Ok(result.Value)
+            : result.ToProblem();
+    }
 
     [HttpGet("")]
+    [Authorize(Roles = "Master,Admin")]
     public async Task<IActionResult> GetDashboard(DateOnly? startDate = null,
       DateOnly? endDate = null)
     {
@@ -161,6 +129,7 @@ public class ReportController(IReportService service) : ControllerBase
 
 
     [HttpGet("monthly/{WorkingId}")]
+    [Authorize(Roles = "Master,Admin,Member")]
     public async Task<IActionResult> GetMonthlyReportByWorkingIdAsync(
         [FromRoute] string WorkingId,
         [FromQuery] int year,
@@ -179,6 +148,8 @@ public class ReportController(IReportService service) : ControllerBase
     }
 
     [HttpGet("monthly/all")]
+    [Authorize(Roles = "Master,Admin")]
+
     public async Task<IActionResult> GetAllRidersMonthlyReportAsync(
         [FromQuery] int year,
         [FromQuery] int month,
@@ -194,6 +165,7 @@ public class ReportController(IReportService service) : ControllerBase
     }
 
     [HttpGet("yearly/{WorkingId}")]
+    [Authorize(Roles = "Master,Admin,Member")]
     public async Task<IActionResult> GetYearlyReportByWorkingIdAsync(
         [FromRoute] string WorkingId,
         [FromQuery] int year,
@@ -209,6 +181,7 @@ public class ReportController(IReportService service) : ControllerBase
     }
 
     [HttpGet("yearly/all")]
+    [Authorize(Roles = "Master,Admin")]
     public async Task<IActionResult> GetAllRidersYearlyReportAsync(
         [FromQuery] int year,
         CancellationToken cancellationToken = default)
@@ -222,6 +195,7 @@ public class ReportController(IReportService service) : ControllerBase
     }
 
     [HttpGet("riders/{WorkingId}/renge")]
+    [Authorize(Roles = "Master,Admin,Member")]
     public async Task<IActionResult> GetCustomDateRangeReportByWorkingIdAsync(
         [FromRoute] string WorkingId,
         [FromQuery] DateOnly startDate,
@@ -239,6 +213,7 @@ public class ReportController(IReportService service) : ControllerBase
     }
 
     [HttpGet("all/range")]
+    [Authorize(Roles = "Master,Admin")]
     public async Task<IActionResult> GetAllRidersCustomDateRangeReportAsync(
         [FromQuery] DateOnly startDate,
         [FromQuery] DateOnly endDate,
@@ -254,6 +229,7 @@ public class ReportController(IReportService service) : ControllerBase
     }
 
     [HttpGet("company-performance")]
+    [Authorize(Roles = "Master,Admin")]
     public async Task<IActionResult> GetCompanyPerformanceReportAsync(
         [FromQuery] string companyName,
         [FromQuery] DateOnly startDate,
@@ -271,6 +247,7 @@ public class ReportController(IReportService service) : ControllerBase
     }
 
     [HttpGet("compare-company-periods")]
+    [Authorize(Roles = "Master,Admin")]
     public async Task<IActionResult> CompareCompanyPeriodsAsync(
         [FromQuery] string companyName,
         [FromQuery] DateOnly period1Start,
@@ -292,6 +269,7 @@ public class ReportController(IReportService service) : ControllerBase
     }
 
     [HttpGet("problem")]
+    [Authorize(Roles = "Master,Admin,Member")]
     public async Task<IActionResult> ProblemAsync(
         [FromQuery] DateOnly StartDate,
         [FromQuery] DateOnly EndDate,
@@ -306,6 +284,7 @@ public class ReportController(IReportService service) : ControllerBase
     }
 
     [HttpGet("riders/compare-periods")]
+    [Authorize(Roles = "Master,Admin")]
     public async Task<IActionResult> CompareAllRidersPeriodsAsync(
         DateOnly period1Start,
         DateOnly period1End,
@@ -325,6 +304,7 @@ public class ReportController(IReportService service) : ControllerBase
     }
 
     [HttpGet("riders/compare/{WorkingId}")]
+    [Authorize(Roles = "Master,Admin,Member")]
     public async Task<IActionResult> CompareRiderPeriodsAsync(
         [FromRoute] string WorkingId,
         [FromQuery] DateOnly period1Start,
@@ -346,6 +326,8 @@ public class ReportController(IReportService service) : ControllerBase
     }
 
     [HttpGet("riders/compare-monthly/{WorkingId}")]
+    [Authorize(Roles = "Master,Admin,Member")]
+
     public async Task<IActionResult> CompareRidersMonthlyAsync(
         [FromRoute] string WorkingId,
         [FromQuery] int year1,
@@ -367,6 +349,8 @@ public class ReportController(IReportService service) : ControllerBase
     }
     
     [HttpGet("riders/compare-yearly/{WorkingId}")]
+    [Authorize(Roles = "Master,Admin,Member")]
+
     public async Task<IActionResult> CompareRiderYearlyAsync(
         [FromRoute] string WorkingId,
         [FromQuery] int year1,
@@ -384,6 +368,7 @@ public class ReportController(IReportService service) : ControllerBase
     }
 
     [HttpGet("housing/compare")]
+    [Authorize(Roles = "Master,Admin,Member")]
     public async Task<IActionResult> CompareHousingCompaniesAsync(
         [FromQuery] DateOnly startDate,
         [FromQuery] DateOnly endDate,
@@ -403,7 +388,8 @@ public class ReportController(IReportService service) : ControllerBase
     }
 
     [HttpGet("housing/riders")]
-    public  async Task<IActionResult> GetRidersForHousingAsync(string housingName,
+    [Authorize(Roles = "Master,Admin,Member")]
+    public async Task<IActionResult> GetRidersForHousingAsync(string housingName,
         DateOnly startDate,
         DateOnly endDate)
     {
@@ -415,6 +401,7 @@ public class ReportController(IReportService service) : ControllerBase
     }
 
     [HttpGet("housing/riders-compare")]
+    [Authorize(Roles = "Master,Admin,Member")]
     public async Task<IActionResult> CompareHousingRidersAsync(
         [FromQuery] string housingName,
         [FromQuery] DateOnly period1Start,
@@ -436,6 +423,8 @@ public class ReportController(IReportService service) : ControllerBase
     }
 
     [HttpGet("top-riders/yearly")]
+    [Authorize(Roles = "Master,Admin")]
+
     public async Task<IActionResult> GetTopRidersForYearAsync(int year,
         int topCount = 10)
     {
@@ -448,6 +437,7 @@ public class ReportController(IReportService service) : ControllerBase
     
     
     [HttpGet("top-riders/monthly")]
+    [Authorize(Roles = "Master,Admin")]
     public async Task<IActionResult> GetTopRidersFormonthAsync(int year, int month,
 
         int topCount = 10)
@@ -460,6 +450,7 @@ public class ReportController(IReportService service) : ControllerBase
     }
 
     [HttpGet("top-riders/company")]
+    [Authorize(Roles = "Master,Admin")]
     public async Task<IActionResult> GetTopRidersPerCompanyAsync(DateOnly Start , DateOnly End)
     {
         var result = await service.GetTopRidersPerCompanyAsync(Start , End);
@@ -470,6 +461,8 @@ public class ReportController(IReportService service) : ControllerBase
     }
 
     [HttpGet("stacked/{WorkingId}")]
+    [Authorize(Roles = "Master,Admin,Member")]
+
     public async Task<IActionResult> GetMonthlyStackedDeliveriesByWorkingIdAsync(string WorkingId,
         [FromQuery]   int year,
         [FromQuery]  int month,
@@ -483,6 +476,7 @@ public class ReportController(IReportService service) : ControllerBase
     
     
     [HttpGet("stacked")]
+    [Authorize(Roles = "Master,Admin")]
     public async Task<IActionResult> GetStackedDeliveriesByWorkingIdAsync(
         [FromQuery] DateOnly startDate,
         [FromQuery]DateOnly endDate,
@@ -496,6 +490,7 @@ public class ReportController(IReportService service) : ControllerBase
     
 
     [HttpGet("housing")]
+    [Authorize(Roles = "Master,Admin")]
     public async Task<IActionResult> GetHousingReportAsync(
         [FromQuery] DateOnly startDate,
         [FromQuery] DateOnly endDate,

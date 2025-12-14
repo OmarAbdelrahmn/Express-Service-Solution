@@ -14,7 +14,305 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
 {
     private readonly ApplicationDbcontext _dbcontext = dbcontext;
 
+    // Add these implementations to ReportService.cs class
 
+    /// <summary>
+    /// Compare orders between two time periods (e.g., previous month vs current month)
+    /// Period 1 is automatically calculated as the previous month of Period 2
+    /// </summary>
+    public async Task<Result<PeriodOrdersComparison>> ComparePeriodOrdersAsync(
+        DateOnly period2Start,
+        DateOnly period2End,
+        CancellationToken cancellationToken = default)
+    {
+        // Validate period 2 dates
+        if (period2End < period2Start)
+            return Result.Failure<PeriodOrdersComparison>(
+                new Error("Period 2: End date must be after or equal to start date", "invalid_input", 400));
+
+        // Automatically calculate Period 1 (previous month of Period 2)
+        var period1Start = period2Start.AddMonths(-1);
+        var period1End = period2End.AddMonths(-1);
+
+        try
+        {
+            // Get shifts for period 1
+            var period1Shifts = await _dbcontext.RiderShifts
+                .Where(s => s.ShiftDate >= period1Start && s.ShiftDate <= period1End)
+                .AsNoTracking()
+                .ToListAsync(cancellationToken);
+
+            // Get shifts for period 2
+            var period2Shifts = await _dbcontext.RiderShifts
+                .Where(s => s.ShiftDate >= period2Start && s.ShiftDate <= period2End)
+                .AsNoTracking()
+                .ToListAsync(cancellationToken);
+
+            // Calculate total orders for each period
+            var period1TotalOrders = period1Shifts.Sum(s => s.AcceptedDailyOrders);
+            var period2TotalOrders = period2Shifts.Sum(s => s.AcceptedDailyOrders);
+
+            // Calculate difference and percentage
+            var ordersDifference = period2TotalOrders - period1TotalOrders;
+            var changePercentage = period1TotalOrders > 0
+                ? Math.Round(((decimal)ordersDifference / period1TotalOrders) * 100, 2)
+                : (period2TotalOrders > 0 ? 100m : 0m);
+
+            // Generate trend description
+            var trendDescription = GenerateTrendDescription(
+                ordersDifference, changePercentage, period1TotalOrders, period2TotalOrders);
+
+            var comparison = new PeriodOrdersComparison(
+                Period1Start: period1Start,
+                Period1End: period1End,
+                Period2Start: period2Start,
+                Period2End: period2End,
+                Period1TotalOrders: period1TotalOrders,
+                Period2TotalOrders: period2TotalOrders,
+                OrdersDifference: ordersDifference,
+                ChangePercentage: changePercentage,
+                TrendDescription: trendDescription
+            );
+
+            return Result.Success(comparison);
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<PeriodOrdersComparison>(
+                new Error($"Error comparing periods: {ex.Message}", "server_error", 500));
+        }
+    }
+
+    /// <summary>
+    /// Get daily summary report grouped by housing
+    /// </summary>
+    public async Task<Result<HousingDailySummaryReport>> GetHousingDailySummaryAsync(
+        DateOnly reportDate,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            // Get all shifts for the specified date with housing information
+            var shifts = await _dbcontext.RiderShifts
+                .Include(s => s.Rider)
+                    .ThenInclude(r => r.Employee)
+                    .ThenInclude(e => e.Housing)
+                .Where(s => s.ShiftDate == reportDate)
+                .AsNoTracking()
+                .ToListAsync(cancellationToken);
+
+            if (!shifts.Any())
+            {
+                return Result.Failure<HousingDailySummaryReport>(
+                    new Error($"No shifts found for date {reportDate:yyyy-MM-dd}", "no_data", 404));
+            }
+
+            // Filter shifts with valid housing
+            var validShifts = shifts
+                .Where(s => s.Rider?.Employee?.Housing != null)
+                .ToList();
+
+            if (!validShifts.Any())
+            {
+                return Result.Failure<HousingDailySummaryReport>(
+                    new Error($"No shifts with housing information found for {reportDate:yyyy-MM-dd}", "no_data", 404));
+            }
+
+            // Calculate totals
+            var totalOrders = validShifts.Sum(s => s.AcceptedDailyOrders);
+            var totalRiders = validShifts.Select(s => s.RiderId).Distinct().Count();
+
+            // Group by housing
+            var housingGroups = validShifts
+                .GroupBy(s => new {
+                    HousingId = s.Rider.Employee.Housing.Id,
+                    HousingName = s.Rider.Employee.Housing.Name
+                });
+
+            var housingSummaries = new List<HousingDailySummary>();
+
+            foreach (var group in housingGroups)
+            {
+                var housingShifts = group.ToList();
+                var housingOrders = housingShifts.Sum(s => s.AcceptedDailyOrders);
+                var activeRiders = housingShifts.Select(s => s.RiderId).Distinct().Count();
+                var avgOrdersPerRider = activeRiders > 0
+                    ? Math.Round((decimal)housingOrders / activeRiders, 2)
+                    : 0;
+                var percentageOfTotal = totalOrders > 0
+                    ? Math.Round((decimal)housingOrders / totalOrders * 100, 2)
+                    : 0;
+
+                housingSummaries.Add(new HousingDailySummary(
+                    HousingId: group.Key.HousingId,
+                    HousingName: group.Key.HousingName,
+                    TotalOrders: housingOrders,
+                    ActiveRiders: activeRiders,
+                    AverageOrdersPerRider: avgOrdersPerRider,
+                    PercentageOfTotalOrders: percentageOfTotal
+                ));
+            }
+
+            // Sort by total orders descending
+            housingSummaries = housingSummaries
+                .OrderByDescending(h => h.TotalOrders)
+                .ToList();
+
+            var avgOrdersPerRiderOverall = totalRiders > 0
+                ? Math.Round((decimal)totalOrders / totalRiders, 2)
+                : 0;
+
+            var report = new HousingDailySummaryReport(
+                ReportDate: reportDate,
+                HousingSummaries: housingSummaries,
+                TotalOrders: totalOrders,
+                TotalRiders: totalRiders,
+                AverageOrdersPerRider: avgOrdersPerRiderOverall
+            );
+
+            return Result.Success(report);
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<HousingDailySummaryReport>(
+                new Error($"Error generating housing daily summary: {ex.Message}", "server_error", 500));
+        }
+    }
+
+    /// <summary>
+    /// Get detailed daily report with individual riders grouped by housing
+    /// </summary>
+    public async Task<Result<HousingDailyDetailedReport>> GetHousingDailyDetailedReportAsync(
+        DateOnly reportDate,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            // Get all shifts for the specified date with full details
+            var shifts = await _dbcontext.RiderShifts
+                .Include(s => s.Rider)
+                    .ThenInclude(r => r.Employee)
+                    .ThenInclude(e => e.Housing)
+                .Where(s => s.ShiftDate == reportDate)
+                .AsNoTracking()
+                .ToListAsync(cancellationToken);
+
+            if (!shifts.Any())
+            {
+                return Result.Failure<HousingDailyDetailedReport>(
+                    new Error($"No shifts found for date {reportDate:yyyy-MM-dd}", "no_data", 404));
+            }
+
+            // Filter shifts with valid housing
+            var validShifts = shifts
+                .Where(s => s.Rider?.Employee?.Housing != null)
+                .ToList();
+
+            if (!validShifts.Any())
+            {
+                return Result.Failure<HousingDailyDetailedReport>(
+                    new Error($"No shifts with housing information found for {reportDate:yyyy-MM-dd}", "no_data", 404));
+            }
+
+            // Calculate grand totals
+            var grandTotalOrders = validShifts.Sum(s => s.AcceptedDailyOrders);
+            var grandTotalRiders = validShifts.Select(s => s.RiderId).Distinct().Count();
+
+            // Group by housing
+            var housingGroups = validShifts
+                .GroupBy(s => new {
+                    HousingId = s.Rider.Employee.Housing.Id,
+                    HousingName = s.Rider.Employee.Housing.Name
+                });
+
+            var housingDetails = new List<HousingDailyDetails>();
+
+            foreach (var group in housingGroups)
+            {
+                var housingShifts = group.ToList();
+                var housingTotalOrders = housingShifts.Sum(s => s.AcceptedDailyOrders);
+                var housingRiderCount = housingShifts.Select(s => s.RiderId).Distinct().Count();
+                var percentageOfCompany = grandTotalOrders > 0
+                    ? Math.Round((decimal)housingTotalOrders / grandTotalOrders * 100, 2)
+                    : 0;
+
+                // Get individual rider performances
+                var riderPerformances = housingShifts
+                    .Select(s => new RiderDailyPerformance(
+                        RiderId: s.RiderId,
+                        RiderName: s.Rider?.Employee.NameAR ?? "Unknown",
+                        WorkingId: s.WorkingId ?? "0",
+                        AcceptedOrders: s.AcceptedDailyOrders,
+                        ShiftDate: s.ShiftDate
+                    ))
+                    .OrderByDescending(r => r.AcceptedOrders)
+                    .ToList();
+
+                housingDetails.Add(new HousingDailyDetails(
+                    HousingId: group.Key.HousingId,
+                    HousingName: group.Key.HousingName,
+                    Riders: riderPerformances,
+                    HousingTotalOrders: housingTotalOrders,
+                    HousingRiderCount: housingRiderCount,
+                    PercentageOfCompanyTotal: percentageOfCompany
+                ));
+            }
+
+            // Sort by total orders descending
+            housingDetails = housingDetails
+                .OrderByDescending(h => h.HousingTotalOrders)
+                .ToList();
+
+            var report = new HousingDailyDetailedReport(
+                ReportDate: reportDate,
+                HousingDetails: housingDetails,
+                GrandTotalOrders: grandTotalOrders,
+                GrandTotalRiders: grandTotalRiders
+            );
+
+            return Result.Success(report);
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<HousingDailyDetailedReport>(
+                new Error($"Error generating housing daily detailed report: {ex.Message}", "server_error", 500));
+        }
+    }
+
+    // Helper method for trend description
+    private string GenerateTrendDescription(
+        int difference,
+        decimal changePercentage,
+        int period1Total,
+        int period2Total)
+    {
+        if (difference == 0)
+            return "📊 Orders remained stable between periods";
+
+        if (difference > 0)
+        {
+            if (changePercentage >= 50)
+                return $"🚀 Significant increase of {difference:N0} orders (+{changePercentage:F1}%) - Excellent growth!";
+            else if (changePercentage >= 20)
+                return $"📈 Strong increase of {difference:N0} orders (+{changePercentage:F1}%) - Good performance!";
+            else if (changePercentage >= 10)
+                return $"✅ Moderate increase of {difference:N0} orders (+{changePercentage:F1}%)";
+            else
+                return $"↗️ Slight increase of {difference:N0} orders (+{changePercentage:F1}%)";
+        }
+        else
+        {
+            var absChange = Math.Abs(changePercentage);
+            if (absChange >= 50)
+                return $"📉 Significant decrease of {Math.Abs(difference):N0} orders ({changePercentage:F1}%) - Needs urgent attention!";
+            else if (absChange >= 20)
+                return $"⚠️ Notable decrease of {Math.Abs(difference):N0} orders ({changePercentage:F1}%) - Review required";
+            else if (absChange >= 10)
+                return $"↘️ Moderate decrease of {Math.Abs(difference):N0} orders ({changePercentage:F1}%)";
+            else
+                return $"➡️ Slight decrease of {Math.Abs(difference):N0} orders ({changePercentage:F1}%)";
+        }
+    }
     public async Task<Result<ComprehensiveDashboard>> GetComprehensiveDashboardAsync(
         DateOnly? startDate = null,
         DateOnly? endDate = null,

@@ -9,6 +9,7 @@ namespace Express_Service.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[Authorize(Roles = "Master,Admin")]
 
 public class HungerController(IHungerDisabilityService service) : ControllerBase
 {
@@ -95,86 +96,86 @@ public class HungerController(IHungerDisabilityService service) : ControllerBase
     }
 
 
-    [HttpGet("above-target")]
-    public async Task<IActionResult> GetRidersAboveTarget(
-        [FromQuery] DateOnly startDate,
-        [FromQuery] DateOnly endDate,
-        CancellationToken cancellationToken = default)
-    {
-        var response = await service.GetReportsByDateRangeAsync(startDate, endDate, cancellationToken);
+    //[HttpGet("above-target")]
+    //public async Task<IActionResult> GetRidersAboveTarget(
+    //    [FromQuery] DateOnly startDate,
+    //    [FromQuery] DateOnly endDate,
+    //    CancellationToken cancellationToken = default)
+    //{
+    //    var response = await service.GetReportsByDateRangeAsync(startDate, endDate, cancellationToken);
 
-        if (!response.IsSuccess)
-            return response.ToProblem();
+    //    if (!response.IsSuccess)
+    //        return response.ToProblem();
 
-        var aboveTarget = response.Value.Where(r => r.IsAboveTarget).ToList();
+    //    var aboveTarget = response.Value.Where(r => r.IsAboveTarget).ToList();
 
-        return Ok(new
-        {
-            totalAboveTarget = aboveTarget.Count,
-            reports = aboveTarget
-        });
-    }
-
-
-    [HttpGet("below-target")]
-    public async Task<IActionResult> GetRidersBelowTarget(
-        [FromQuery] DateOnly startDate,
-        [FromQuery] DateOnly endDate,
-        CancellationToken cancellationToken = default)
-    {
-        var response = await service.GetReportsByDateRangeAsync(startDate, endDate, cancellationToken);
-
-        if (!response.IsSuccess)
-            return response.ToProblem();
-
-        var belowTarget = response.Value.Where(r => !r.IsAboveTarget).ToList();
-
-        return Ok(new
-        {
-            totalBelowTarget = belowTarget.Count,
-            reports = belowTarget
-        });
-    }
+    //    return Ok(new
+    //    {
+    //        totalAboveTarget = aboveTarget.Count,
+    //        reports = aboveTarget
+    //    });
+    //}
 
 
-    [HttpGet("with-substitutes")]
-    public async Task<IActionResult> GetRidersWithSubstitutes(
-        [FromQuery] DateOnly startDate,
-        [FromQuery] DateOnly endDate,
-        CancellationToken cancellationToken = default)
-    {
-        var response = await service.GetReportsByDateRangeAsync(startDate, endDate, cancellationToken);
+    //[HttpGet("below-target")]
+    //public async Task<IActionResult> GetRidersBelowTarget(
+    //    [FromQuery] DateOnly startDate,
+    //    [FromQuery] DateOnly endDate,
+    //    CancellationToken cancellationToken = default)
+    //{
+    //    var response = await service.GetReportsByDateRangeAsync(startDate, endDate, cancellationToken);
 
-        if (!response.IsSuccess)
-            return response.ToProblem();
+    //    if (!response.IsSuccess)
+    //        return response.ToProblem();
 
-        var withSubstitutes = response.Value.Where(r => r.HasSubstitute).ToList();
+    //    var belowTarget = response.Value.Where(r => !r.IsAboveTarget).ToList();
 
-        return Ok(new
-        {
-            totalWithSubstitutes = withSubstitutes.Count,
-            reports = withSubstitutes
-        });
-    }
+    //    return Ok(new
+    //    {
+    //        totalBelowTarget = belowTarget.Count,
+    //        reports = belowTarget
+    //    });
+    //}
 
-    [HttpGet("without-substitutes")]
-    public async Task<IActionResult> GetRidersWithoutSubstitutes(
-        [FromQuery] DateOnly startDate,
-        [FromQuery] DateOnly endDate,
-        CancellationToken cancellationToken = default)
-    {
-        var response = await service.GetReportsByDateRangeAsync(startDate, endDate, cancellationToken);
 
-        if (!response.IsSuccess)
-            return response.ToProblem();
+    //[HttpGet("with-substitutes")]
+    //public async Task<IActionResult> GetRidersWithSubstitutes(
+    //    [FromQuery] DateOnly startDate,
+    //    [FromQuery] DateOnly endDate,
+    //    CancellationToken cancellationToken = default)
+    //{
+    //    var response = await service.GetReportsByDateRangeAsync(startDate, endDate, cancellationToken);
 
-        var withoutSubstitutes = response.Value.Where(r => !r.HasSubstitute).ToList();
+    //    if (!response.IsSuccess)
+    //        return response.ToProblem();
 
-        return Ok(new
-        {
-            totalWithoutSubstitutes = withoutSubstitutes.Count,
-            warning = "⚠️ These disabled riders appear in shift data without active substitutions",
-            reports = withoutSubstitutes
-        });
-    }
+    //    var withSubstitutes = response.Value.Where(r => r.HasSubstitute).ToList();
+
+    //    return Ok(new
+    //    {
+    //        totalWithSubstitutes = withSubstitutes.Count,
+    //        reports = withSubstitutes
+    //    });
+    //}
+
+    //[HttpGet("without-substitutes")]
+    //public async Task<IActionResult> GetRidersWithoutSubstitutes(
+    //    [FromQuery] DateOnly startDate,
+    //    [FromQuery] DateOnly endDate,
+    //    CancellationToken cancellationToken = default)
+    //{
+    //    var response = await service.GetReportsByDateRangeAsync(startDate, endDate, cancellationToken);
+
+    //    if (!response.IsSuccess)
+    //        return response.ToProblem();
+
+    //    var withoutSubstitutes = response.Value.Where(r => !r.HasSubstitute).ToList();
+
+    //    return Ok(new
+    //    {
+    //        totalWithoutSubstitutes = withoutSubstitutes.Count,
+    //        warning = "⚠️ These disabled riders appear in shift data without active substitutions",
+    //        reports = withoutSubstitutes
+    //    });
+    //}
 }
