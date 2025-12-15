@@ -20,6 +20,12 @@ public interface IRiderService
     Task<List<RiderResponse>> SmartSearch(string keyword);
     Task<Result> ChangeWorkinId(string OldWorkinId, string NewWorkingId);
     Task<Result> AddETOR(long IqamaNo, EMTOR request );
+    Task<Result<EmployeeStatisticsResponse>> GetEmployeeStatistics();
     Task<Result<IEnumerable<RiderResponse>>> Filter(EmployeeFilterr filter);
 
 }
+public record EmployeeStatisticsResponse(
+    int Total,
+    int Riders,
+    int Employees
+);

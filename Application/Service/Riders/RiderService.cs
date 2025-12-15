@@ -18,7 +18,34 @@ namespace Application.Service.Riders;
 public class RiderService(ApplicationDbcontext dbcontext) : IRiderService
 {
     private readonly ApplicationDbcontext dbcontext = dbcontext;
+    public async Task<Result<EmployeeStatisticsResponse>> GetEmployeeStatistics()
+    {
+        try
+        {
+            var totalEmployees = await dbcontext.Employees
+                .CountAsync();
 
+            var totalRiders = await dbcontext.Employees
+                .Where(e => e.RiderDetails != null)
+                .CountAsync();
+
+            // Calculate non-riders
+            var totalNonRiders = totalEmployees - totalRiders;
+
+            var response = new EmployeeStatisticsResponse(
+                 totalEmployees,
+                 totalRiders,
+                 totalNonRiders
+            );
+
+            return Result.Success(response);
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<EmployeeStatisticsResponse>(
+                new Error("ServerError", $"Error retrieving employee statistics: {ex.Message}", 500));
+        }
+    }
     public async Task<Result<IEnumerable<RiderResponse>>> Get(long IqamaNo)
     {
 

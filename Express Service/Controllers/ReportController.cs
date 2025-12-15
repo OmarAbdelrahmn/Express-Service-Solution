@@ -15,50 +15,50 @@ public class ReportController(IReportService service) : ControllerBase
     private readonly IReportService service = service;
 
 
-    //[HttpGet("spicial")]
-    //public async Task<IActionResult> ComparePeriodOrdersAsync(
-    //    [FromQuery] DateOnly period2Start,
-    //    [FromQuery] DateOnly period2End,
-    //    CancellationToken cancellationToken = default)
-    //{
-    //    var result = await service.ComparePeriodOrdersAsync(
-    //        period2Start,
-    //        period2End,
-    //        cancellationToken);
+    [HttpGet("special3")]
+    public async Task<IActionResult> ComparePeriodOrdersAsync(
+        [FromQuery] DateOnly period2Start,
+        [FromQuery] DateOnly period2End,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await service.ComparePeriodOrdersAsync(
+            period2Start,
+            period2End,
+            cancellationToken);
 
-    //    return result.IsSuccess
-    //        ? Ok(result.Value)
-    //        : result.ToProblem();
-    //}
+        return result.IsSuccess
+            ? Ok(result.Value)
+            : result.ToProblem();
+    }
 
-    //[HttpGet("spicial1")]
-    //public async Task<IActionResult> GetHousingDailySummaryAsync(
-    //    [FromQuery] DateOnly reportDate,
-    //    CancellationToken cancellationToken = default)
-    //{
-    //    var result = await service.GetHousingDailySummaryAsync(
-    //        reportDate,
-    //        cancellationToken);
+    [HttpGet("special4")]
+    public async Task<IActionResult> GetHousingDailySummaryAsync(
+        [FromQuery] DateOnly reportDate,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await service.GetHousingDailySummaryAsync(
+            reportDate,
+            cancellationToken);
 
-    //    return result.IsSuccess
-    //        ? Ok(result.Value)
-    //        : result.ToProblem();
-    //}
+        return result.IsSuccess
+            ? Ok(result.Value)
+            : result.ToProblem();
+    }
 
 
-    //[HttpGet("housing-daily-detailed")]
-    //public async Task<IActionResult> GetHousingDailyDetailedReportAsync(
-    //    [FromQuery] DateOnly reportDate,
-    //    CancellationToken cancellationToken = default)
-    //{
-    //    var result = await service.GetHousingDailyDetailedReportAsync(
-    //        reportDate,
-    //        cancellationToken);
+    [HttpGet("special5")]
+    public async Task<IActionResult> GetHousingDailyDetailedReportAsync(
+        [FromQuery] DateOnly reportDate,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await service.GetHousingDailyDetailedReportAsync(
+            reportDate,
+            cancellationToken);
 
-    //    return result.IsSuccess
-    //        ? Ok(result.Value)
-    //        : result.ToProblem();
-    //}
+        return result.IsSuccess
+            ? Ok(result.Value)
+            : result.ToProblem();
+    }
 
 
     [HttpGet("special")]

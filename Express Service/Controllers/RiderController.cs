@@ -24,7 +24,15 @@ public class RiderController(IRiderService service) : ControllerBase
         return result.IsSuccess
             ? Ok(result.Value) : result.ToProblem();
     }
-    
+    [HttpGet("statistics")]
+    public async Task<IActionResult> GetEmployeeStatistics()
+    {
+        var result = await service.GetEmployeeStatistics();
+
+        return result.IsSuccess
+           ? Ok(result.Value) : result.ToProblem();
+    }
+
     [HttpGet("inactive")]
     [Authorize(Roles = "Master,Admin,Member")]
     public async Task<IActionResult> GetAlRiders()

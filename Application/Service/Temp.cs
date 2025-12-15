@@ -31,9 +31,18 @@ public class Temp(ApplicationDbcontext dbcontext) : ITemp
                 return Result.Failure<BulkUploadResult>(
                     new Error("MissingIqama", "Excel must contain IqamaNo column", 400));
 
+            // Get all employees from database
+            var allEmployees = await dbcontext.Employees
+                .AsNoTracking()
+                .ToListAsync();
+
             var tempUpdates = new List<TempEmployeeUpdate>();
             var rowCount = worksheet.LastRowUsed()?.RowNumber() ?? 0;
             int skippedCount = 0;
+
+            // Track all IqamaNo values from Excel
+            var excelIqamaNumbers = new HashSet<long>();
+            var newEmployeesFromExcel = new List<EmployeeRowInfo>();
 
             for (int row = 2; row <= rowCount; row++)
             {
@@ -42,9 +51,9 @@ public class Temp(ApplicationDbcontext dbcontext) : ITemp
                 if (string.IsNullOrWhiteSpace(iqamaNoValue) || !long.TryParse(iqamaNoValue, out long IqamaNo))
                     continue;
 
-                var existingEmployee = await dbcontext.Employees
-                    .AsNoTracking()
-                    .FirstOrDefaultAsync(e => e.IqamaNo == IqamaNo);
+                excelIqamaNumbers.Add(IqamaNo);
+
+                var existingEmployee = allEmployees.FirstOrDefault(e => e.IqamaNo == IqamaNo);
 
                 // Get new values from Excel
                 var newIqamaEndM = GetDateValue(worksheet, row, columnMapping, "IqamaEndM");
@@ -63,33 +72,28 @@ public class Temp(ApplicationDbcontext dbcontext) : ITemp
                 var newIBAN = GetStringValue(worksheet, row, columnMapping, "IBAN");
                 var newINKSA = GetBoolValue(worksheet, row, columnMapping, "INKSA");
 
-                // Check if this is a new employee
+                // Check if this is a new employee (in Excel but not in DB)
                 if (existingEmployee == null)
                 {
-                    var tempUpdate = new TempEmployeeUpdate
-                    {
-                        IqamaNo = IqamaNo,
-                        IsNewEmployee = true,
-                        UploadedAt = DateTime.Now,
-                        UploadedBy = uploadedBy,
-                        NewIqamaEndM = newIqamaEndM,
-                        NewIqamaEndH = newIqamaEndH,
-                        NewPassportNo = newPassportNo,
-                        NewPassportEnd = newPassportEnd,
-                        NewSponsor = newSponsor,
-                        NewSponsorNo = newSponsorNo,
-                        NewJobTitle = newJobTitle,
-                        NewNameAR = newNameAR,
-                        NewNameEN = newNameEN,
-                        NewCountry = newCountry,
-                        NewPhone = newPhone,
-                        NewDateOfBirth = newDateOfBirth,
-                        NewStatus = newStatus,
-                        NewIBAN = newIBAN,
-                        NewINKSA = newINKSA.HasValue ? !newINKSA.Value : (bool?)null
-                    };
-
-                    tempUpdates.Add(tempUpdate);
+                    // Store information but DON'T add to TempEmployeeUpdate
+                    newEmployeesFromExcel.Add(new EmployeeRowInfo(
+                        IqamaNo: IqamaNo,
+                        IqamaEndM: newIqamaEndM,
+                        IqamaEndH: newIqamaEndH,
+                        PassportNo: newPassportNo,
+                        PassportEnd: newPassportEnd,
+                        Sponsor: newSponsor,
+                        SponsorNo: newSponsorNo,
+                        JobTitle: newJobTitle,
+                        NameAR: newNameAR,
+                        NameEN: newNameEN,
+                        Country: newCountry,
+                        Phone: newPhone,
+                        DateOfBirth: newDateOfBirth,
+                        Status: newStatus,
+                        IBAN: newIBAN,
+                        INKSA: newINKSA.HasValue ? !newINKSA.Value : null
+                    ));
                     continue;
                 }
 
@@ -222,20 +226,45 @@ public class Temp(ApplicationDbcontext dbcontext) : ITemp
                 }
             }
 
-            if (tempUpdates.Count == 0)
-                return Result.Failure<BulkUploadResult>(
-                    new Error("NoData", "No changes detected in Excel file", 400));
+            // Find employees in DB but not in Excel (missing from Excel)
+            var missingFromExcel = allEmployees
+                .Where(e => !excelIqamaNumbers.Contains(e.IqamaNo))
+                .Select(e => new EmployeeRowInfo(
+                    IqamaNo: e.IqamaNo,
+                    IqamaEndM: e.IqamaEndM,
+                    IqamaEndH: e.IqamaEndH,
+                    PassportNo: e.PassportNo,
+                    PassportEnd: e.PassportEnd,
+                    Sponsor: e.Sponsor,
+                    SponsorNo: e.sponsorNo,
+                    JobTitle: e.JobTitle,
+                    NameAR: e.NameAR,
+                    NameEN: e.NameEN,
+                    Country: e.Country,
+                    Phone: e.Phone,
+                    DateOfBirth: e.DateOfBirth,
+                    Status: e.Status,
+                    IBAN: e.IBAN,
+                    INKSA: e.INKSA
+                ))
+                .ToList();
 
-            await dbcontext.TempEmployeeUpdates.AddRangeAsync(tempUpdates);
-            await dbcontext.SaveChangesAsync();
+            // Save only the updates (changes to existing employees)
+            if (tempUpdates.Count > 0)
+            {
+                await dbcontext.TempEmployeeUpdates.AddRangeAsync(tempUpdates);
+                await dbcontext.SaveChangesAsync();
+            }
 
             var result = new BulkUploadResult(
                 TotalRows: tempUpdates.Count,
-                NewEmployees: tempUpdates.Count(t => t.IsNewEmployee),
-                ExistingEmployees: tempUpdates.Count(t => !t.IsNewEmployee),
+                NewEmployees: 0, // We're not creating TempEmployeeUpdate for new employees anymore
+                ExistingEmployees: tempUpdates.Count,
                 SkippedRows: skippedCount,
                 UploadedAt: DateTime.Now,
-                Message: $"Excel uploaded successfully. {tempUpdates.Count} changes detected, {skippedCount} rows skipped (no changes)."
+                Message: $"Excel uploaded successfully. {tempUpdates.Count} changes detected, {skippedCount} rows skipped (no changes).",
+                EmployeesInExcelNotInDB: newEmployeesFromExcel,
+                EmployeesInDBNotInExcel: missingFromExcel
             );
 
             return Result.Success(result);
@@ -246,7 +275,6 @@ public class Temp(ApplicationDbcontext dbcontext) : ITemp
                 new Error("UploadError", $"Failed to upload Excel: {ex.Message}", 500));
         }
     }
-
     public async Task<Result<IEnumerable<TempEmployeeUpdateResponse>>> GetPendingUpdatesAsync()
     {
         try
@@ -395,14 +423,12 @@ public class Temp(ApplicationDbcontext dbcontext) : ITemp
         }
     }
 
-    
 
-    // Helper methods
+
     private bool HasChanged<T>(T? oldValue, T? newValue)
     {
         return !EqualityComparer<T>.Default.Equals(oldValue, newValue);
     }
-
     private Dictionary<string, int> MapColumns(IXLWorksheet worksheet)
     {
         var mapping = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
@@ -451,7 +477,6 @@ public class Temp(ApplicationDbcontext dbcontext) : ITemp
         if (!mapping.ContainsKey(columnName)) return null;
         return ws.Cell(row, mapping[columnName]).Value.ToString()?.Trim();
     }
-
     private int? GetIntValue(IXLWorksheet ws, int row, Dictionary<string, int> mapping, string columnName)
     {
         if (!mapping.ContainsKey(columnName)) return null;
@@ -466,16 +491,11 @@ public class Temp(ApplicationDbcontext dbcontext) : ITemp
     private long? GetLongValue(IXLWorksheet ws, int row, Dictionary<string, int> mapping, string columnName)
     {
         if (!mapping.ContainsKey(columnName)) return null;
-
         var value = ws.Cell(row, mapping[columnName]).Value.ToString()?.Trim();
-
         if (string.IsNullOrWhiteSpace(value)) return null;
-
         if (long.TryParse(value, out long result)) return result;
-
         return null;
     }
-
 
     private DateOnly? GetDateValue(IXLWorksheet ws, int row, Dictionary<string, int> mapping, string columnName)
     {
@@ -499,18 +519,15 @@ public class Temp(ApplicationDbcontext dbcontext) : ITemp
 
         var cell = ws.Cell(row, mapping[columnName]);
 
-        // Try to get the cell value as DateTime
         if (cell.TryGetValue(out DateTime dt))
             return DateOnly.FromDateTime(dt);
 
-        // Fallback: parse the string manually
         var value = cell.Value.ToString();
         if (!string.IsNullOrWhiteSpace(value) && DateTime.TryParse(value, out var dateTime))
             return DateOnly.FromDateTime(dateTime);
 
         return null;
     }
-
 
     private bool? GetBoolValue(IXLWorksheet ws, int row, Dictionary<string, int> mapping, string columnName)
     {
@@ -522,7 +539,6 @@ public class Temp(ApplicationDbcontext dbcontext) : ITemp
 
         return null;
     }
-
     private TempEmployeeUpdateResponse MapToResponse(TempEmployeeUpdate update)
     {
         var changes = new List<FieldChangeInfo>();
@@ -586,16 +602,17 @@ public class Temp(ApplicationDbcontext dbcontext) : ITemp
     }
 }
 
+// Updated BulkUploadResult with new properties
 public record BulkUploadResult(
     int TotalRows,
     int NewEmployees,
     int ExistingEmployees,
     int SkippedRows,
     DateTime UploadedAt,
-    string Message
+    string Message,
+    List<EmployeeRowInfo> EmployeesInExcelNotInDB,
+    List<EmployeeRowInfo> EmployeesInDBNotInExcel
 );
-
-
 // Response record for individual temp employee update
 public record TempEmployeeUpdateResponse(
     int Id,
@@ -634,4 +651,23 @@ public record BulkResolutionResponse(
     int SuccessCount,
     int FailedCount,
     List<string> Details
+);
+// New record to represent full employee row information
+public record EmployeeRowInfo(
+    long IqamaNo,
+    DateOnly? IqamaEndM,
+    DateOnly? IqamaEndH,
+    string? PassportNo,
+    DateOnly? PassportEnd,
+    string? Sponsor,
+    long? SponsorNo,
+    string? JobTitle,
+    string? NameAR,
+    string? NameEN,
+    string? Country,
+    string? Phone,
+    DateOnly? DateOfBirth,
+    string? Status,
+    string? IBAN,
+    bool? INKSA
 );

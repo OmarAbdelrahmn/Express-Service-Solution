@@ -1,4 +1,5 @@
-﻿using Application.Service;
+﻿using Application.Extensions;
+using Application.Service;
 using Application.Service.Empolyee;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
@@ -35,12 +36,13 @@ public class TempController(ITemp service , IEmployeeService service1 , IVehicle
 
     public async Task<IActionResult> CreateTempData(IFormFile excelFile)
     {
+        var UserId = User.GetUserId();
         if (excelFile == null || excelFile.Length == 0)
         {
             return BadRequest("No file uploaded.");
         }
         using var stream = excelFile.OpenReadStream();
-        var result = await service.UploadEmployeeExcelAsync(stream,"omar");
+        var result = await service.UploadEmployeeExcelAsync(stream,UserId!);
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
 
