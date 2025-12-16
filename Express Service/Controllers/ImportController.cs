@@ -101,4 +101,76 @@ public class ImportController(IImportService service) : ControllerBase
             }
         });
     }
+
+
+    // Add this to your ImportController.cs
+    [HttpPost("debug-headers")]
+    public async Task<IActionResult> DebugHeaders(IFormFile file)
+    {
+        if (file == null || file.Length == 0)
+            return BadRequest("No file uploaded");
+
+        try
+        {
+            using var stream = file.OpenReadStream();
+            using var workbook = new ClosedXML.Excel.XLWorkbook(stream);
+            var worksheet = workbook.Worksheet(1);
+
+            var debugInfo = new
+            {
+                totalRows = worksheet.RowsUsed().Count(),
+                rows = new List<object>()
+            };
+
+            // Check first 5 rows
+            for (int i = 1; i <= Math.Min(5, worksheet.RowsUsed().Count()); i++)
+            {
+                var row = worksheet.Row(i);
+                var cells = new List<object>();
+
+                foreach (var cell in row.CellsUsed())
+                {
+                    string value = "";
+                    try
+                    {
+                        if (cell.IsMerged())
+                        {
+                            value = $"[MERGED: {cell.MergedRange().FirstCell().GetString()}]";
+                        }
+                        else
+                        {
+                            value = cell.GetString();
+                        }
+                    }
+                    catch
+                    {
+                        value = "[ERROR]";
+                    }
+
+                    cells.Add(new
+                    {
+                        column = cell.Address.ColumnNumber,
+                        columnLetter = cell.Address.ColumnLetter,
+                        value = value,
+                        dataType = cell.DataType.ToString(),
+                        isEmpty = cell.IsEmpty(),
+                        isMerged = cell.IsMerged()
+                    });
+                }
+
+                ((List<object>)debugInfo.rows).Add(new
+                {
+                    rowNumber = i,
+                    cellCount = cells.Count,
+                    cells = cells
+                });
+            }
+
+            return Ok(debugInfo);
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { error = ex.Message, stackTrace = ex.StackTrace });
+        }
+    }
 }

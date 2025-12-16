@@ -51,7 +51,8 @@ public class ImportService : IImportService
                     new Error("InvalidWorksheet", "Could not read worksheet", 400));
             }
 
-            var headerRow = worksheet.FirstRowUsed();
+            var headerRow = FindHeaderRow(worksheet);
+
             if (headerRow == null)
             {
                 return Result.Failure<DirectImportResponse>(
@@ -71,8 +72,11 @@ public class ImportService : IImportService
                 .AsNoTracking()
                 .ToDictionaryAsync(c => c.Name.Trim().ToLower(), c => c.Id);
 
-            var dataRows = worksheet.RowsUsed().Skip(1).ToList();
-            var rowNumber = 1;
+            var dataRows = worksheet.RowsUsed()
+            .Where(r => r.RowNumber() > headerRow.RowNumber())
+            .ToList();
+
+            var rowNumber = headerRow.RowNumber();
 
             foreach (var row in dataRows)
             {
@@ -211,103 +215,197 @@ public class ImportService : IImportService
         }
     }
 
+
+    // Replace your BuildColumnMapping method with this version that has better error reporting
     private ColumnMapping BuildColumnMapping(IXLRow headerRow)
     {
         var mapping = new ColumnMapping();
         var cells = headerRow.CellsUsed().ToList();
 
+        // Collect all actual headers for debugging
+        var actualHeaders = new List<string>();
+        foreach (var cell in cells)
+        {
+            try
+            {
+                string val = cell.IsMerged()
+                    ? cell.MergedRange().FirstCell().GetString()
+                    : cell.GetString();
+
+                actualHeaders.Add($"Col{cell.Address.ColumnNumber}({cell.Address.ColumnLetter})='{val}'");
+                Console.WriteLine($"Header Column {cell.Address.ColumnNumber} ({cell.Address.ColumnLetter}): '{val}'");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error reading column {cell.Address.ColumnNumber}: {ex.Message}");
+            }
+        }
+
+        // Map columns
         mapping.IqamaNoCol = FindColumn(cells,
-            "رقم الاقامة", "رقم الإقامة", "Iqama No", "IqamaNo", "Iqama Number", "الاقامة");
+            "IqamaNumber", "Iqama Number", "رقم الاقامة", "رقم الإقامة", "Iqama No", "IqamaNo", "الاقامة");
+        Console.WriteLine($"IqamaNo mapped to column: {mapping.IqamaNoCol}");
 
         mapping.NameARCol = FindColumn(cells,
-            "الاسم بالعربية", "الاسم العربي", "Name AR", "NameAR", "Arabic Name");
+            "NameAR", "Name AR", "الاسم بالعربية", "الاسم العربي", "Arabic Name", "الاسم");
+        Console.WriteLine($"NameAR mapped to column: {mapping.NameARCol}");
 
         mapping.NameENCol = FindColumn(cells,
-            "الاسم بالإنجليزية", "الاسم الانجليزي", "Name EN", "NameEN", "English Name", "Name");
+            "NameEN", "Name EN", "الاسم بالإنجليزية", "الاسم الانجليزي", "English Name", "Name");
+        Console.WriteLine($"NameEN mapped to column: {mapping.NameENCol}");
 
         mapping.IqamaEndMCol = FindColumn(cells,
-            "تاريخ انتهاء الاقامة ميلادي", "انتهاء الاقامة", "Iqama End M", "IqamaEndM", "Iqama Expiry");
+            "IqamaEndM", "Iqama End M", "تاريخ انتهاء الاقامة ميلادي", "انتهاء الاقامة", "Iqama Expiry");
 
         mapping.IqamaEndHCol = FindColumn(cells,
-            "تاريخ انتهاء الاقامة هجري", "Iqama End H", "IqamaEndH", "Hijri Date");
+            "IqamaEndH", "Iqama End H", "تاريخ انتهاء الاقامة هجري", "Hijri Date");
 
         mapping.PassportNoCol = FindColumn(cells,
-            "رقم الجواز", "رقم جواز السفر", "Passport No", "PassportNo", "Passport Number");
+            "IqamaNumber", "Passport Number", "رقم الجواز", "رقم جواز السفر", "Passport No", "PassportNo");
 
         mapping.PassportEndCol = FindColumn(cells,
-            "تاريخ انتهاء الجواز", "انتهاء الجواز", "Passport End", "PassportEnd", "Passport Expiry");
+            "PassportEnd", "Passport End", "تاريخ انتهاء الجواز", "انتهاء الجواز", "Passport Expiry");
 
         mapping.SponsorCol = FindColumn(cells,
-            "الكفيل", "اسم الكفيل", "Sponsor", "Sponsor Name");
+            "Sponsor", "الكفيل", "اسم الكفيل", "Sponsor Name");
 
         mapping.SponsorNoCol = FindColumn(cells,
-            "رقم الكفيل", "Sponsor No", "SponsorNo", "Sponsor Number");
+            "SponsorNo", "Sponsor No", "رقم الكفيل", "Sponsor Number");
 
         mapping.JobTitleCol = FindColumn(cells,
-            "المسمى الوظيفي", "الوظيفة", "Job Title", "JobTitle", "Position");
+            "JobTitle", "Job Title", "المسمى الوظيفي", "الوظيفة", "Position");
 
         mapping.CountryCol = FindColumn(cells,
-            "الجنسية", "البلد", "Country", "Nationality");
+            "Country", "الجنسية", "البلد", "Nationality");
 
         mapping.PhoneCol = FindColumn(cells,
-            "رقم الجوال", "الجوال", "Phone", "Mobile", "Phone Number");
+            "Phone", "رقم الجوال", "الجوال", "Mobile", "Phone Number");
 
         mapping.DateOfBirthCol = FindColumn(cells,
-            "تاريخ الميلاد", "الميلاد", "Date Of Birth", "DateOfBirth", "Birth Date", "DOB");
+            "DateOfBirth", "Date Of Birth", "تاريخ الميلاد", "الميلاد", "Birth Date", "DOB");
 
         mapping.StatusCol = FindColumn(cells,
-            "الحالة", "Status", "Employee Status");
+            "Status", "الحالة", "Employee Status");
 
         mapping.IBANCol = FindColumn(cells,
-            "رقم الآيبان", "الآيبان", "IBAN", "Bank Account");
+            "IBAN", "رقم الآيبان", "الآيبان", "Bank Account");
 
         mapping.INKSACol = FindColumn(cells,
             "INKSA", "في السعودية", "In KSA");
 
         mapping.WorkingIdCol = FindColumn(cells,
-            "معرف العمل", "رقم العمل", "Working ID", "WorkingID", "Work ID", "Employee ID");
+            "WorkingID", "Working ID", "معرف العمل", "رقم العمل", "Work ID", "Employee ID");
 
         mapping.TshirtSizeCol = FindColumn(cells,
-            "مقاس القميص", "القميص", "Tshirt Size", "T-shirt", "Shirt Size");
+            "TshirtSize", "Tshirt Size", "مقاس القميص", "القميص", "T-shirt", "Shirt Size");
 
         mapping.LicenseNumberCol = FindColumn(cells,
-            "رقم الرخصة", "الرخصة", "License Number", "License No", "Driving License");
+            "LicenseNumber", "License Number", "رقم الرخصة", "الرخصة", "License No", "Driving License");
 
         mapping.CompanyNameCol = FindColumn(cells,
-            "اسم الشركة", "الشركة", "Company Name", "Company", "اسم شركة العميل");
+            "CompanyName", "Company Name", "اسم الشركة", "الشركة", "Company", "اسم شركة العميل");
 
         // Validate required columns
         var missing = new List<string>();
         if (mapping.IqamaNoCol == 0) missing.Add("Iqama Number");
-        if (mapping.NameARCol == 0) missing.Add("Name AR");
-        if (mapping.NameENCol == 0) missing.Add("Name EN");
+        if (mapping.NameARCol == 0) missing.Add("NameAR");
+        if (mapping.NameENCol == 0) missing.Add("NameEN");
 
         if (missing.Any())
         {
             mapping.IsValid = false;
-            mapping.ErrorMessage = $"Required columns missing: {string.Join(", ", missing)}";
+            mapping.ErrorMessage = $"Required columns missing: {string.Join(", ", missing)} \n" +
+                                  $"Header row number: {headerRow.RowNumber()}\n" +
+                                  $"Columns found in header row:\n{string.Join("\n", actualHeaders)} \n" +
+                                  $"Expected variations for NameAR: NameAR, Name AR, الاسم بالعربية  \n" +
+                                  $"Expected variations for NameEN: NameEN, Name EN, Name, الاسم بالإنجليزية";
+
+            Console.WriteLine($"ERROR: {mapping.ErrorMessage}");
         }
         else
         {
             mapping.IsValid = true;
+            Console.WriteLine("SUCCESS: All required columns found!");
         }
 
         return mapping;
     }
-
     private int FindColumn(List<IXLCell> cells, params string[] possibleNames)
     {
         foreach (var cell in cells)
         {
-            var headerValue = cell.Value.ToString().Trim();
-            foreach (var name in possibleNames)
+            try
             {
-                if (headerValue.Equals(name, StringComparison.OrdinalIgnoreCase))
+                if (cell.IsEmpty()) continue;
+
+                string headerValue = "";
+
+                // Handle merged cells
+                if (cell.IsMerged())
                 {
-                    return cell.Address.ColumnNumber;
+                    headerValue = cell.MergedRange().FirstCell().GetString().Trim();
+                }
+                else
+                {
+                    // Get cell value based on type
+                    switch (cell.DataType)
+                    {
+                        case XLDataType.Text:
+                            headerValue = cell.GetText().Trim();
+                            break;
+                        case XLDataType.Number:
+                            headerValue = cell.GetDouble().ToString().Trim();
+                            break;
+                        case XLDataType.Boolean:
+                            headerValue = cell.GetBoolean().ToString().Trim();
+                            break;
+                        default:
+                            headerValue = cell.GetString().Trim();
+                            break;
+                    }
+                }
+
+                if (string.IsNullOrWhiteSpace(headerValue))
+                    continue;
+
+                // Clean up the header value
+                headerValue = headerValue.Trim();
+
+                // Method 1: Exact match (case-insensitive)
+                foreach (var name in possibleNames)
+                {
+                    if (headerValue.Equals(name, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return cell.Address.ColumnNumber;
+                    }
+                }
+
+                // Method 2: Match without any spaces (NameAR = Name AR)
+                string headerNoSpaces = headerValue.Replace(" ", "").Replace("\t", "").Replace("\n", "").Replace("\r", "");
+                foreach (var name in possibleNames)
+                {
+                    string nameNoSpaces = name.Replace(" ", "").Replace("\t", "").Replace("\n", "").Replace("\r", "");
+                    if (headerNoSpaces.Equals(nameNoSpaces, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return cell.Address.ColumnNumber;
+                    }
+                }
+
+                // Method 3: Partial match (contains) - as last resort
+                foreach (var name in possibleNames)
+                {
+                    if (headerValue.Contains(name, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return cell.Address.ColumnNumber;
+                    }
                 }
             }
+            catch
+            {
+                continue;
+            }
         }
+
         return 0;
     }
 
@@ -399,6 +497,116 @@ public class ImportService : IImportService
         }
 
         return data;
+    }
+
+    // Replace your FindHeaderRow method with this improved version
+    private IXLRow FindHeaderRow(IXLWorksheet worksheet)
+    {
+        // Known required column names to look for
+        var knownColumns = new[]
+        {
+        "NameEN", "Name EN", "NameAR", "Name AR",
+        "IqamaNumber", "Iqama Number", "رقم الإقامة", "رقم الاقامة",
+        "Phone", "Sponsor", "Country"
+    };
+
+        // Check first 10 rows to find the one that contains our known columns
+        for (int i = 1; i <= Math.Min(10, worksheet.RowsUsed().Count()); i++)
+        {
+            var row = worksheet.Row(i);
+            var cellValues = new List<string>();
+
+            foreach (var cell in row.CellsUsed())
+            {
+                try
+                {
+                    string value = "";
+                    if (cell.IsMerged())
+                    {
+                        value = cell.MergedRange().FirstCell().GetString().Trim();
+                    }
+                    else
+                    {
+                        value = cell.GetString().Trim();
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(value))
+                    {
+                        cellValues.Add(value);
+                    }
+                }
+                catch { }
+            }
+
+            // Check if this row contains any of our known column names
+            int matchCount = 0;
+            foreach (var cellValue in cellValues)
+            {
+                foreach (var knownCol in knownColumns)
+                {
+                    if (cellValue.Equals(knownCol, StringComparison.OrdinalIgnoreCase) ||
+                        cellValue.Replace(" ", "").Equals(knownCol.Replace(" ", ""), StringComparison.OrdinalIgnoreCase))
+                    {
+                        matchCount++;
+                        break;
+                    }
+                }
+            }
+
+            // If we found at least 3 matching column names, this is likely the header row
+            if (matchCount >= 3)
+            {
+                Console.WriteLine($"Found header row at row {i} with {matchCount} matching columns");
+                return row;
+            }
+        }
+
+        // Fallback: return the row with the most non-empty cells
+        IXLRow? bestRow = null;
+        int maxNonEmptyCells = 0;
+
+        for (int i = 1; i <= Math.Min(10, worksheet.RowsUsed().Count()); i++)
+        {
+            var row = worksheet.Row(i);
+            var nonEmptyCells = row.CellsUsed().Count(c =>
+                !string.IsNullOrWhiteSpace(GetCellValueSafe(c)));
+
+            if (nonEmptyCells > maxNonEmptyCells)
+            {
+                maxNonEmptyCells = nonEmptyCells;
+                bestRow = row;
+            }
+        }
+
+        Console.WriteLine($"Fallback: Using row {bestRow?.RowNumber()} with {maxNonEmptyCells} cells");
+        return bestRow ?? worksheet.Row(1);
+    }
+    private string GetCellValueSafe(IXLCell cell)
+    {
+        try
+        {
+            if (cell.IsEmpty()) return "";
+
+            // Handle merged cells
+            if (cell.IsMerged())
+            {
+                var mergedRange = cell.MergedRange();
+                cell = mergedRange.FirstCell();
+            }
+
+            if (cell.DataType == XLDataType.Text)
+                return cell.GetText().Trim();
+            else if (cell.DataType == XLDataType.Number)
+                return cell.GetDouble().ToString().Trim();
+            else if (cell.DataType == XLDataType.Boolean)
+                return cell.GetBoolean().ToString().Trim();
+            else
+                return cell.Value.ToString()?.Trim() ?? "";
+        }
+        catch
+        {
+            return "";
+        }
     }
 
     private string? GetCellValue(IXLRow row, int columnIndex)
@@ -809,3 +1017,4 @@ internal class RowData
     public string? CompanyName { get; set; }
     public int? CompanyId { get; set; }
 }
+

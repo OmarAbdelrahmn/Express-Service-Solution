@@ -9,7 +9,6 @@ namespace Express_Service.Controllers;
 
 [Route("api/[controller]")]
 [ApiController]
-[Authorize(Roles = "Master")]
 
 public class RiderController(IRiderService service) : ControllerBase
 {
