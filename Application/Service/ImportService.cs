@@ -1,5 +1,5 @@
 ﻿using Application.Abstraction;
-using Application.Service.Empolyee;
+using ClosedXML.Excel;
 using Domain;
 using Domain.Entities;
 using Microsoft.AspNetCore.Http;
@@ -7,771 +7,805 @@ using Microsoft.EntityFrameworkCore;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
-using System.Text;
+using System.Linq;
+using System.Threading.Tasks;
 
 namespace Application.Service;
 
-public class ImportService(ApplicationDbcontext dbcontext) : IImportService
+public class ImportService : IImportService
 {
-    private readonly ApplicationDbcontext _dbcontext = dbcontext;
+    private readonly ApplicationDbcontext _dbcontext;
 
-    public async Task<Result<ImportStagingResponse>> ProcessExcelFileAsync(
-    IFormFile file,
-    string uploadedBy)
+    public ImportService(ApplicationDbcontext dbcontext)
+    {
+        _dbcontext = dbcontext;
+    }
+
+    public async Task<Result<DirectImportResponse>> ImportEmployeesAndRidersAsync(
+        IFormFile file,
+        string uploadedBy)
     {
         if (file == null || file.Length == 0)
-            return Result.Failure<ImportStagingResponse>(
+            return Result.Failure<DirectImportResponse>(
                 new Error("InvalidFile", "File is empty or null", 400));
 
         if (!file.FileName.EndsWith(".xlsx") && !file.FileName.EndsWith(".xls"))
-            return Result.Failure<ImportStagingResponse>(
+            return Result.Failure<DirectImportResponse>(
                 new Error("InvalidFormat", "File must be Excel format (.xlsx or .xls)", 400));
 
-        var batchId = Guid.NewGuid();
-        var records = new List<TempEmployeeRiderImport>();
-        var criticalErrors = new List<string>();
+        var results = new List<ImportRowResult>();
+        var errors = new List<string>();
+        int successfulEmployees = 0;
+        int successfulRiders = 0;
+        int failedRecords = 0;
 
         try
         {
             using var stream = file.OpenReadStream();
-            using var package = new ExcelPackage(stream);
+            using var workbook = new XLWorkbook(stream);
+            var worksheet = workbook.Worksheet(1);
 
-            var worksheet = package.Workbook.Worksheets[0];
-            var rowCount = worksheet.Dimension?.Rows ?? 0;
-
-            if (rowCount <= 1)
-                return Result.Failure<ImportStagingResponse>(
-                    new Error("EmptyFile", "Excel file has no data rows", 400));
-
-            if (rowCount > 501) // 500 data rows + 1 header
+            if (worksheet == null)
             {
-                return Result.Failure<ImportStagingResponse>(
-                    new Error("TooManyRows",
-                        $"File contains {rowCount - 1} rows. Maximum allowed is 500 rows.", 400));
+                return Result.Failure<DirectImportResponse>(
+                    new Error("InvalidWorksheet", "Could not read worksheet", 400));
             }
 
-            // Get company cache for faster lookups
-            var companies = await _dbcontext.Companies
-                .ToDictionaryAsync(c => c.Name.ToLower(), c => c.Id);
-
-            // Process each row (starting from row 2, assuming row 1 is header)
-            for (int row = 2; row <= rowCount; row++)
+            var headerRow = worksheet.FirstRowUsed();
+            if (headerRow == null)
             {
+                return Result.Failure<DirectImportResponse>(
+                    new Error("EmptyFile", "Excel file has no header row", 400));
+            }
+
+            // Map columns by finding their positions
+            var columnMap = BuildColumnMapping(headerRow);
+            if (!columnMap.IsValid)
+            {
+                return Result.Failure<DirectImportResponse>(
+                    new Error("InvalidColumns", columnMap.ErrorMessage!, 400));
+            }
+
+            // Load company lookup dictionary
+            var companies = await _dbcontext.Companies
+                .AsNoTracking()
+                .ToDictionaryAsync(c => c.Name.Trim().ToLower(), c => c.Id);
+
+            var dataRows = worksheet.RowsUsed().Skip(1).ToList();
+            var rowNumber = 1;
+
+            foreach (var row in dataRows)
+            {
+                rowNumber++;
+
+                using var transaction = await _dbcontext.Database.BeginTransactionAsync();
                 try
                 {
-                    var record = await ParseExcelRow(worksheet, row, companies, batchId, file.FileName, uploadedBy);
-                    records.Add(record);
+                    var rowData = ParseRowData(row, columnMap, rowNumber);
+
+                    if (!rowData.IsValid)
+                    {
+                        failedRecords++;
+                        results.Add(new ImportRowResult(
+                            rowNumber,
+                            false,
+                            rowData.IqamaNo.ToString() ?? "N/A",
+                            rowData.NameEN ?? "N/A",
+                            rowData.NameAR ?? "N/A",
+                            rowData.CompanyName,
+                            false, false, false, false,
+                            new List<string>(),
+                            rowData.ErrorMessage
+                        ));
+                        continue;
+                    }
+
+                    var warnings = new List<string>();
+
+                    // Process Employee
+                    var (employeeCreated, employeeUpdated, employeeError) =
+                        await ProcessEmployee(rowData, warnings);
+
+                    if (employeeError != null)
+                    {
+                        await transaction.RollbackAsync();
+                        failedRecords++;
+                        results.Add(new ImportRowResult(
+                            rowNumber,
+                            false,
+                            rowData.IqamaNo.ToString(),
+                            rowData.NameEN ?? "N/A",
+                            rowData.NameAR ?? "N/A",
+                            rowData.CompanyName,
+                            false, false, false, false,
+                            warnings,
+                            employeeError
+                        ));
+                        continue;
+                    }
+
+                    if (employeeCreated || employeeUpdated)
+                        successfulEmployees++;
+
+                    // Process Rider (if company data exists)
+                    bool riderCreated = false;
+                    bool riderUpdated = false;
+
+                    if (!string.IsNullOrWhiteSpace(rowData.CompanyName))
+                    {
+                        if (companies.TryGetValue(rowData.CompanyName.Trim().ToLower(), out int companyId))
+                        {
+                            rowData.CompanyId = companyId;
+                            var (created, updated, riderError) =
+                                await ProcessRider(rowData, warnings);
+
+                            if (riderError != null)
+                            {
+                                warnings.Add($"Rider processing failed: {riderError}");
+                            }
+                            else
+                            {
+                                riderCreated = created;
+                                riderUpdated = updated;
+                                if (created || updated)
+                                    successfulRiders++;
+                            }
+                        }
+                        else
+                        {
+                            warnings.Add($"Company '{rowData.CompanyName}' not found in database");
+                        }
+                    }
+
+                    await _dbcontext.SaveChangesAsync();
+                    await transaction.CommitAsync();
+
+                    results.Add(new ImportRowResult(
+                        rowNumber,
+                        true,
+                        rowData.IqamaNo.ToString(),
+                        rowData.NameEN ?? "",
+                        rowData.NameAR ?? "",
+                        rowData.CompanyName,
+                        employeeCreated,
+                        employeeUpdated,
+                        riderCreated,
+                        riderUpdated,
+                        warnings,
+                        null
+                    ));
                 }
                 catch (Exception ex)
                 {
-                    criticalErrors.Add($"Row {row}: {ex.Message}");
+                    await transaction.RollbackAsync();
+                    failedRecords++;
+                    errors.Add($"Row {rowNumber}: {ex.Message}");
+
+                    results.Add(new ImportRowResult(
+                        rowNumber,
+                        false,
+                        "N/A", "N/A", "N/A", null,
+                        false, false, false, false,
+                        new List<string>(),
+                        $"Exception: {ex.Message}"
+                    ));
                 }
             }
 
-            // Save all records to temp table
-            await _dbcontext.TempEmployeeRiderImports.AddRangeAsync(records);
-            await _dbcontext.SaveChangesAsync();
-
-            // Calculate statistics
-            var stats = CalculateStatistics(records, criticalErrors);
-
-            return Result.Success(new ImportStagingResponse(
-                BatchId: batchId,
-                FileName: file.FileName,
-                TotalRecords: records.Count,
-                ValidRecords: records.Count(r => !r.HasErrors),
-                RecordsWithErrors: records.Count(r => r.HasErrors),
-                RecordsWithWarnings: records.Count(r => !string.IsNullOrEmpty(r.ValidationWarnings)),
-                NewEmployees: records.Count(r => r.IsNewEmployee),
-                ExistingEmployees: records.Count(r => !r.IsNewEmployee),
-                NewRiders: records.Count(r => r.IsNewRider),
-                CriticalErrors: criticalErrors,
+            var response = new DirectImportResponse(
+                TotalRecords: dataRows.Count,
+                SuccessfulEmployees: successfulEmployees,
+                SuccessfulRiders: successfulRiders,
+                FailedRecords: failedRecords,
+                Results: results,
+                Errors: errors,
                 ProcessedAt: DateTime.Now
-            ));
+            );
+
+            return Result.Success(response);
         }
         catch (Exception ex)
         {
-            return Result.Failure<ImportStagingResponse>(
+            return Result.Failure<DirectImportResponse>(
                 new Error("ProcessingError", $"Failed to process Excel file: {ex.Message}", 500));
         }
     }
 
-    private async Task<TempEmployeeRiderImport> ParseExcelRow(
-        ExcelWorksheet worksheet,
-        int row,
-        Dictionary<string, int> companies,
-        Guid batchId,
-        string fileName,
-        string uploadedBy)
+    private ColumnMapping BuildColumnMapping(IXLRow headerRow)
     {
-        var errors = new List<string>();
-        var warnings = new List<string>();
+        var mapping = new ColumnMapping();
+        var cells = headerRow.CellsUsed().ToList();
 
-        // Read raw values from Excel (adjust column indexes based on your Excel structure)
-        var iqamaNoStr = GetCellValue(worksheet, row, 1); // Column A
-        var nameAR = GetCellValue(worksheet, row, 2);      // Column B
-        var nameEN = GetCellValue(worksheet, row, 3);      // Column C
-        var iqamaEndM = GetCellValue(worksheet, row, 4);   // Column D
-        var iqamaEndH = GetCellValue(worksheet, row, 5);   // Column E
-        var passportNo = GetCellValue(worksheet, row, 6);  // Column F
-        var passportEnd = GetCellValue(worksheet, row, 7); // Column G
-        var sponsor = GetCellValue(worksheet, row, 8);     // Column H
-        var sponsorNoStr = GetCellValue(worksheet, row, 9); // Column I
-        var jobTitle = GetCellValue(worksheet, row, 10);   // Column J
-        var country = GetCellValue(worksheet, row, 11);    // Column K
-        var phone = GetCellValue(worksheet, row, 12);      // Column L
-        var dateOfBirth = GetCellValue(worksheet, row, 13); // Column M
-        var status = GetCellValue(worksheet, row, 14);     // Column N
-        var iban = GetCellValue(worksheet, row, 15);       // Column O
-        var inksaStr = GetCellValue(worksheet, row, 16);   // Column P
+        mapping.IqamaNoCol = FindColumn(cells,
+            "رقم الاقامة", "رقم الإقامة", "Iqama No", "IqamaNo", "Iqama Number", "الاقامة");
 
-        // Rider Details
-        var workingId = GetCellValue(worksheet, row, 17);  // Column Q
-        var tshirtSize = GetCellValue(worksheet, row, 18); // Column R
-        var licenseNumber = GetCellValue(worksheet, row, 19); // Column S
-        var companyName = GetCellValue(worksheet, row, 20);   // Column T
+        mapping.NameARCol = FindColumn(cells,
+            "الاسم بالعربية", "الاسم العربي", "Name AR", "NameAR", "Arabic Name");
 
-        // Parse IqamaNo
-        if (!long.TryParse(iqamaNoStr, out long iqamaNo) || iqamaNo <= 0)
-            errors.Add("Invalid or missing IqamaNo");
+        mapping.NameENCol = FindColumn(cells,
+            "الاسم بالإنجليزية", "الاسم الانجليزي", "Name EN", "NameEN", "English Name", "Name");
 
-        // Parse SponsorNo
-        long? sponsorNo = null;
-        if (!string.IsNullOrWhiteSpace(sponsorNoStr))
+        mapping.IqamaEndMCol = FindColumn(cells,
+            "تاريخ انتهاء الاقامة ميلادي", "انتهاء الاقامة", "Iqama End M", "IqamaEndM", "Iqama Expiry");
+
+        mapping.IqamaEndHCol = FindColumn(cells,
+            "تاريخ انتهاء الاقامة هجري", "Iqama End H", "IqamaEndH", "Hijri Date");
+
+        mapping.PassportNoCol = FindColumn(cells,
+            "رقم الجواز", "رقم جواز السفر", "Passport No", "PassportNo", "Passport Number");
+
+        mapping.PassportEndCol = FindColumn(cells,
+            "تاريخ انتهاء الجواز", "انتهاء الجواز", "Passport End", "PassportEnd", "Passport Expiry");
+
+        mapping.SponsorCol = FindColumn(cells,
+            "الكفيل", "اسم الكفيل", "Sponsor", "Sponsor Name");
+
+        mapping.SponsorNoCol = FindColumn(cells,
+            "رقم الكفيل", "Sponsor No", "SponsorNo", "Sponsor Number");
+
+        mapping.JobTitleCol = FindColumn(cells,
+            "المسمى الوظيفي", "الوظيفة", "Job Title", "JobTitle", "Position");
+
+        mapping.CountryCol = FindColumn(cells,
+            "الجنسية", "البلد", "Country", "Nationality");
+
+        mapping.PhoneCol = FindColumn(cells,
+            "رقم الجوال", "الجوال", "Phone", "Mobile", "Phone Number");
+
+        mapping.DateOfBirthCol = FindColumn(cells,
+            "تاريخ الميلاد", "الميلاد", "Date Of Birth", "DateOfBirth", "Birth Date", "DOB");
+
+        mapping.StatusCol = FindColumn(cells,
+            "الحالة", "Status", "Employee Status");
+
+        mapping.IBANCol = FindColumn(cells,
+            "رقم الآيبان", "الآيبان", "IBAN", "Bank Account");
+
+        mapping.INKSACol = FindColumn(cells,
+            "INKSA", "في السعودية", "In KSA");
+
+        mapping.WorkingIdCol = FindColumn(cells,
+            "معرف العمل", "رقم العمل", "Working ID", "WorkingID", "Work ID", "Employee ID");
+
+        mapping.TshirtSizeCol = FindColumn(cells,
+            "مقاس القميص", "القميص", "Tshirt Size", "T-shirt", "Shirt Size");
+
+        mapping.LicenseNumberCol = FindColumn(cells,
+            "رقم الرخصة", "الرخصة", "License Number", "License No", "Driving License");
+
+        mapping.CompanyNameCol = FindColumn(cells,
+            "اسم الشركة", "الشركة", "Company Name", "Company", "اسم شركة العميل");
+
+        // Validate required columns
+        var missing = new List<string>();
+        if (mapping.IqamaNoCol == 0) missing.Add("Iqama Number");
+        if (mapping.NameARCol == 0) missing.Add("Name AR");
+        if (mapping.NameENCol == 0) missing.Add("Name EN");
+
+        if (missing.Any())
         {
-            if (long.TryParse(sponsorNoStr, out long parsedSponsorNo))
-                sponsorNo = parsedSponsorNo;
-            else
-                warnings.Add("Invalid SponsorNo format");
-        }
-
-        // Parse INKSA
-        bool inksa = true;
-        if (!string.IsNullOrWhiteSpace(inksaStr))
-        {
-            if (bool.TryParse(inksaStr, out bool parsedInksa))
-                inksa = parsedInksa;
-            else if (inksaStr.ToLower() == "yes" || inksaStr == "1")
-                inksa = true;
-            else if (inksaStr.ToLower() == "no" || inksaStr == "0")
-                inksa = false;
-        }
-
-        // Validate required fields
-        if (string.IsNullOrWhiteSpace(nameAR))
-            errors.Add("NameAR is required");
-        if (string.IsNullOrWhiteSpace(nameEN))
-            errors.Add("NameEN is required");
-
-        // Check if employee exists
-        var existingEmployee = await _dbcontext.Employees
-            .AsNoTracking()
-            .FirstOrDefaultAsync(e => e.IqamaNo == iqamaNo);
-
-        bool isNewEmployee = existingEmployee == null;
-
-        // Check if rider exists
-        var existingRider = await _dbcontext.RiderDetails
-            .AsNoTracking()
-            .FirstOrDefaultAsync(r => r.EmployeeIqamaNo == iqamaNo);
-
-        bool isNewRider = existingRider == null;
-
-        // Resolve Company
-        int? companyId = null;
-        if (!string.IsNullOrWhiteSpace(companyName))
-        {
-            if (companies.TryGetValue(companyName.ToLower(), out int foundCompanyId))
-            {
-                companyId = foundCompanyId;
-            }
-            else
-            {
-                errors.Add($"Company '{companyName}' not found in database");
-            }
-        }
-        else if (!isNewRider)
-        {
-            // If updating existing rider, company is not required
-            warnings.Add("No company specified, will keep existing company");
+            mapping.IsValid = false;
+            mapping.ErrorMessage = $"Required columns missing: {string.Join(", ", missing)}";
         }
         else
         {
-            errors.Add("Company name is required for new riders");
+            mapping.IsValid = true;
         }
 
-        // Parse dates
-        var parsedIqamaEndM = ParseDate(iqamaEndM, "IqamaEndM", errors, warnings);
-        var parsedIqamaEndH = ParseHijriDate(iqamaEndH, "IqamaEndH", errors, warnings);
-        var parsedPassportEnd = ParseDate(passportEnd, "PassportEnd", errors, warnings);
-        var parsedDateOfBirth = ParseDate(dateOfBirth, "DateOfBirth", errors, warnings);
-
-        // Validate status
-        if (!string.IsNullOrWhiteSpace(status) &&
-            !EmployeeStatus.IsValid(status))
-        {
-            errors.Add($"Invalid status '{status}'. Valid: {string.Join(", ", EmployeeStatus.ValidStatuses)}");
-        }
-
-        var record = new TempEmployeeRiderImport
-        {
-            BatchId = batchId,
-            FileName = fileName,
-            RowNumber = row,
-            UploadedBy = uploadedBy,
-
-            // Employee data
-            IqamaNo = iqamaNo,
-            NameAR = nameAR,
-            NameEN = nameEN,
-            IqamaEndM = iqamaEndM,
-            IqamaEndH = iqamaEndH,
-            PassportNo = passportNo,
-            PassportEnd = passportEnd,
-            Sponsor = sponsor,
-            SponsorNo = sponsorNo,
-            JobTitle = jobTitle,
-            Country = country,
-            Phone = phone,
-            DateOfBirth = dateOfBirth,
-            Status = status,
-            IBAN = iban,
-            INKSA = inksa,
-
-            // Rider data
-            WorkingId = workingId,
-            TshirtSize = tshirtSize,
-            LicenseNumber = licenseNumber,
-            CompanyName = companyName,
-            CompanyId = companyId,
-
-            // Parsed dates
-            ParsedIqamaEndM = parsedIqamaEndM,
-            ParsedIqamaEndH = parsedIqamaEndH,
-            ParsedPassportEnd = parsedPassportEnd,
-            ParsedDateOfBirth = parsedDateOfBirth,
-
-            // Status
-            IsNewEmployee = isNewEmployee,
-            IsNewRider = isNewRider,
-            HasErrors = errors.Count > 0,
-            ValidationErrors = errors.Count > 0 ? JsonSerializer.Serialize(errors) : null,
-            ValidationWarnings = warnings.Count > 0 ? JsonSerializer.Serialize(warnings) : null
-        };
-
-        return record;
+        return mapping;
     }
 
-    private string GetCellValue(ExcelWorksheet worksheet, int row, int col)
+    private int FindColumn(List<IXLCell> cells, params string[] possibleNames)
     {
-        var cellValue = worksheet.Cells[row, col].Value;
-        return cellValue?.ToString()?.Trim() ?? string.Empty;
+        foreach (var cell in cells)
+        {
+            var headerValue = cell.Value.ToString().Trim();
+            foreach (var name in possibleNames)
+            {
+                if (headerValue.Equals(name, StringComparison.OrdinalIgnoreCase))
+                {
+                    return cell.Address.ColumnNumber;
+                }
+            }
+        }
+        return 0;
     }
 
-    private DateOnly? ParseDate(string dateStr, string fieldName, List<string> errors, List<string> warnings)
+    private RowData ParseRowData(IXLRow row, ColumnMapping map, int rowNumber)
+    {
+        var data = new RowData { RowNumber = rowNumber };
+        var errors = new List<string>();
+
+        try
+        {
+            // Parse Iqama Number (REQUIRED)
+            var iqamaStr = GetCellValue(row, map.IqamaNoCol);
+            if (string.IsNullOrWhiteSpace(iqamaStr))
+            {
+                data.IsValid = false;
+                data.ErrorMessage = "Iqama Number is required";
+                return data;
+            }
+
+            if (!long.TryParse(iqamaStr.Replace(" ", ""), out long iqamaNo) || iqamaNo <= 0)
+            {
+                data.IsValid = false;
+                data.ErrorMessage = $"Invalid Iqama Number: {iqamaStr}";
+                return data;
+            }
+            data.IqamaNo = iqamaNo;
+
+            // Parse Names (REQUIRED)
+            data.NameAR = GetCellValue(row, map.NameARCol);
+            data.NameEN = GetCellValue(row, map.NameENCol);
+
+            if (string.IsNullOrWhiteSpace(data.NameAR))
+            {
+                data.IsValid = false;
+                data.ErrorMessage = "Name AR is required";
+                return data;
+            }
+
+            if (string.IsNullOrWhiteSpace(data.NameEN))
+            {
+                data.IsValid = false;
+                data.ErrorMessage = "Name EN is required";
+                return data;
+            }
+
+            // Parse Dates
+            data.IqamaEndM = ParseGregorianDate(GetCellValue(row, map.IqamaEndMCol));
+            data.IqamaEndH = ParseHijriDate(GetCellValue(row, map.IqamaEndHCol));
+            data.PassportEnd = ParseGregorianDate(GetCellValue(row, map.PassportEndCol));
+            data.DateOfBirth = ParseGregorianDate(GetCellValue(row, map.DateOfBirthCol));
+
+            // Default dates if missing
+            data.IqamaEndM ??= DateOnly.FromDateTime(DateTime.Now.AddYears(1));
+            data.IqamaEndH ??= DateOnly.FromDateTime(DateTime.Now.AddYears(1));
+            data.DateOfBirth ??= DateOnly.FromDateTime(new DateTime(1990, 1, 1));
+
+            // Parse other fields
+            data.PassportNo = GetCellValue(row, map.PassportNoCol);
+            data.Sponsor = GetCellValue(row, map.SponsorCol) ?? "Default Sponsor";
+
+            var sponsorNoStr = GetCellValue(row, map.SponsorNoCol);
+            data.SponsorNo = long.TryParse(sponsorNoStr?.Replace(" ", ""), out long sNo) ? sNo : 0;
+
+            data.JobTitle = GetCellValue(row, map.JobTitleCol) ?? "Employee";
+            data.Country = GetCellValue(row, map.CountryCol) ?? "Unknown";
+            data.Phone = GetCellValue(row, map.PhoneCol) ?? "";
+            data.Status = GetCellValue(row, map.StatusCol) ?? "enable";
+            data.IBAN = GetCellValue(row, map.IBANCol);
+
+            // Parse INKSA
+            var inksaStr = GetCellValue(row, map.INKSACol);
+            data.INKSA = string.IsNullOrWhiteSpace(inksaStr) ||
+                         inksaStr.ToLower() == "yes" ||
+                         inksaStr == "1" ||
+                         inksaStr.ToLower() == "true";
+
+            // Rider fields
+            data.WorkingId = GetCellValue(row, map.WorkingIdCol);
+            data.TshirtSize = GetCellValue(row, map.TshirtSizeCol);
+            data.LicenseNumber = GetCellValue(row, map.LicenseNumberCol);
+            data.CompanyName = GetCellValue(row, map.CompanyNameCol);
+
+            data.IsValid = true;
+        }
+        catch (Exception ex)
+        {
+            data.IsValid = false;
+            data.ErrorMessage = $"Error parsing row: {ex.Message}";
+        }
+
+        return data;
+    }
+
+    private string? GetCellValue(IXLRow row, int columnIndex)
+    {
+        if (columnIndex == 0) return null;
+
+        try
+        {
+            var cell = row.Cell(columnIndex);
+            if (cell.IsEmpty()) return null;
+
+            // Handle different cell types
+            if (cell.DataType == XLDataType.DateTime)
+            {
+                return cell.GetDateTime().ToString("dd/MM/yyyy");
+            }
+
+            if (cell.DataType == XLDataType.Number)
+            {
+                return cell.GetDouble().ToString();
+            }
+
+            if (cell.DataType == XLDataType.Text)
+            {
+                return cell.GetText().Trim();
+            }
+
+            if (cell.DataType == XLDataType.Boolean)
+            {
+                return cell.GetBoolean().ToString();
+            }
+
+            // Fallback: try to get string representation
+            var cellValue = cell.Value;
+            return cellValue.ToString()?.Trim();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private DateOnly? ParseGregorianDate(string? dateStr)
     {
         if (string.IsNullOrWhiteSpace(dateStr))
             return null;
 
-        // Try multiple date formats
+        // Try multiple formats
         string[] formats = {
-            "dd/MM/yyyy", "d/M/yyyy",
-            "MM/dd/yyyy", "M/d/yyyy",
-            "yyyy-MM-dd", "yyyy/MM/dd",
-            "dd-MM-yyyy", "d-M-yyyy"
+            "dd/MM/yyyy", "d/M/yyyy", "dd-MM-yyyy", "d-M-yyyy",
+            "MM/dd/yyyy", "M/d/yyyy", "MM-dd-yyyy", "M-d-yyyy",
+            "yyyy/MM/dd", "yyyy-MM-dd", "yyyy/M/d", "yyyy-M-d",
+            "dd.MM.yyyy", "d.M.yyyy"
         };
 
         foreach (var format in formats)
         {
-            if (DateTime.TryParseExact(dateStr, format, CultureInfo.InvariantCulture,
-                DateTimeStyles.None, out DateTime parsedDate))
+            if (DateTime.TryParseExact(dateStr, format,
+                CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime date))
             {
-                return DateOnly.FromDateTime(parsedDate);
+                return DateOnly.FromDateTime(date);
             }
         }
 
-        // Try default parsing
-        if (DateTime.TryParse(dateStr, out DateTime date))
+        // Try general parsing
+        if (DateTime.TryParse(dateStr, out DateTime generalDate))
         {
-            return DateOnly.FromDateTime(date);
+            return DateOnly.FromDateTime(generalDate);
         }
 
-        warnings.Add($"{fieldName}: Could not parse date '{dateStr}'");
         return null;
     }
 
-    private DateOnly? ParseHijriDate(string hijriDateStr, string fieldName,
-        List<string> errors, List<string> warnings)
+    private DateOnly? ParseHijriDate(string? hijriDateStr)
     {
         if (string.IsNullOrWhiteSpace(hijriDateStr))
             return null;
 
         try
         {
-            // Parse Hijri date format like "01/04/1447"
-            var parts = hijriDateStr.Split('/');
-            if (parts.Length == 3 &&
-                int.TryParse(parts[0], out int day) &&
-                int.TryParse(parts[1], out int month) &&
-                int.TryParse(parts[2], out int year))
-            {
-                // Create Hijri calendar date
-                var hijriCalendar = new System.Globalization.HijriCalendar();
+            // Expected format: DD/MM/YYYY (Hijri)
+            var parts = hijriDateStr.Split('/', '-');
+            if (parts.Length != 3)
+                return null;
 
-                // Validate Hijri date
-                if (year >= 1300 && year <= 1500 &&
-                    month >= 1 && month <= 12 &&
-                    day >= 1 && day <= hijriCalendar.GetDaysInMonth(year, month))
-                {
-                    var gregorianDate = hijriCalendar.ToDateTime(year, month, day, 0, 0, 0, 0);
-                    return DateOnly.FromDateTime(gregorianDate);
-                }
-            }
+            if (!int.TryParse(parts[0], out int day) ||
+                !int.TryParse(parts[1], out int month) ||
+                !int.TryParse(parts[2], out int year))
+                return null;
 
-            warnings.Add($"{fieldName}: Invalid Hijri date format '{hijriDateStr}'");
+            // Validate Hijri date ranges
+            if (year < 1300 || year > 1500 ||
+                month < 1 || month > 12 ||
+                day < 1 || day > 30)
+                return null;
+
+            var hijriCalendar = new HijriCalendar();
+
+            // Ensure the day is valid for the month
+            int maxDays = hijriCalendar.GetDaysInMonth(year, month);
+            if (day > maxDays)
+                day = maxDays;
+
+            var gregorianDate = hijriCalendar.ToDateTime(year, month, day, 0, 0, 0, 0);
+            return DateOnly.FromDateTime(gregorianDate);
+        }
+        catch
+        {
             return null;
         }
-        catch (Exception ex)
-        {
-            warnings.Add($"{fieldName}: Error parsing Hijri date '{hijriDateStr}': {ex.Message}");
-            return null;
-        }
     }
 
-    private ImportStatisticsResponse CalculateStatistics(
-        List<TempEmployeeRiderImport> records,
-        List<string> criticalErrors)
+    private async Task<(bool created, bool updated, string? error)> ProcessEmployee(
+        RowData data,
+        List<string> warnings)
     {
-        var errorBreakdown = new Dictionary<string, int>();
-        var companyBreakdown = new Dictionary<string, int>();
-
-        foreach (var record in records)
+        try
         {
-            if (!string.IsNullOrEmpty(record.ValidationErrors))
+            var employee = await _dbcontext.Employees
+                .FirstOrDefaultAsync(e => e.IqamaNo == data.IqamaNo);
+
+            if (employee == null)
             {
-                var errors = JsonSerializer.Deserialize<List<string>>(record.ValidationErrors);
-                foreach (var error in errors ?? new List<string>())
+                // Create new employee
+                employee = new Employees
                 {
-                    var errorType = error.Split(':')[0];
-                    errorBreakdown[errorType] = errorBreakdown.GetValueOrDefault(errorType) + 1;
+                    IqamaNo = data.IqamaNo,
+                    NameAR = data.NameAR!,
+                    NameEN = data.NameEN!,
+                    IqamaEndM = data.IqamaEndM!.Value,
+                    IqamaEndH = data.IqamaEndH!.Value,
+                    PassportNo = data.PassportNo,
+                    PassportEnd = data.PassportEnd,
+                    Sponsor = data.Sponsor!,
+                    sponsorNo = data.SponsorNo,
+                    JobTitle = data.JobTitle!,
+                    Country = data.Country!,
+                    Phone = data.Phone!,
+                    DateOfBirth = data.DateOfBirth!.Value,
+                    Status = data.Status!,
+                    IBAN = data.IBAN,
+                    INKSA = data.INKSA,
+                    CreatedAt = DateTime.Now
+                };
+
+                await _dbcontext.Employees.AddAsync(employee);
+                await _dbcontext.SaveChangesAsync();
+
+                return (true, false, null);
+            }
+            else
+            {
+                // Update existing employee
+                bool hasChanges = false;
+
+                if (data.IqamaEndM.HasValue && employee.IqamaEndM != data.IqamaEndM.Value)
+                {
+                    employee.IqamaEndM = data.IqamaEndM.Value;
+                    hasChanges = true;
                 }
-            }
 
-            if (!string.IsNullOrEmpty(record.CompanyName))
-            {
-                companyBreakdown[record.CompanyName] =
-                    companyBreakdown.GetValueOrDefault(record.CompanyName) + 1;
-            }
-        }
-
-        return new ImportStatisticsResponse(
-            BatchId: records.FirstOrDefault()?.BatchId ?? Guid.Empty,
-            FileName: records.FirstOrDefault()?.FileName ?? "",
-            TotalRecords: records.Count,
-            ValidRecords: records.Count(r => !r.HasErrors),
-            RecordsWithErrors: records.Count(r => r.HasErrors),
-            RecordsWithWarnings: records.Count(r => !string.IsNullOrEmpty(r.ValidationWarnings)),
-            NewEmployees: records.Count(r => r.IsNewEmployee),
-            ExistingEmployees: records.Count(r => !r.IsNewEmployee),
-            NewRiders: records.Count(r => r.IsNewRider),
-            ResolvedRecords: 0,
-            PendingRecords: records.Count,
-            ErrorBreakdown: errorBreakdown,
-            CompanyBreakdown: companyBreakdown,
-            UploadedAt: records.FirstOrDefault()?.UploadedAt ?? DateTime.Now
-        );
-    }
-
-    public async Task<Result<IEnumerable<TempEmployeeRiderImportResponse>>> GetPendingImportsAsync(
-        Guid? batchId = null)
-    {
-        try
-        {
-            var query = _dbcontext.TempEmployeeRiderImports
-                .Where(t => !t.IsResolved);
-
-            if (batchId.HasValue)
-                query = query.Where(t => t.BatchId == batchId.Value);
-
-            var imports = await query
-                .OrderBy(t => t.RowNumber)
-                .ToListAsync();
-
-            var responses = imports.Select(MapToResponse).ToList();
-
-            return Result.Success<IEnumerable<TempEmployeeRiderImportResponse>>(responses);
-        }
-        catch (Exception ex)
-        {
-            return Result.Failure<IEnumerable<TempEmployeeRiderImportResponse>>(
-                new Error("GetError", $"Failed to get pending imports: {ex.Message}", 500));
-        }
-    }
-
-    public async Task<Result<ImportStatisticsResponse>> GetImportStatisticsAsync(Guid batchId)
-    {
-        try
-        {
-            var records = await _dbcontext.TempEmployeeRiderImports
-                .Where(t => t.BatchId == batchId)
-                .ToListAsync();
-
-            if (!records.Any())
-                return Result.Failure<ImportStatisticsResponse>(
-                    new Error("NotFound", "Batch not found", 404));
-
-            var stats = CalculateStatistics(records, new List<string>());
-            stats = stats with
-            {
-                ResolvedRecords = records.Count(r => r.IsResolved),
-                PendingRecords = records.Count(r => !r.IsResolved)
-            };
-
-            return Result.Success(stats);
-        }
-        catch (Exception ex)
-        {
-            return Result.Failure<ImportStatisticsResponse>(
-                new Error("GetError", $"Failed to get statistics: {ex.Message}", 500));
-        }
-    }
-
-    public async Task<Result<ImportResolutionResponse>> ApproveValidRecordsAsync(
-        Guid batchId,
-        string resolvedBy,
-        string? adminNotes = null)
-    {
-        using var transaction = await _dbcontext.Database.BeginTransactionAsync();
-        try
-        {
-            var records = await _dbcontext.TempEmployeeRiderImports
-                .Where(t => t.BatchId == batchId && !t.IsResolved && !t.HasErrors)
-                .ToListAsync();
-
-            if (!records.Any())
-                return Result.Failure<ImportResolutionResponse>(
-                    new Error("NoRecords", "No valid records found in batch", 404));
-
-            var response = await ProcessRecords(records, resolvedBy, adminNotes);
-
-            await _dbcontext.SaveChangesAsync();
-            await transaction.CommitAsync();
-
-            return Result.Success(response);
-        }
-        catch (Exception ex)
-        {
-            await transaction.RollbackAsync();
-            return Result.Failure<ImportResolutionResponse>(
-                new Error("ApproveError", $"Failed to approve records: {ex.Message}", 500));
-        }
-    }
-
-    public async Task<Result> RejectBatchAsync(
-        Guid batchId,
-        string resolvedBy,
-        string reason)
-    {
-        try
-        {
-            var records = await _dbcontext.TempEmployeeRiderImports
-                .Where(t => t.BatchId == batchId && !t.IsResolved)
-                .ToListAsync();
-
-            foreach (var record in records)
-            {
-                record.IsResolved = true;
-                record.Resolution = "Rejected";
-                record.ResolvedBy = resolvedBy;
-                record.ResolvedAt = DateTime.Now;
-                record.AdminNotes = reason;
-            }
-
-            await _dbcontext.SaveChangesAsync();
-            return Result.Success();
-        }
-        catch (Exception ex)
-        {
-            return Result.Failure(
-                new Error("RejectError", $"Failed to reject batch: {ex.Message}", 500));
-        }
-    }
-
-    public async Task<Result<ImportResolutionResponse>> ApproveSelectedRecordsAsync(
-        List<int> recordIds,
-        string resolvedBy,
-        string? adminNotes = null)
-    {
-        using var transaction = await _dbcontext.Database.BeginTransactionAsync();
-        try
-        {
-            var records = await _dbcontext.TempEmployeeRiderImports
-                .Where(t => recordIds.Contains(t.Id) && !t.IsResolved)
-                .ToListAsync();
-
-            if (!records.Any())
-                return Result.Failure<ImportResolutionResponse>(
-                    new Error("NoRecords", "No valid records found", 404));
-
-            var response = await ProcessRecords(records, resolvedBy, adminNotes);
-
-            await _dbcontext.SaveChangesAsync();
-            await transaction.CommitAsync();
-
-            return Result.Success(response);
-        }
-        catch (Exception ex)
-        {
-            await transaction.RollbackAsync();
-            return Result.Failure<ImportResolutionResponse>(
-                new Error("ApproveError", $"Failed to approve records: {ex.Message}", 500));
-        }
-    }
-
-    public async Task<Result<IEnumerable<ImportBatchSummary>>> GetAllBatchesAsync()
-    {
-        try
-        {
-            var batches = await _dbcontext.TempEmployeeRiderImports
-                .GroupBy(t => t.BatchId)
-                .Select(g => new ImportBatchSummary(
-                    BatchId: g.Key,
-                    FileName: g.First().FileName ?? "",
-                    TotalRecords: g.Count(),
-                    ValidRecords: g.Count(t => !t.HasErrors),
-                    RecordsWithErrors: g.Count(t => t.HasErrors),
-                    IsResolved: g.All(t => t.IsResolved),
-                    UploadedAt: g.First().UploadedAt,
-                    UploadedBy: g.First().UploadedBy
-                ))
-                .OrderByDescending(b => b.UploadedAt)
-                .ToListAsync();
-
-            return Result.Success<IEnumerable<ImportBatchSummary>>(batches);
-        }
-        catch (Exception ex)
-        {
-            return Result.Failure<IEnumerable<ImportBatchSummary>>(
-                new Error("GetError", $"Failed to get batches: {ex.Message}", 500));
-        }
-    }
-
-    private async Task<ImportResolutionResponse> ProcessRecords(
-        List<TempEmployeeRiderImport> records,
-        string resolvedBy,
-        string? adminNotes)
-    {
-        int successfulEmployees = 0;
-        int successfulRiders = 0;
-        int failed = 0;
-        var details = new List<string>();
-        var errors = new List<string>();
-
-        foreach (var record in records)
-        {
-            try
-            {
-                // Process Employee
-                var employee = await ProcessEmployee(record);
-                if (employee != null)
+                if (data.IqamaEndH.HasValue && employee.IqamaEndH != data.IqamaEndH.Value)
                 {
-                    successfulEmployees++;
+                    employee.IqamaEndH = data.IqamaEndH.Value;
+                    hasChanges = true;
+                }
 
-                    // Process Rider if applicable
-                    if (!string.IsNullOrWhiteSpace(record.WorkingId) || record.CompanyId.HasValue)
-                    {
-                        var riderSuccess = await ProcessRider(record, employee);
-                        if (riderSuccess)
-                        {
-                            successfulRiders++;
-                            details.Add($"Row {record.RowNumber}: Employee and Rider created/updated");
-                        }
-                        else
-                        {
-                            details.Add($"Row {record.RowNumber}: Employee created but Rider failed");
-                        }
-                    }
-                    else
-                    {
-                        details.Add($"Row {record.RowNumber}: Employee created (no rider data)");
-                    }
+                if (!string.IsNullOrWhiteSpace(data.PassportNo) && employee.PassportNo != data.PassportNo)
+                {
+                    employee.PassportNo = data.PassportNo;
+                    hasChanges = true;
+                }
+
+                if (data.PassportEnd.HasValue && employee.PassportEnd != data.PassportEnd)
+                {
+                    employee.PassportEnd = data.PassportEnd;
+                    hasChanges = true;
+                }
+
+                if (!string.IsNullOrWhiteSpace(data.Sponsor) && employee.Sponsor != data.Sponsor)
+                {
+                    employee.Sponsor = data.Sponsor;
+                    hasChanges = true;
+                }
+
+                if (data.SponsorNo != 0 && employee.sponsorNo != data.SponsorNo)
+                {
+                    employee.sponsorNo = data.SponsorNo;
+                    hasChanges = true;
+                }
+
+                if (!string.IsNullOrWhiteSpace(data.JobTitle) && employee.JobTitle != data.JobTitle)
+                {
+                    employee.JobTitle = data.JobTitle;
+                    hasChanges = true;
+                }
+
+                if (!string.IsNullOrWhiteSpace(data.NameAR) && employee.NameAR != data.NameAR)
+                {
+                    employee.NameAR = data.NameAR;
+                    hasChanges = true;
+                }
+
+                if (!string.IsNullOrWhiteSpace(data.NameEN) && employee.NameEN != data.NameEN)
+                {
+                    employee.NameEN = data.NameEN;
+                    hasChanges = true;
+                }
+
+                if (!string.IsNullOrWhiteSpace(data.Country) && employee.Country != data.Country)
+                {
+                    employee.Country = data.Country;
+                    hasChanges = true;
+                }
+
+                if (!string.IsNullOrWhiteSpace(data.Phone) && employee.Phone != data.Phone)
+                {
+                    employee.Phone = data.Phone;
+                    hasChanges = true;
+                }
+
+                if (data.DateOfBirth.HasValue && employee.DateOfBirth != data.DateOfBirth.Value)
+                {
+                    employee.DateOfBirth = data.DateOfBirth.Value;
+                    hasChanges = true;
+                }
+
+                if (!string.IsNullOrWhiteSpace(data.Status) && employee.Status != data.Status)
+                {
+                    employee.Status = data.Status;
+                    hasChanges = true;
+                }
+
+                if (!string.IsNullOrWhiteSpace(data.IBAN) && employee.IBAN != data.IBAN)
+                {
+                    employee.IBAN = data.IBAN;
+                    hasChanges = true;
+                }
+
+                employee.INKSA = data.INKSA;
+
+                if (hasChanges)
+                {
+                    await _dbcontext.SaveChangesAsync();
+                    warnings.Add("Employee record updated with new data");
+                    return (false, true, null);
                 }
                 else
                 {
-                    failed++;
-                    errors.Add($"Row {record.RowNumber}: Failed to process employee");
+                    warnings.Add("Employee exists with same data - no changes made");
+                    return (false, false, null);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            return (false, false, $"Employee processing error: {ex.Message}");
+        }
+    }
+
+    private async Task<(bool created, bool updated, string? error)> ProcessRider(
+        RowData data,
+        List<string> warnings)
+    {
+        try
+        {
+            if (!data.CompanyId.HasValue)
+            {
+                return (false, false, "Company ID not resolved");
+            }
+
+            var rider = await _dbcontext.RiderDetails
+                .FirstOrDefaultAsync(r => r.EmployeeIqamaNo == data.IqamaNo);
+
+            if (rider == null)
+            {
+                // Create new rider only if we have at least WorkingId or CompanyId
+                if (string.IsNullOrWhiteSpace(data.WorkingId) && !data.CompanyId.HasValue)
+                {
+                    warnings.Add("No rider data provided - skipping rider creation");
+                    return (false, false, null);
                 }
 
-                // Mark as resolved
-                record.IsResolved = true;
-                record.Resolution = "Approved";
-                record.ResolvedBy = resolvedBy;
-                record.ResolvedAt = DateTime.Now;
-                record.AdminNotes = adminNotes;
+                rider = new RiderDetails
+                {
+                    EmployeeIqamaNo = data.IqamaNo,
+                    WorkingId = data.WorkingId,
+                    TshirtSize = data.TshirtSize,
+                    LicenseNumber = data.LicenseNumber,
+                    CompanyId = data.CompanyId.Value,
+                    CreatedAt = DateTime.Now
+                };
+
+                await _dbcontext.RiderDetails.AddAsync(rider);
+                await _dbcontext.SaveChangesAsync();
+
+                return (true, false, null);
             }
-            catch (Exception ex)
+            else
             {
-                failed++;
-                errors.Add($"Row {record.RowNumber}: {ex.Message}");
+                // Update existing rider
+                bool hasChanges = false;
 
-                record.IsResolved = true;
-                record.Resolution = "Failed";
-                record.ResolvedBy = resolvedBy;
-                record.ResolvedAt = DateTime.Now;
-                record.AdminNotes = ex.Message;
+                if (!string.IsNullOrWhiteSpace(data.WorkingId) && rider.WorkingId != data.WorkingId)
+                {
+                    rider.WorkingId = data.WorkingId;
+                    hasChanges = true;
+                }
+
+                if (!string.IsNullOrWhiteSpace(data.TshirtSize) && rider.TshirtSize != data.TshirtSize)
+                {
+                    rider.TshirtSize = data.TshirtSize;
+                    hasChanges = true;
+                }
+
+                if (!string.IsNullOrWhiteSpace(data.LicenseNumber) && rider.LicenseNumber != data.LicenseNumber)
+                {
+                    rider.LicenseNumber = data.LicenseNumber;
+                    hasChanges = true;
+                }
+
+                if (data.CompanyId.HasValue && rider.CompanyId != data.CompanyId.Value)
+                {
+                    rider.CompanyId = data.CompanyId.Value;
+                    hasChanges = true;
+                    warnings.Add($"Rider company changed to {data.CompanyName}");
+                }
+
+                if (hasChanges)
+                {
+                    await _dbcontext.SaveChangesAsync();
+                    warnings.Add("Rider record updated with new data");
+                    return (false, true, null);
+                }
+                else
+                {
+                    warnings.Add("Rider exists with same data - no changes made");
+                    return (false, false, null);
+                }
             }
         }
-
-        return new ImportResolutionResponse(
-            TotalProcessed: records.Count,
-            SuccessfulEmployees: successfulEmployees,
-            SuccessfulRiders: successfulRiders,
-            Failed: failed,
-            Details: details,
-            Errors: errors
-        );
-    }
-
-    private async Task<Employees?> ProcessEmployee(TempEmployeeRiderImport record)
-    {
-        var employee = await _dbcontext.Employees
-            .FirstOrDefaultAsync(e => e.IqamaNo == record.IqamaNo);
-
-        if (employee == null)
+        catch (Exception ex)
         {
-            // Create new employee
-            employee = new Employees
-            {
-                IqamaNo = record.IqamaNo,
-                NameAR = record.NameAR ?? "",
-                NameEN = record.NameEN ?? "",
-                IqamaEndM = record.ParsedIqamaEndM ?? DateOnly.MinValue,
-                IqamaEndH = record.ParsedIqamaEndH ?? DateOnly.MinValue,
-                PassportNo = record.PassportNo,
-                PassportEnd = record.ParsedPassportEnd,
-                Sponsor = record.Sponsor ?? "",
-                sponsorNo = record.SponsorNo ?? 0,
-                JobTitle = record.JobTitle ?? "",
-                Country = record.Country ?? "",
-                Phone = record.Phone ?? "",
-                DateOfBirth = record.ParsedDateOfBirth ?? DateOnly.MinValue,
-                Status = record.Status ?? "enable",
-                IBAN = record.IBAN,
-                INKSA = record.INKSA,
-                CreatedAt = DateTime.Now
-            };
-
-            await _dbcontext.Employees.AddAsync(employee);
+            return (false, false, $"Rider processing error: {ex.Message}");
         }
-        else
-        {
-            // Update existing employee
-            if (record.ParsedIqamaEndM.HasValue)
-                employee.IqamaEndM = record.ParsedIqamaEndM.Value;
-            if (record.ParsedIqamaEndH.HasValue)
-                employee.IqamaEndH = record.ParsedIqamaEndH.Value;
-            if (!string.IsNullOrWhiteSpace(record.PassportNo))
-                employee.PassportNo = record.PassportNo;
-            if (record.ParsedPassportEnd.HasValue)
-                employee.PassportEnd = record.ParsedPassportEnd;
-            if (!string.IsNullOrWhiteSpace(record.Sponsor))
-                employee.Sponsor = record.Sponsor;
-            if (record.SponsorNo.HasValue)
-                employee.sponsorNo = record.SponsorNo.Value;
-            if (!string.IsNullOrWhiteSpace(record.JobTitle))
-                employee.JobTitle = record.JobTitle;
-            if (!string.IsNullOrWhiteSpace(record.NameAR))
-                employee.NameAR = record.NameAR;
-            if (!string.IsNullOrWhiteSpace(record.NameEN))
-                employee.NameEN = record.NameEN;
-            if (!string.IsNullOrWhiteSpace(record.Country))
-                employee.Country = record.Country;
-            if (!string.IsNullOrWhiteSpace(record.Phone))
-                employee.Phone = record.Phone;
-            if (record.ParsedDateOfBirth.HasValue)
-                employee.DateOfBirth = record.ParsedDateOfBirth.Value;
-            if (!string.IsNullOrWhiteSpace(record.Status))
-                employee.Status = record.Status;
-            if (!string.IsNullOrWhiteSpace(record.IBAN))
-                employee.IBAN = record.IBAN;
-
-            employee.INKSA = record.INKSA;
-        }
-
-        await _dbcontext.SaveChangesAsync();
-        return employee;
     }
+}
 
-    private async Task<bool> ProcessRider(TempEmployeeRiderImport record, Employees employee)
-    {
-        var rider = await _dbcontext.RiderDetails
-            .FirstOrDefaultAsync(r => r.EmployeeIqamaNo == record.IqamaNo);
+// Helper classes
+internal class ColumnMapping
+{
+    public bool IsValid { get; set; }
+    public string? ErrorMessage { get; set; }
 
-        if (rider == null && record.CompanyId.HasValue)
-        {
-            // Create new rider
-            rider = new RiderDetails
-            {
-                EmployeeIqamaNo = record.IqamaNo,
-                WorkingId = record.WorkingId,
-                TshirtSize = record.TshirtSize,
-                LicenseNumber = record.LicenseNumber,
-                CompanyId = record.CompanyId.Value,
-                CreatedAt = DateTime.Now
-            };
+    // Employee columns
+    public int IqamaNoCol { get; set; }
+    public int NameARCol { get; set; }
+    public int NameENCol { get; set; }
+    public int IqamaEndMCol { get; set; }
+    public int IqamaEndHCol { get; set; }
+    public int PassportNoCol { get; set; }
+    public int PassportEndCol { get; set; }
+    public int SponsorCol { get; set; }
+    public int SponsorNoCol { get; set; }
+    public int JobTitleCol { get; set; }
+    public int CountryCol { get; set; }
+    public int PhoneCol { get; set; }
+    public int DateOfBirthCol { get; set; }
+    public int StatusCol { get; set; }
+    public int IBANCol { get; set; }
+    public int INKSACol { get; set; }
 
-            await _dbcontext.RiderDetails.AddAsync(rider);
-        }
-        else if (rider != null)
-        {
-            // Update existing rider
-            if (!string.IsNullOrWhiteSpace(record.WorkingId))
-                rider.WorkingId = record.WorkingId;
-            if (!string.IsNullOrWhiteSpace(record.TshirtSize))
-                rider.TshirtSize = record.TshirtSize;
-            if (!string.IsNullOrWhiteSpace(record.LicenseNumber))
-                rider.LicenseNumber = record.LicenseNumber;
-            if (record.CompanyId.HasValue)
-                rider.CompanyId = record.CompanyId.Value;
-        }
+    // Rider columns
+    public int WorkingIdCol { get; set; }
+    public int TshirtSizeCol { get; set; }
+    public int LicenseNumberCol { get; set; }
+    public int CompanyNameCol { get; set; }
+}
 
-        await _dbcontext.SaveChangesAsync();
-        return true;
-    }
+internal class RowData
+{
+    public int RowNumber { get; set; }
+    public bool IsValid { get; set; }
+    public string? ErrorMessage { get; set; }
 
-    private TempEmployeeRiderImportResponse MapToResponse(TempEmployeeRiderImport import)
-    {
-        var errors = string.IsNullOrEmpty(import.ValidationErrors)
-            ? new List<string>()
-            : JsonSerializer.Deserialize<List<string>>(import.ValidationErrors) ?? new List<string>();
+    // Employee data
+    public long IqamaNo { get; set; }
+    public string? NameAR { get; set; }
+    public string? NameEN { get; set; }
+    public DateOnly? IqamaEndM { get; set; }
+    public DateOnly? IqamaEndH { get; set; }
+    public string? PassportNo { get; set; }
+    public DateOnly? PassportEnd { get; set; }
+    public string? Sponsor { get; set; }
+    public long SponsorNo { get; set; }
+    public string? JobTitle { get; set; }
+    public string? Country { get; set; }
+    public string? Phone { get; set; }
+    public DateOnly? DateOfBirth { get; set; }
+    public string? Status { get; set; }
+    public string? IBAN { get; set; }
+    public bool INKSA { get; set; }
 
-        var warnings = string.IsNullOrEmpty(import.ValidationWarnings)
-            ? new List<string>()
-            : JsonSerializer.Deserialize<List<string>>(import.ValidationWarnings) ?? new List<string>();
-
-        return new TempEmployeeRiderImportResponse(
-            Id: import.Id,
-            RowNumber: import.RowNumber,
-            BatchId: import.BatchId,
-            IqamaNo: import.IqamaNo,
-            NameAR: import.NameAR,
-            NameEN: import.NameEN,
-            IqamaEndM: import.IqamaEndM,
-            IqamaEndH: import.IqamaEndH,
-            Phone: import.Phone,
-            Status: import.Status,
-            WorkingId: import.WorkingId,
-            CompanyName: import.CompanyName,
-            CompanyId: import.CompanyId,
-            LicenseNumber: import.LicenseNumber,
-            IsNewEmployee: import.IsNewEmployee,
-            IsNewRider: import.IsNewRider,
-            HasErrors: import.HasErrors,
-            ValidationErrors: errors,
-            ValidationWarnings: warnings,
-            UploadedAt: import.UploadedAt,
-            UploadedBy: import.UploadedBy
-        );
-    }
-
+    // Rider data
+    public string? WorkingId { get; set; }
+    public string? TshirtSize { get; set; }
+    public string? LicenseNumber { get; set; }
+    public string? CompanyName { get; set; }
+    public int? CompanyId { get; set; }
 }
