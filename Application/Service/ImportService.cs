@@ -531,7 +531,7 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
             }
             data.SerialNumber = serialNumber;
 
-            data.PlateNumberA = GetCellValue1(row, map.PlateNumberACol);
+            data.PlateNumberA = GetCellValue1(row, map.PlateNumberACol)?.Replace(" ","");
             if (string.IsNullOrWhiteSpace(data.PlateNumberA))
             {
                 data.IsValid = false;
@@ -539,7 +539,7 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
                 return data;
             }
 
-            data.PlateNumberE = GetCellValue1(row, map.PlateNumberECol);
+            data.PlateNumberE = GetCellValue1(row, map.PlateNumberECol)?.Replace(" ", "");
             if (string.IsNullOrWhiteSpace(data.PlateNumberE))
             {
                 data.IsValid = false;
