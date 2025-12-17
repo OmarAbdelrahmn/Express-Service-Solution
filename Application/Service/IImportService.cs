@@ -11,6 +11,10 @@ public interface IImportService
     Task<Result<DirectImportResponse>> ImportEmployeesAndRidersAsync(
         IFormFile file,
         string uploadedBy);
+
+    Task<Result<VehicleImportResponse>> ImportVehiclesAsync(
+    IFormFile file,
+    string uploadedBy);
 }
 
 // DTOs
@@ -35,6 +39,33 @@ public record ImportRowResult(
     bool EmployeeUpdated,
     bool RiderCreated,
     bool RiderUpdated,
+    List<string> Warnings,
+    string? ErrorMessage
+);
+
+
+public record VehicleImportResponse(
+    int TotalRecords,
+    int SuccessfulVehicles,
+    int UpdatedVehicles,
+    int AssignedToRiders,
+    int FailedRecords,
+    List<VehicleImportRowResult> Results,
+    List<string> Errors,
+    DateTime ProcessedAt
+);
+
+public record VehicleImportRowResult(
+    int RowNumber,
+    bool Success,
+    string VehicleNumber,
+    string PlateNumberA,
+    int SerialNumber,
+    bool VehicleCreated,
+    bool VehicleUpdated,
+    bool AssignedToRider,
+    string? AssignedRiderIqama,
+    List<string> Changes,
     List<string> Warnings,
     string? ErrorMessage
 );

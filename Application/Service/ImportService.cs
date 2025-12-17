@@ -12,14 +12,9 @@ using System.Threading.Tasks;
 
 namespace Application.Service;
 
-public class ImportService : IImportService
+public class ImportService(ApplicationDbcontext dbcontext) : IImportService
 {
-    private readonly ApplicationDbcontext _dbcontext;
-
-    public ImportService(ApplicationDbcontext dbcontext)
-    {
-        _dbcontext = dbcontext;
-    }
+    private readonly ApplicationDbcontext _dbcontext = dbcontext;
 
     public async Task<Result<DirectImportResponse>> ImportEmployeesAndRidersAsync(
         IFormFile file,
@@ -215,14 +210,752 @@ public class ImportService : IImportService
         }
     }
 
+    public async Task<Result<VehicleImportResponse>> ImportVehiclesAsync(
+        IFormFile file,
+        string uploadedBy)
+    {
+        if (file == null || file.Length == 0)
+            return Result.Failure<VehicleImportResponse>(
+                new Error("InvalidFile", "File is empty or null", 400));
 
-    // Replace your BuildColumnMapping method with this version that has better error reporting
+        if (!file.FileName.EndsWith(".xlsx") && !file.FileName.EndsWith(".xls"))
+            return Result.Failure<VehicleImportResponse>(
+                new Error("InvalidFormat", "File must be Excel format (.xlsx or .xls)", 400));
+
+        var results = new List<VehicleImportRowResult>();
+        var errors = new List<string>();
+        int successfulVehicles = 0;
+        int updatedVehicles = 0;
+        int assignedToRiders = 0;
+        int failedRecords = 0;
+
+        try
+        {
+            using var stream = file.OpenReadStream();
+            using var workbook = new XLWorkbook(stream);
+            var worksheet = workbook.Worksheet(1);
+
+            if (worksheet == null)
+            {
+                return Result.Failure<VehicleImportResponse>(
+                    new Error("InvalidWorksheet", "Could not read worksheet", 400));
+            }
+
+            var headerRow = FindHeaderRow1(worksheet);
+
+            if (headerRow == null)
+            {
+                return Result.Failure<VehicleImportResponse>(
+                    new Error("EmptyFile", "Excel file has no header row", 400));
+            }
+
+            var columnMap = BuildColumnMapping1(headerRow);
+            if (!columnMap.IsValid)
+            {
+                return Result.Failure<VehicleImportResponse>(
+                    new Error("InvalidColumns", columnMap.ErrorMessage!, 400));
+            }
+
+            var dataRows = worksheet.RowsUsed()
+                .Where(r => r.RowNumber() > headerRow.RowNumber())
+                .ToList();
+
+            var rowNumber = headerRow.RowNumber();
+
+            foreach (var row in dataRows)
+            {
+                rowNumber++;
+
+                using var transaction = await _dbcontext.Database.BeginTransactionAsync();
+                try
+                {
+                    var rowData = ParseRowData(row, columnMap, rowNumber);
+
+                    if (!rowData.IsValid)
+                    {
+                        failedRecords++;
+                        results.Add(new VehicleImportRowResult(
+                            rowNumber,
+                            false,
+                            rowData.VehicleNumber ?? "N/A",
+                            rowData.PlateNumberA ?? "N/A",
+                            rowData.SerialNumber,
+                            false, false, false, null,
+                            new List<string>(),
+                            new List<string>(),
+                            rowData.ErrorMessage
+                        ));
+                        continue;
+                    }
+
+                    var warnings = new List<string>();
+                    var changes = new List<string>();
+
+                    var (vehicleCreated, vehicleUpdated, vehicleError, vehicleChanges) =
+                        await ProcessVehicle(rowData, warnings, uploadedBy);
+
+                    if (vehicleError != null)
+                    {
+                        await transaction.RollbackAsync();
+                        failedRecords++;
+                        results.Add(new VehicleImportRowResult(
+                            rowNumber,
+                            false,
+                            rowData.VehicleNumber!,
+                            rowData.PlateNumberA!,
+                            rowData.SerialNumber,
+                            false, false, false, null,
+                            new List<string>(),
+                            warnings,
+                            vehicleError
+                        ));
+                        continue;
+                    }
+
+                    if (vehicleCreated)
+                        successfulVehicles++;
+                    else if (vehicleUpdated)
+                        updatedVehicles++;
+
+                    changes.AddRange(vehicleChanges);
+
+                    bool assignedToRider = false;
+                    string? assignedRiderIqama = null;
+
+                    if (rowData.RiderIqamaNo.HasValue)
+                    {
+                        var (assigned, assignError) =
+                            await ProcessRiderAssignment(rowData, warnings, uploadedBy);
+
+                        if (assignError != null)
+                        {
+                            warnings.Add($"Rider assignment failed: {assignError}");
+                        }
+                        else if (assigned)
+                        {
+                            assignedToRider = true;
+                            assignedRiderIqama = rowData.RiderIqamaNo.Value.ToString();
+                            assignedToRiders++;
+                            changes.Add($"Assigned to rider {rowData.RiderIqamaNo.Value}");
+                        }
+                    }
+
+                    await _dbcontext.SaveChangesAsync();
+                    await transaction.CommitAsync();
+
+                    results.Add(new VehicleImportRowResult(
+                        rowNumber,
+                        true,
+                        rowData.VehicleNumber!,
+                        rowData.PlateNumberA!,
+                        rowData.SerialNumber,
+                        vehicleCreated,
+                        vehicleUpdated,
+                        assignedToRider,
+                        assignedRiderIqama,
+                        changes,
+                        warnings,
+                        null
+                    ));
+                }
+                catch (Exception ex)
+                {
+                    await transaction.RollbackAsync();
+                    failedRecords++;
+                    errors.Add($"Row {rowNumber}: {ex.Message}");
+
+                    results.Add(new VehicleImportRowResult(
+                        rowNumber,
+                        false,
+                        "N/A", "N/A", 0,
+                        false, false, false, null,
+                        new List<string>(),
+                        new List<string>(),
+                        $"Exception: {ex.Message}"
+                    ));
+                }
+            }
+
+            var response = new VehicleImportResponse(
+                TotalRecords: dataRows.Count,
+                SuccessfulVehicles: successfulVehicles,
+                UpdatedVehicles: updatedVehicles,
+                AssignedToRiders: assignedToRiders,
+                FailedRecords: failedRecords,
+                Results: results,
+                Errors: errors,
+                ProcessedAt: DateTime.Now
+            );
+
+            return Result.Success(response);
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<VehicleImportResponse>(
+                new Error("ProcessingError", $"Failed to process Excel file: {ex.Message}", 500));
+        }
+    }
+
+    private VehicleColumnMapping BuildColumnMapping1(IXLRow headerRow)
+    {
+        var mapping = new VehicleColumnMapping();
+        var cells = headerRow.CellsUsed().ToList();
+
+        var actualHeaders = new List<string>();
+        foreach (var cell in cells)
+        {
+            try
+            {
+                string val = cell.IsMerged()
+                    ? cell.MergedRange().FirstCell().GetString()
+                    : cell.GetString();
+                actualHeaders.Add($"Col{cell.Address.ColumnNumber}({cell.Address.ColumnLetter})='{val}'");
+            }
+            catch { }
+        }
+
+        mapping.VehicleNumberCol = FindColumn1(cells,
+            "VehicleNumber", "Vehicle Number", "رقم الهيكل", "Vehicle ID", "VIN");
+
+        mapping.SerialNumberCol = FindColumn1(cells,
+            "SerialNumber", "Serial Number", "الرقم التسلسلي", "Serial No", "Serial");
+
+        mapping.PlateNumberACol = FindColumn1(cells,
+            "PlateNumberA", "Plate Number A", "رقم اللوحة", "اللوحة العربية", "Plate A", "Arabic Plate");
+
+        mapping.PlateNumberECol = FindColumn1(cells,
+            "PlateNumberE", "Plate Number E", "رقم اللوحة En", "اللوحة الانجليزية", "Plate E", "English Plate");
+
+        mapping.VehicleTypeCol = FindColumn1(cells,
+            "VehicleType", "Vehicle Type", "نوع المركبة", "طراز المركبة");
+
+        mapping.ManufacturerCol = FindColumn1(cells,
+            "Manufacturer", "الصانع", "المصنع", "ماركة المركبة", "Brand");
+
+        mapping.ManufactureYearCol = FindColumn1(cells,
+            "ManufactureYear", "Manufacture Year", "سنة الصنع", "Year", "Model Year");
+
+        mapping.LicenseExpiryDateCol = FindColumn1(cells,
+            "LicenseExpiryDate", "License Expiry Date", "تاريخ انتهاء الرخصة", "License Expiry", "Expiry Date");
+
+        mapping.LocationCol = FindColumn1(cells,
+            "Location", "الموقع", "المكان");
+
+        mapping.StatusCol = FindColumn1(cells,
+            "Status", "الحالة", "ملاحظات");
+
+        mapping.RiderIqamaNoCol = FindColumn1(cells,
+            "RiderIqamaNo", "Rider Iqama", "رقم اقامة السائق", "Driver Iqama", "EmployeeIqamaNo", "IqamaNo");
+
+        var missing = new List<string>();
+        if (mapping.VehicleNumberCol == 0) missing.Add("Vehicle Number");
+        if (mapping.SerialNumberCol == 0) missing.Add("Serial Number");
+        if (mapping.PlateNumberACol == 0) missing.Add("Plate Number A");
+        if (mapping.PlateNumberECol == 0) missing.Add("Plate Number E");
+
+        if (missing.Any())
+        {
+            mapping.IsValid = false;
+            mapping.ErrorMessage = $"Required columns missing: {string.Join(", ", missing)}\n" +
+                                  $"Columns found:\n{string.Join("\n", actualHeaders)}";
+        }
+        else
+        {
+            mapping.IsValid = true;
+        }
+
+        return mapping;
+    }
+
+    private int FindColumn1(List<IXLCell> cells, params string[] possibleNames)
+    {
+        foreach (var cell in cells)
+        {
+            try
+            {
+                if (cell.IsEmpty()) continue;
+
+                string headerValue = cell.IsMerged()
+                    ? cell.MergedRange().FirstCell().GetString().Trim()
+                    : cell.GetString().Trim();
+
+                if (string.IsNullOrWhiteSpace(headerValue)) continue;
+
+                foreach (var name in possibleNames)
+                {
+                    if (headerValue.Equals(name, StringComparison.OrdinalIgnoreCase))
+                        return cell.Address.ColumnNumber;
+                }
+
+                string headerNoSpaces = headerValue.Replace(" ", "");
+                foreach (var name in possibleNames)
+                {
+                    string nameNoSpaces = name.Replace(" ", "");
+                    if (headerNoSpaces.Equals(nameNoSpaces, StringComparison.OrdinalIgnoreCase))
+                        return cell.Address.ColumnNumber;
+                }
+
+                foreach (var name in possibleNames)
+                {
+                    if (headerValue.Contains(name, StringComparison.OrdinalIgnoreCase))
+                        return cell.Address.ColumnNumber;
+                }
+            }
+            catch { }
+        }
+
+        return 0;
+    }
+
+    private VehicleRowData ParseRowData(IXLRow row, VehicleColumnMapping map, int rowNumber)
+    {
+        var data = new VehicleRowData { RowNumber = rowNumber };
+
+        try
+        {
+            data.VehicleNumber = GetCellValue1(row, map.VehicleNumberCol);
+            if (string.IsNullOrWhiteSpace(data.VehicleNumber))
+            {
+                data.IsValid = false;
+                data.ErrorMessage = "Vehicle Number is required";
+                return data;
+            }
+
+            var serialStr = GetCellValue1(row, map.SerialNumberCol);
+            if (string.IsNullOrWhiteSpace(serialStr) ||
+                !int.TryParse(serialStr.Replace(" ", ""), out int serialNumber))
+            {
+                data.IsValid = false;
+                data.ErrorMessage = "Valid Serial Number is required";
+                return data;
+            }
+            data.SerialNumber = serialNumber;
+
+            data.PlateNumberA = GetCellValue1(row, map.PlateNumberACol);
+            if (string.IsNullOrWhiteSpace(data.PlateNumberA))
+            {
+                data.IsValid = false;
+                data.ErrorMessage = "Plate Number A is required";
+                return data;
+            }
+
+            data.PlateNumberE = GetCellValue1(row, map.PlateNumberECol);
+            if (string.IsNullOrWhiteSpace(data.PlateNumberE))
+            {
+                data.IsValid = false;
+                data.ErrorMessage = "Plate Number E is required";
+                return data;
+            }
+
+            data.VehicleType = GetCellValue1(row, map.VehicleTypeCol) ?? "دراجة نارية";
+            data.Manufacturer = GetCellValue1(row, map.ManufacturerCol) ?? "Unknown";
+            data.Location = GetCellValue1(row, map.LocationCol) ?? "الشركة";
+            data.Status = GetCellValue1(row, map.StatusCol) ?? "Returned";
+
+            var yearStr = GetCellValue1(row, map.ManufactureYearCol);
+            data.ManufactureYear = int.TryParse(yearStr, out int year) && year >= 1900 && year <= DateTime.Now.Year + 1
+                ? year
+                : DateTime.Now.Year;
+
+            data.LicenseExpiryDate = ParseDate(GetCellValue1(row, map.LicenseExpiryDateCol))
+                ?? DateOnly.FromDateTime(DateTime.Now.AddYears(1));
+
+            var riderIqamaStr = GetCellValue1(row, map.RiderIqamaNoCol);
+            if (!string.IsNullOrWhiteSpace(riderIqamaStr) &&
+                long.TryParse(riderIqamaStr.Replace(" ", ""), out long riderIqama))
+            {
+                data.RiderIqamaNo = riderIqama;
+            }
+
+            data.OwnerName = "الخدمة السريعة";
+            data.OwnerId = 7010962889;
+
+            data.IsValid = true;
+        }
+        catch (Exception ex)
+        {
+            data.IsValid = false;
+            data.ErrorMessage = $"Error parsing row: {ex.Message}";
+        }
+
+        return data;
+    }
+
+    private async Task<(bool created, bool updated, string? error, List<string> changes)> ProcessVehicle(
+        VehicleRowData data,
+        List<string> warnings,
+        string uploadedBy)
+    {
+        var changes = new List<string>();
+
+        try
+        {
+            var conflictingVehicle = await _dbcontext.Vehicles
+                .Where(v => v.VehicleNumber != data.VehicleNumber &&
+                           (v.SerialNumber == data.SerialNumber ||
+                            v.PlateNumberA == data.PlateNumberA ||
+                            v.PlateNumberE == data.PlateNumberE))
+                .FirstOrDefaultAsync();
+
+            if (conflictingVehicle != null)
+            {
+                return (false, false,
+                    $"Conflict: Serial/Plate already exists on vehicle {conflictingVehicle.VehicleNumber}",
+                    changes);
+            }
+
+            var vehicle = await _dbcontext.Vehicles
+                .FirstOrDefaultAsync(v => v.VehicleNumber == data.VehicleNumber);
+
+            if (vehicle == null)
+            {
+                vehicle = new Vehicle
+                {
+                    VehicleNumber = data.VehicleNumber!,
+                    SerialNumber = data.SerialNumber,
+                    PlateNumberA = data.PlateNumberA!,
+                    PlateNumberE = data.PlateNumberE!,
+                    VehicleType = data.VehicleType!,
+                    Manufacturer = data.Manufacturer!,
+                    ManufactureYear = data.ManufactureYear,
+                    LicenseExpiryDate = data.LicenseExpiryDate!.Value,
+                    Location = data.Location!,
+                    OwnerName = data.OwnerName!,
+                    OwnerId = data.OwnerId,
+                    CreatedAt = DateTime.Now
+                };
+
+                await _dbcontext.Vehicles.AddAsync(vehicle);
+                changes.Add("Vehicle created");
+
+                return (true, false, null, changes);
+            }
+            else
+            {
+                bool hasChanges = false;
+
+                if (vehicle.SerialNumber != data.SerialNumber)
+                {
+                    changes.Add($"Serial changed: {vehicle.SerialNumber} → {data.SerialNumber}");
+                    vehicle.SerialNumber = data.SerialNumber;
+                    hasChanges = true;
+                }
+
+                if (vehicle.PlateNumberA != data.PlateNumberA)
+                {
+                    changes.Add($"Plate A changed: {vehicle.PlateNumberA} → {data.PlateNumberA}");
+                    vehicle.PlateNumberA = data.PlateNumberA!;
+                    hasChanges = true;
+                }
+
+                if (vehicle.PlateNumberE != data.PlateNumberE)
+                {
+                    changes.Add($"Plate E changed: {vehicle.PlateNumberE} → {data.PlateNumberE}");
+                    vehicle.PlateNumberE = data.PlateNumberE!;
+                    hasChanges = true;
+                }
+
+                if (vehicle.VehicleType != data.VehicleType)
+                {
+                    vehicle.VehicleType = data.VehicleType!;
+                    hasChanges = true;
+                }
+
+                if (vehicle.Manufacturer != data.Manufacturer)
+                {
+                    vehicle.Manufacturer = data.Manufacturer!;
+                    hasChanges = true;
+                }
+
+                if (vehicle.ManufactureYear != data.ManufactureYear)
+                {
+                    vehicle.ManufactureYear = data.ManufactureYear;
+                    hasChanges = true;
+                }
+
+                if (vehicle.LicenseExpiryDate != data.LicenseExpiryDate!.Value)
+                {
+                    vehicle.LicenseExpiryDate = data.LicenseExpiryDate.Value;
+                    hasChanges = true;
+                }
+
+                if (vehicle.Location != data.Location)
+                {
+                    changes.Add($"Location changed: {vehicle.Location} → {data.Location}");
+                    vehicle.Location = data.Location!;
+                    hasChanges = true;
+                }
+
+                await HandleStatusChanges(vehicle, data, changes, uploadedBy);
+
+                if (hasChanges)
+                {
+                    changes.Add("Vehicle updated");
+                    return (false, true, null, changes);
+                }
+                else
+                {
+                    warnings.Add("Vehicle exists with same data - no changes");
+                    return (false, false, null, changes);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            return (false, false, $"Vehicle processing error: {ex.Message}", changes);
+        }
+    }
+
+    private async Task HandleStatusChanges(
+        Vehicle vehicle,
+        VehicleRowData data,
+        List<string> changes,
+        string uploadedBy)
+    {
+        // Check current status
+        var currentActiveStatus = await _dbcontext.RiderVehicleStatus
+            .Where(s => s.VehicleNumber == vehicle.VehicleNumber && s.IsActive)
+            .FirstOrDefaultAsync();
+
+        string currentStatus = currentActiveStatus?.StatusType.ToString() ?? "Available";
+
+        // If status in Excel differs from current status
+        if (data.Status != null && !data.Status.Equals(currentStatus, StringComparison.OrdinalIgnoreCase))
+        {
+            changes.Add($"Status changed: {currentStatus} → {data.Status}");
+
+            // Deactivate old status
+            if (currentActiveStatus != null)
+            {
+                currentActiveStatus.IsActive = false;
+            }
+
+            // Add new status if not "Available"
+            if (!data.Status.Equals("Available", StringComparison.OrdinalIgnoreCase))
+            {
+                VehicleStatusType newStatusType = data.Status.ToLower() switch
+                {
+                    "problem" => VehicleStatusType.Problem,
+                    "stolen" => VehicleStatusType.Stolen,
+                    "breakup" or "break up" => VehicleStatusType.BreakUp,
+                    _ => VehicleStatusType.Returned
+                };
+
+                _dbcontext.RiderVehicleStatus.Add(new RiderVehicleStatus
+                {
+                    VehicleNumber = vehicle.VehicleNumber,
+                    EmployeeIqamaNo = null,
+                    StatusType = newStatusType,
+                    Reason = $"Status updated via import by {uploadedBy}",
+                    IsActive = true,
+                    Timestamp = DateTime.Now
+                });
+            }
+        }
+    }
+
+    private async Task<(bool assigned, string? error)> ProcessRiderAssignment(
+        VehicleRowData data,
+        List<string> warnings,
+        string uploadedBy)
+    {
+        try
+        {
+            var rider = await _dbcontext.RiderDetails
+                .Include(r => r.Employee)
+                .FirstOrDefaultAsync(r => r.EmployeeIqamaNo == data.RiderIqamaNo!.Value);
+
+            if (rider == null)
+                return (false, $"Rider with Iqama {data.RiderIqamaNo} not found");
+
+            if (rider.Employee.Status != "enable")
+                return (false, "Rider is disabled");
+
+            // Check if rider already has a vehicle
+            if (!string.IsNullOrEmpty(rider.VehicleNumber))
+            {
+                warnings.Add($"Rider already has vehicle {rider.VehicleNumber}, replacing it");
+
+                // Return old vehicle
+                var oldVehicleStatus = await _dbcontext.RiderVehicleStatus
+                    .FirstOrDefaultAsync(s => s.VehicleNumber == rider.VehicleNumber &&
+                                             s.EmployeeIqamaNo == rider.EmployeeIqamaNo &&
+                                             s.IsActive &&
+                                             s.StatusType == VehicleStatusType.Taken);
+
+                if (oldVehicleStatus != null)
+                {
+                    oldVehicleStatus.IsActive = false;
+                    _dbcontext.RiderVehicleStatus.Add(new RiderVehicleStatus
+                    {
+                        VehicleNumber = rider.VehicleNumber,
+                        EmployeeIqamaNo = rider.EmployeeIqamaNo,
+                        StatusType = VehicleStatusType.Returned,
+                        Reason = "Replaced by import",
+                        IsActive = false,
+                        Timestamp = DateTime.Now
+                    });
+                }
+            }
+
+            // Check if vehicle is available
+            var vehicleUnavailable = await _dbcontext.RiderVehicleStatus
+                .AnyAsync(s => s.VehicleNumber == data.VehicleNumber &&
+                              s.IsActive &&
+                              (s.StatusType == VehicleStatusType.Taken ||
+                               s.StatusType == VehicleStatusType.Problem ||
+                               s.StatusType == VehicleStatusType.Stolen));
+
+            if (vehicleUnavailable)
+            {
+                // Deactivate old statuses
+                var oldStatuses = await _dbcontext.RiderVehicleStatus
+                    .Where(s => s.VehicleNumber == data.VehicleNumber && s.IsActive)
+                    .ToListAsync();
+
+                foreach (var status in oldStatuses)
+                {
+                    status.IsActive = false;
+                }
+
+                warnings.Add("Vehicle was unavailable, forcing assignment");
+            }
+
+            // Assign vehicle to rider
+            rider.VehicleNumber = data.VehicleNumber;
+
+            // Add history
+            _dbcontext.RiderVehicleStatus.Add(new RiderVehicleStatus
+            {
+                VehicleNumber = data.VehicleNumber!,
+                EmployeeIqamaNo = data.RiderIqamaNo!.Value,
+                StatusType = VehicleStatusType.Taken,
+                Reason = $"Assigned via import by {uploadedBy}",
+                IsActive = true,
+                Timestamp = DateTime.Now
+            });
+
+            return (true, null);
+        }
+        catch (Exception ex)
+        {
+            return (false, $"Assignment error: {ex.Message}");
+        }
+    }
+
+    private IXLRow FindHeaderRow1(IXLWorksheet worksheet)
+    {
+        var knownColumns = new[]
+        {
+            "VehicleNumber", "Vehicle Number", "SerialNumber", "Serial Number",
+            "PlateNumberA", "Plate A", "PlateNumberE", "Plate E",
+            "رقم المركبة", "الرقم التسلسلي", "رقم اللوحة"
+        };
+
+        for (int i = 1; i <= Math.Min(10, worksheet.RowsUsed().Count()); i++)
+        {
+            var row = worksheet.Row(i);
+            var cellValues = new List<string>();
+
+            foreach (var cell in row.CellsUsed())
+            {
+                try
+                {
+                    string value = cell.IsMerged()
+                        ? cell.MergedRange().FirstCell().GetString().Trim()
+                        : cell.GetString().Trim();
+
+                    if (!string.IsNullOrWhiteSpace(value))
+                        cellValues.Add(value);
+                }
+                catch { }
+            }
+
+            int matchCount = 0;
+            foreach (var cellValue in cellValues)
+            {
+                foreach (var knownCol in knownColumns)
+                {
+                    if (cellValue.Equals(knownCol, StringComparison.OrdinalIgnoreCase) ||
+                        cellValue.Replace(" ", "").Equals(knownCol.Replace(" ", ""), StringComparison.OrdinalIgnoreCase))
+                    {
+                        matchCount++;
+                        break;
+                    }
+                }
+            }
+
+            if (matchCount >= 2)
+                return row;
+        }
+
+        // Fallback
+        return worksheet.Row(1);
+    }
+
+    private string? GetCellValue1(IXLRow row, int columnIndex)
+    {
+        if (columnIndex == 0) return null;
+
+        try
+        {
+            var cell = row.Cell(columnIndex);
+            if (cell.IsEmpty()) return null;
+
+            if (cell.DataType == XLDataType.DateTime)
+                return cell.GetDateTime().ToString("dd/MM/yyyy");
+
+            if (cell.DataType == XLDataType.Number)
+                return cell.GetDouble().ToString();
+
+            if (cell.DataType == XLDataType.Text)
+                return cell.GetText().Trim();
+
+            if (cell.DataType == XLDataType.Boolean)
+                return cell.GetBoolean().ToString();
+
+            return cell.Value.ToString()?.Trim();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private DateOnly? ParseDate(string? dateStr)
+    {
+        if (string.IsNullOrWhiteSpace(dateStr))
+            return null;
+
+        string[] formats = {
+            "dd/MM/yyyy", "d/M/yyyy", "dd-MM-yyyy", "d-M-yyyy",
+            "MM/dd/yyyy", "M/d/yyyy", "MM-dd-yyyy", "M-d-yyyy",
+            "yyyy/MM/dd", "yyyy-MM-dd", "yyyy/M/d", "yyyy-M-d",
+            "dd.MM.yyyy", "d.M.yyyy"
+        };
+
+        foreach (var format in formats)
+        {
+            if (DateTime.TryParseExact(dateStr, format,
+                CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime date))
+            {
+                return DateOnly.FromDateTime(date);
+            }
+        }
+
+        if (DateTime.TryParse(dateStr, out DateTime generalDate))
+        {
+            return DateOnly.FromDateTime(generalDate);
+        }
+
+        return null;
+    }
+
     private ColumnMapping BuildColumnMapping(IXLRow headerRow)
     {
         var mapping = new ColumnMapping();
         var cells = headerRow.CellsUsed().ToList();
 
-        // Collect all actual headers for debugging
         var actualHeaders = new List<string>();
         foreach (var cell in cells)
         {
@@ -340,14 +1073,12 @@ public class ImportService : IImportService
 
                 string headerValue = "";
 
-                // Handle merged cells
                 if (cell.IsMerged())
                 {
                     headerValue = cell.MergedRange().FirstCell().GetString().Trim();
                 }
                 else
                 {
-                    // Get cell value based on type
                     switch (cell.DataType)
                     {
                         case XLDataType.Text:
@@ -416,7 +1147,6 @@ public class ImportService : IImportService
 
         try
         {
-            // Parse Iqama Number (REQUIRED)
             var iqamaStr = GetCellValue(row, map.IqamaNoCol);
             if (string.IsNullOrWhiteSpace(iqamaStr))
             {
@@ -499,10 +1229,8 @@ public class ImportService : IImportService
         return data;
     }
 
-    // Replace your FindHeaderRow method with this improved version
     private IXLRow FindHeaderRow(IXLWorksheet worksheet)
     {
-        // Known required column names to look for
         var knownColumns = new[]
         {
         "NameEN", "Name EN", "NameAR", "Name AR",
@@ -510,7 +1238,6 @@ public class ImportService : IImportService
         "Phone", "Sponsor", "Country"
     };
 
-        // Check first 10 rows to find the one that contains our known columns
         for (int i = 1; i <= Math.Min(10, worksheet.RowsUsed().Count()); i++)
         {
             var row = worksheet.Row(i);
@@ -538,7 +1265,6 @@ public class ImportService : IImportService
                 catch { }
             }
 
-            // Check if this row contains any of our known column names
             int matchCount = 0;
             foreach (var cellValue in cellValues)
             {
@@ -553,7 +1279,6 @@ public class ImportService : IImportService
                 }
             }
 
-            // If we found at least 3 matching column names, this is likely the header row
             if (matchCount >= 3)
             {
                 Console.WriteLine($"Found header row at row {i} with {matchCount} matching columns");
@@ -561,7 +1286,6 @@ public class ImportService : IImportService
             }
         }
 
-        // Fallback: return the row with the most non-empty cells
         IXLRow? bestRow = null;
         int maxNonEmptyCells = 0;
 
@@ -587,7 +1311,6 @@ public class ImportService : IImportService
         {
             if (cell.IsEmpty()) return "";
 
-            // Handle merged cells
             if (cell.IsMerged())
             {
                 var mergedRange = cell.MergedRange();
@@ -618,7 +1341,6 @@ public class ImportService : IImportService
             var cell = row.Cell(columnIndex);
             if (cell.IsEmpty()) return null;
 
-            // Handle different cell types
             if (cell.DataType == XLDataType.DateTime)
             {
                 return cell.GetDateTime().ToString("dd/MM/yyyy");
@@ -639,7 +1361,6 @@ public class ImportService : IImportService
                 return cell.GetBoolean().ToString();
             }
 
-            // Fallback: try to get string representation
             var cellValue = cell.Value;
             return cellValue.ToString()?.Trim();
         }
@@ -654,7 +1375,6 @@ public class ImportService : IImportService
         if (string.IsNullOrWhiteSpace(dateStr))
             return null;
 
-        // Try multiple formats
         string[] formats = {
             "dd/MM/yyyy", "d/M/yyyy", "dd-MM-yyyy", "d-M-yyyy",
             "MM/dd/yyyy", "M/d/yyyy", "MM-dd-yyyy", "M-d-yyyy",
@@ -671,7 +1391,6 @@ public class ImportService : IImportService
             }
         }
 
-        // Try general parsing
         if (DateTime.TryParse(dateStr, out DateTime generalDate))
         {
             return DateOnly.FromDateTime(generalDate);
@@ -687,7 +1406,6 @@ public class ImportService : IImportService
 
         try
         {
-            // Expected format: DD/MM/YYYY (Hijri)
             var parts = hijriDateStr.Split('/', '-');
             if (parts.Length != 3)
                 return null;
@@ -697,7 +1415,6 @@ public class ImportService : IImportService
                 !int.TryParse(parts[2], out int year))
                 return null;
 
-            // Validate Hijri date ranges
             if (year < 1300 || year > 1500 ||
                 month < 1 || month > 12 ||
                 day < 1 || day > 30)
@@ -705,7 +1422,6 @@ public class ImportService : IImportService
 
             var hijriCalendar = new HijriCalendar();
 
-            // Ensure the day is valid for the month
             int maxDays = hijriCalendar.GetDaysInMonth(year, month);
             if (day > maxDays)
                 day = maxDays;
@@ -730,7 +1446,6 @@ public class ImportService : IImportService
 
             if (employee == null)
             {
-                // Create new employee
                 employee = new Employees
                 {
                     IqamaNo = data.IqamaNo,
@@ -759,7 +1474,6 @@ public class ImportService : IImportService
             }
             else
             {
-                // Update existing employee
                 bool hasChanges = false;
 
                 if (data.IqamaEndM.HasValue && employee.IqamaEndM != data.IqamaEndM.Value)
@@ -883,7 +1597,6 @@ public class ImportService : IImportService
 
             if (rider == null)
             {
-                // Create new rider only if we have at least WorkingId or CompanyId
                 if (string.IsNullOrWhiteSpace(data.WorkingId) && !data.CompanyId.HasValue)
                 {
                     warnings.Add("No rider data provided - skipping rider creation");
@@ -907,7 +1620,6 @@ public class ImportService : IImportService
             }
             else
             {
-                // Update existing rider
                 bool hasChanges = false;
 
                 if (!string.IsNullOrWhiteSpace(data.WorkingId) && rider.WorkingId != data.WorkingId)
@@ -955,13 +1667,54 @@ public class ImportService : IImportService
     }
 }
 
-// Helper classes
-internal class ColumnMapping
+internal class VehicleColumnMapping
 {
     public bool IsValid { get; set; }
     public string? ErrorMessage { get; set; }
 
-    // Employee columns
+    public int VehicleNumberCol { get; set; }
+    public int SerialNumberCol { get; set; }
+    public int PlateNumberACol { get; set; }
+    public int PlateNumberECol { get; set; }
+
+    public int VehicleTypeCol { get; set; }
+    public int ManufacturerCol { get; set; }
+    public int ManufactureYearCol { get; set; }
+    public int LicenseExpiryDateCol { get; set; }
+    public int LocationCol { get; set; }
+    public int StatusCol { get; set; }
+    public int RiderIqamaNoCol { get; set; }
+}
+
+internal class VehicleRowData
+{
+    public int RowNumber { get; set; }
+    public bool IsValid { get; set; }
+    public string? ErrorMessage { get; set; }
+
+    public string? VehicleNumber { get; set; }
+    public int SerialNumber { get; set; }
+    public string? PlateNumberA { get; set; }
+    public string? PlateNumberE { get; set; }
+
+    public string? VehicleType { get; set; }
+    public string? Manufacturer { get; set; }
+    public int ManufactureYear { get; set; }
+    public DateOnly? LicenseExpiryDate { get; set; }
+    public string? Location { get; set; }
+    public string? Status { get; set; }
+    public long? RiderIqamaNo { get; set; }
+
+    public string? OwnerName { get; set; }
+    public long OwnerId { get; set; }
+
+}
+
+    internal class ColumnMapping
+{
+    public bool IsValid { get; set; }
+    public string? ErrorMessage { get; set; }
+
     public int IqamaNoCol { get; set; }
     public int NameARCol { get; set; }
     public int NameENCol { get; set; }
@@ -979,7 +1732,6 @@ internal class ColumnMapping
     public int IBANCol { get; set; }
     public int INKSACol { get; set; }
 
-    // Rider columns
     public int WorkingIdCol { get; set; }
     public int TshirtSizeCol { get; set; }
     public int LicenseNumberCol { get; set; }
@@ -992,7 +1744,6 @@ internal class RowData
     public bool IsValid { get; set; }
     public string? ErrorMessage { get; set; }
 
-    // Employee data
     public long IqamaNo { get; set; }
     public string? NameAR { get; set; }
     public string? NameEN { get; set; }
@@ -1010,7 +1761,6 @@ internal class RowData
     public string? IBAN { get; set; }
     public bool INKSA { get; set; }
 
-    // Rider data
     public string? WorkingId { get; set; }
     public string? TshirtSize { get; set; }
     public string? LicenseNumber { get; set; }

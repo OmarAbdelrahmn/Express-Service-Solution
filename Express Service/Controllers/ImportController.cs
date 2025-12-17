@@ -1,4 +1,5 @@
 ﻿using Application.Service;
+using k8s.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -50,11 +51,8 @@ public class ImportController(IImportService service) : ControllerBase
         return result.ToProblem();
     }
 
-    /// <summary>
-    /// Get import template information
-    /// </summary>
+
     [HttpGet("template-info")]
-    [AllowAnonymous]
     public IActionResult GetTemplateInfo()
     {
         return Ok(new
@@ -103,74 +101,105 @@ public class ImportController(IImportService service) : ControllerBase
     }
 
 
-    // Add this to your ImportController.cs
-    [HttpPost("debug-headers")]
-    public async Task<IActionResult> DebugHeaders(IFormFile file)
+    [HttpPost("vehicles")]
+    public async Task<IActionResult> ImportVehiclesAsync(IFormFile file)
     {
         if (file == null || file.Length == 0)
-            return BadRequest("No file uploaded");
-
-        try
         {
-            using var stream = file.OpenReadStream();
-            using var workbook = new ClosedXML.Excel.XLWorkbook(stream);
-            var worksheet = workbook.Worksheet(1);
+            return BadRequest(new { error = "No file uploaded or file is empty" });
+        }
 
-            var debugInfo = new
+        if (!file.FileName.EndsWith(".xlsx") && !file.FileName.EndsWith(".xls"))
+        {
+            return BadRequest(new { error = "File must be Excel format (.xlsx or .xls)" });
+        }
+
+        var uploadedBy = User?.Identity?.Name ?? "System";
+
+        var result = await service.ImportVehiclesAsync(file, uploadedBy);
+
+        if (result.IsSuccess)
+        {
+            return Ok(new
             {
-                totalRows = worksheet.RowsUsed().Count(),
-                rows = new List<object>()
-            };
-
-            // Check first 5 rows
-            for (int i = 1; i <= Math.Min(5, worksheet.RowsUsed().Count()); i++)
-            {
-                var row = worksheet.Row(i);
-                var cells = new List<object>();
-
-                foreach (var cell in row.CellsUsed())
+                success = true,
+                data = result.Value,
+                summary = new
                 {
-                    string value = "";
-                    try
-                    {
-                        if (cell.IsMerged())
-                        {
-                            value = $"[MERGED: {cell.MergedRange().FirstCell().GetString()}]";
-                        }
-                        else
-                        {
-                            value = cell.GetString();
-                        }
-                    }
-                    catch
-                    {
-                        value = "[ERROR]";
-                    }
-
-                    cells.Add(new
-                    {
-                        column = cell.Address.ColumnNumber,
-                        columnLetter = cell.Address.ColumnLetter,
-                        value = value,
-                        dataType = cell.DataType.ToString(),
-                        isEmpty = cell.IsEmpty(),
-                        isMerged = cell.IsMerged()
-                    });
+                    totalRecords = result.Value.TotalRecords,
+                    successfulVehicles = result.Value.SuccessfulVehicles,
+                    updatedVehicles = result.Value.UpdatedVehicles,
+                    assignedToRiders = result.Value.AssignedToRiders,
+                    failedRecords = result.Value.FailedRecords,
+                    successRate = result.Value.TotalRecords > 0
+                        ? $"{((result.Value.SuccessfulVehicles + result.Value.UpdatedVehicles) * 100.0 / result.Value.TotalRecords):F1}%"
+                        : "0%"
                 }
-
-                ((List<object>)debugInfo.rows).Add(new
-                {
-                    rowNumber = i,
-                    cellCount = cells.Count,
-                    cells = cells
-                });
-            }
-
-            return Ok(debugInfo);
+            });
         }
-        catch (Exception ex)
-        {
-            return StatusCode(500, new { error = ex.Message, stackTrace = ex.StackTrace });
-        }
+
+        return result.ToProblem();
     }
+
+
+    [HttpGet("vehicle-template-info")]
+    public IActionResult GetvehicleTemplateInfo()
+    {
+        return Ok(new
+        {
+            requiredColumns = new[]
+            {
+                "VehicleNumber / رقم المركبة (Primary Key - Must be unique)",
+                "SerialNumber / الرقم التسلسلي (Must be unique)",
+                "PlateNumberA / رقم اللوحة أ (Arabic - Must be unique)",
+                "PlateNumberE / رقم اللوحة E (English - Must be unique)"
+            },
+            optionalColumns = new[]
+            {
+                "VehicleType / نوع المركبة (Default: Motorcycle)",
+                "Manufacturer / الصانع (Default: Unknown)",
+                "ManufactureYear / سنة الصنع (Default: Current year)",
+                "LicenseExpiryDate / تاريخ انتهاء الرخصة (Default: +1 year)",
+                "Location / الموقع (Default: Unknown)",
+                "Status / الحالة (Default: Available | Options: Available, Problem, Stolen, BreakUp)",
+                "RiderIqamaNo / رقم اقامة السائق (Optional - assigns vehicle to rider)"
+            },
+            automaticDefaults = new
+            {
+                ownerName = "الخدمة السريعة",
+                ownerId = 7010962889,
+                status = "Available (if not specified)"
+            },
+            dateFormats = new
+            {
+                licenseExpiryDate = new[] { "dd/MM/yyyy", "dd-MM-yyyy", "yyyy-MM-dd" }
+            },
+            importBehavior = new
+            {
+                newVehicles = "Creates new vehicle records with default values",
+                existingVehicles = "Updates existing vehicles, tracks changes in history",
+                statusChanges = "Automatically recorded in RiderVehicleStatus table",
+                riderAssignment = "If RiderIqamaNo provided, assigns vehicle and creates history",
+                conflicts = "Prevents duplicate Serial/Plate numbers across different vehicles"
+            },
+            statusOptions = new[]
+            {
+                "Available - Vehicle can be taken by riders",
+                "Problem - Vehicle has issues",
+                "Stolen - Vehicle reported stolen",
+                "BreakUp - Vehicle is broken/decommissioned"
+            },
+            notes = new[]
+            {
+                "Column order doesn't matter - matched by name",
+                "VehicleNumber, SerialNumber, PlateNumberA, PlateNumberE must be unique",
+                "Duplicate VehicleNumber will update existing vehicle",
+                "Status changes are automatically tracked in history",
+                "If RiderIqamaNo provided, vehicle will be assigned to that rider",
+                "Owner defaults to 'الخدمة السريعة' (ID: 7010962889)",
+                "Maximum file size: 10MB"
+            }
+        });
+    }
+
 }

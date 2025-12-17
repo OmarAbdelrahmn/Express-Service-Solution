@@ -10,11 +10,11 @@ public class Vehicle
 {
     [Length(1,20)]
     public string VehicleType { get; set; } = string.Empty;
-    public string VehicleNumber { get; set; } = string.Empty;  // Vehicle Identification Number
+    public string VehicleNumber { get; set; } = string.Empty;  
     public int SerialNumber { get; set; }
     public string PlateNumberA { get; set; } = string.Empty;
     public string PlateNumberE { get; set; } = string.Empty;
-    public int OwnerId { get; set; }
+    public long OwnerId { get; set; }
     public string OwnerName { get; set; } = string.Empty;
     public int ManufactureYear { get; set; }
     public string Manufacturer { get; set; } = string.Empty;

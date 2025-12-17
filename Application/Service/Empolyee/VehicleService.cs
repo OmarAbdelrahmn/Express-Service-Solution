@@ -152,6 +152,22 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
 
             if (hasProblem)
                 return Result.Failure(new Error("VehicleHasProblem", "Vehicle has active problems and cannot be taken", 400));
+            
+            bool stolen = await dbcontext.RiderVehicleStatus
+              .AnyAsync(s => s.Vehicle.PlateNumberA == PlateNumberA &&
+                            s.IsActive &&
+                            s.StatusType == VehicleStatusType.Stolen);
+
+            if (stolen)
+                return Result.Failure(new Error("VehicleHasStolen", "Vehicle has active stolen report and cannot be taken", 400));
+            
+            bool breakup = await dbcontext.RiderVehicleStatus
+              .AnyAsync(s => s.Vehicle.PlateNumberA == PlateNumberA &&
+                            s.IsActive &&
+                            s.StatusType == VehicleStatusType.BreakUp);
+
+            if (breakup)
+                return Result.Failure(new Error("Vehiclebreakup", "Vehicle has active breakup problems and cannot be taken", 400));
 
 
             rider.VehicleNumber = vehicle.VehicleNumber;
@@ -1772,7 +1788,6 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
     }
 }
 
-// Response DTOs
 public record TempVehicleOperationResponse(
     int Id,
     long RiderIqamaNo,
@@ -1798,7 +1813,6 @@ public record VehicleOperationValidation(
 );
 
 
-// Request DTOs
 public record VBulkResolutionRequest(
     string Resolution, // "Approved" or "Rejected"
     string ResolvedBy,

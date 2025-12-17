@@ -12,7 +12,7 @@ public record VehicleRequest
         string VehicleNumber,
         int SerialNumber,
         string PlateNumberA,
-        int OwnerId,
+        long OwnerId,
         string OwnerName,
         string PlateNumberE,
         int ManufactureYear,
@@ -29,7 +29,7 @@ public record UVehicleRequest
         string VehicleType,
         int SerialNumber,
         string PlateNumberA,
-        int OwnerId,
+        long OwnerId,
         string OwnerName,
         string PlateNumberE,
         int ManufactureYear,
@@ -47,7 +47,7 @@ public record VehicleResponse
         string VehicleNumber,
         int SerialNumber,
         string PlateNumberA,
-        int OwnerId,
+        long OwnerId,
         string OwnerName,
         string PlateNumberE,
         int ManufactureYear,
@@ -110,7 +110,7 @@ public class VehicleWithRiderDto
     public DateOnly LicenseExpiryDate { get; set; }
     public string PlateNumberA { get; set; } = string.Empty;
     public string PlateNumberE { get; set; } = string.Empty;
-    public int OwnerId { get; set; }
+    public long OwnerId { get; set; }
     public string OwnerName { get; set; } = string.Empty;
     public int ManufactureYear { get; set; }
     public string Manufacturer { get; set; } = string.Empty;
@@ -131,7 +131,7 @@ public class UnavailableVehicleDto
     public int SerialNumber { get; set; }
     public string PlateNumberA { get; set; } = string.Empty;
     public string PlateNumberE { get; set; } = string.Empty;
-    public int OwnerId { get; set; }
+    public long OwnerId { get; set; }
     public string OwnerName { get; set; } = string.Empty;
     public string LicenseNumber { get; set; }
     public int ManufactureYear { get; set; }
@@ -153,7 +153,7 @@ public class VehicleHistoryDto
     public int SerialNumber { get; set; }
     public string PlateNumberA { get; set; } = string.Empty;
     public string PlateNumberE { get; set; } = string.Empty;
-    public int OwnerId { get; set; }
+    public long OwnerId { get; set; }
     public string OwnerName { get; set; } = string.Empty;
     public int ManufactureYear { get; set; }
     public string Manufacturer { get; set; } = string.Empty;
