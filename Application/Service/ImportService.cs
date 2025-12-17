@@ -464,14 +464,14 @@ public class ImportService : IImportService
 
             // Parse other fields
             data.PassportNo = GetCellValue(row, map.PassportNoCol);
-            data.Sponsor = GetCellValue(row, map.SponsorCol) ?? "Default Sponsor";
+            data.Sponsor = GetCellValue(row, map.SponsorCol) ?? "الخدمة السريعة";
 
             var sponsorNoStr = GetCellValue(row, map.SponsorNoCol);
             data.SponsorNo = long.TryParse(sponsorNoStr?.Replace(" ", ""), out long sNo) ? sNo : 0;
 
-            data.JobTitle = GetCellValue(row, map.JobTitleCol) ?? "Employee";
+            data.JobTitle = GetCellValue(row, map.JobTitleCol) ?? "سائق دراجة نارية";
             data.Country = GetCellValue(row, map.CountryCol) ?? "Unknown";
-            data.Phone = GetCellValue(row, map.PhoneCol) ?? "";
+            data.Phone = GetCellValue(row, map.PhoneCol) ?? "05";
             data.Status = GetCellValue(row, map.StatusCol) ?? "enable";
             data.IBAN = GetCellValue(row, map.IBANCol);
 
@@ -483,9 +483,9 @@ public class ImportService : IImportService
                          inksaStr.ToLower() == "true";
 
             // Rider fields
-            data.WorkingId = GetCellValue(row, map.WorkingIdCol);
-            data.TshirtSize = GetCellValue(row, map.TshirtSizeCol);
-            data.LicenseNumber = GetCellValue(row, map.LicenseNumberCol);
+            data.WorkingId = GetCellValue(row, map.WorkingIdCol) ?? "0";
+            data.TshirtSize = GetCellValue(row, map.TshirtSizeCol)??"s";
+            data.LicenseNumber = GetCellValue(row, map.LicenseNumberCol)??"0";
             data.CompanyName = GetCellValue(row, map.CompanyNameCol);
 
             data.IsValid = true;

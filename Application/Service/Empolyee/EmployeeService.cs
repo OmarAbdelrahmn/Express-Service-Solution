@@ -505,6 +505,7 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
                 e.Country.ToLower().Contains(keyword) ||
                 e.Sponsor.ToLower().Contains(keyword) ||
                 e.sponsorNo.ToString().Contains(keyword) ||
+                e.IqamaNo.ToString().StartsWith(keyword) ||
                 e.JobTitle.ToLower().Contains(keyword)
             );
 

@@ -347,7 +347,8 @@ public class RiderService(ApplicationDbcontext dbcontext) : IRiderService
                 e.Sponsor.ToLower().Contains(keyword) ||
                 e.JobTitle.ToLower().Contains(keyword) ||
                 e.IBAN.ToLower().Contains(keyword) ||
-                e.sponsorNo.ToString().ToLower().Contains(keyword)
+                e.IqamaNo .ToString().StartsWith(keyword) ||
+                e.sponsorNo.ToString().ToLower().StartsWith(keyword)
             )
             .Select(emp => new RiderResponse(
                 emp.IqamaNo,
