@@ -66,7 +66,7 @@ public class ReportController(IReportService service) : ControllerBase
     public async Task<IActionResult> CompareMonthOverMonthAsync(
         CancellationToken cancellationToken = default)
     {
-        var today = DateOnly.FromDateTime(DateTime.Now);
+        var today = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3));
         var yesterday = today.AddDays(-1);
 
         var period2Start = new DateOnly(yesterday.Year, yesterday.Month, 1);
@@ -87,7 +87,7 @@ public class ReportController(IReportService service) : ControllerBase
     public async Task<IActionResult> GetHousingYesterdaySummaryAsync(
         CancellationToken cancellationToken = default)
     {
-        var yesterday = DateOnly.FromDateTime(DateTime.Now.AddDays(-1));
+        var yesterday = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3).AddDays(-1));
 
         var result = await service.GetHousingDailySummaryAsync(
             yesterday,
@@ -103,7 +103,7 @@ public class ReportController(IReportService service) : ControllerBase
     public async Task<IActionResult> GetHousingYesterdayDetailedAsync(
         CancellationToken cancellationToken = default)
     {
-        var yesterday = DateOnly.FromDateTime(DateTime.Now.AddDays(-1));
+        var yesterday = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3).AddDays(-1));
 
         var result = await service.GetHousingDailyDetailedReportAsync(
             yesterday,

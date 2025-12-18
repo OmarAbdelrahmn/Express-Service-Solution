@@ -103,9 +103,9 @@ public class VehicleController : ControllerBase
 
     [HttpGet("taken")]
     [Authorize(Roles = "Master,Admin,Member")]
-    public async Task<IActionResult> GetTakenVehicles()
+    public async Task<IActionResult> GetTakenVehicles([FromQuery] string statusFilter)
     {
-        var result = await _service.GetUnavailableVehiclesAsync();
+        var result = await _service.GetUnavailableVehiclesAsync(statusFilter);
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
 

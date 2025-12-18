@@ -21,7 +21,7 @@ public class Employees
     public DateOnly DateOfBirth { get; set; }
     public string Status { get; set; } = "enable";
     public string? IBAN { get; set; } = string.Empty;
-    public DateTime CreatedAt { get; set; } = DateTime.Now;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow.AddHours(3);
     public bool INKSA { get; set; } = true;
 
 

@@ -112,7 +112,7 @@ public class HungerDisabilityService(ApplicationDbcontext dbcontext) : IHungerDi
                         Days = rowData.Days!.Value,
                         CompanyId = actualRider.CompanyId,
                         AcceptedDailyOrders = rowData.AcceptedDailyOrders!.Value,
-                        CreatedAt = DateTime.UtcNow
+                        CreatedAt = DateTime.UtcNow.AddHours(3)
                     };
 
                     recordsToAdd.Add(record);

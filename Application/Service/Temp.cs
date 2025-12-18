@@ -101,7 +101,7 @@ public class Temp(ApplicationDbcontext dbcontext) : ITemp
                 {
                     IqamaNo = IqamaNo,
                     IsNewEmployee = false,
-                    UploadedAt = DateTime.Now,
+                    UploadedAt = DateTime.UtcNow.AddHours(3),
                     UploadedBy = uploadedBy
                 };
 
@@ -261,7 +261,7 @@ public class Temp(ApplicationDbcontext dbcontext) : ITemp
                 NewEmployees: 0, // We're not creating TempEmployeeUpdate for new employees anymore
                 ExistingEmployees: tempUpdates.Count,
                 SkippedRows: skippedCount,
-                UploadedAt: DateTime.Now,
+                UploadedAt: DateTime.UtcNow.AddHours(3),
                 Message: $"Excel uploaded successfully. {tempUpdates.Count} changes detected, {skippedCount} rows skipped (no changes).",
                 EmployeesInExcelNotInDB: newEmployeesFromExcel,
                 EmployeesInDBNotInExcel: missingFromExcel
@@ -344,7 +344,7 @@ public class Temp(ApplicationDbcontext dbcontext) : ITemp
                                 Status = update.NewStatus ?? string.Empty,
                                 IBAN = update.NewIBAN,
                                 INKSA = update.NewINKSA ?? true,
-                                CreatedAt = DateTime.Now
+                                CreatedAt = DateTime.UtcNow.AddHours(3)
                             };
 
                             await dbcontext.Employees.AddAsync(newEmployee);
@@ -392,7 +392,7 @@ public class Temp(ApplicationDbcontext dbcontext) : ITemp
                     update.IsResolved = true;
                     update.Resolution = request.Resolution;
                     update.ResolvedBy = request.ResolvedBy;
-                    update.ResolvedAt = DateTime.Now;
+                    update.ResolvedAt = DateTime.UtcNow.AddHours(3);
 
                     successCount++;
                 }

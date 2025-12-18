@@ -19,7 +19,6 @@ public class RiderSub(ApplicationDbcontext dbcontext) : IRiderSub
         using var transaction = await _dbcontext.Database.BeginTransactionAsync(cancellationToken);
         try
         {
-            // Get actual rider by WorkingId
             var actualRider = await _dbcontext.RiderDetails
                 .Include(r => r.Employee)
                 .Include(r => r.Company)
@@ -29,7 +28,6 @@ public class RiderSub(ApplicationDbcontext dbcontext) : IRiderSub
                 return Result.Failure<RiderSubstitutionResponse>(
                     new Error("NotFound", "Actual rider not found", 404));
 
-            // Get substitute by WorkingId
             var substituteRider = await _dbcontext.RiderDetails
                 .Include(r => r.Employee)
                 .Include(r => r.Company)
@@ -39,12 +37,10 @@ public class RiderSub(ApplicationDbcontext dbcontext) : IRiderSub
                 return Result.Failure<RiderSubstitutionResponse>(
                     new Error("NotFound", "Substitute working ID not found", 404));
 
-            // Prevent substituting with self
             if (substituteRider.WorkingId == actualRider.WorkingId)
                 return Result.Failure<RiderSubstitutionResponse>(
                     new Error("InvalidOperation", "Cannot substitute with own working ID", 400));
 
-            // Check active substitution by ActualRider numeric Id
             var hasActiveSubstitution = await _dbcontext.RiderShiftSubstitutions
                 .AnyAsync(s => s.ActualRiderId == actualRider.Id && s.IsActive, cancellationToken);
 
@@ -52,7 +48,6 @@ public class RiderSub(ApplicationDbcontext dbcontext) : IRiderSub
                 return Result.Failure<RiderSubstitutionResponse>(
                     new Error("AlreadyExists", "Rider already has an active substitution", 400));
 
-            // Create new substitution
             var substitution = new RiderShiftSubstitution
             {
                 ActualRiderId = actualRider.Id,
@@ -70,7 +65,6 @@ public class RiderSub(ApplicationDbcontext dbcontext) : IRiderSub
             await _dbcontext.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
 
-            // Prepare response
             var response = new RiderSubstitutionResponse(
                 substitution.Id,
                 actualRider.Employee.NameEN,

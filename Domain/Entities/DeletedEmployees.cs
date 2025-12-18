@@ -21,7 +21,7 @@ public class DeletedEmployees
     public DateTime DateOfBirth { get; set; }
     public string Status { get; set; } = string.Empty;
     public string? IBAN { get; set; } = string.Empty;
-    public DateTime CreatedAt { get; set; } = DateTime.Now;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow.AddHours(3);
     public bool INKSA { get; set; } = true;
     public int? HousingId { get; set; }
     public string? WorkingId { get; set; }

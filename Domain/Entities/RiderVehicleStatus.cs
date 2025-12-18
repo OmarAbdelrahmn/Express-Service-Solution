@@ -13,10 +13,10 @@ public class RiderVehicleStatus
     public string VehicleNumber { get; set; } = string.Empty;
     public Vehicle Vehicle { get; set; } = default!;
 
-    public VehicleStatusType StatusType { get; set; }   // Take, Stop, Problem
+    public VehicleStatusType StatusType { get; set; }   
     public string? Reason { get; set; }
 
-    public DateTime Timestamp { get; set; } = DateTime.Now;
+    public DateTime Timestamp { get; set; } = DateTime.UtcNow.AddHours(3);
 
     public bool IsActive { get; set; }
 

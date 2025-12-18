@@ -573,7 +573,7 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
                 Action = newStatus.ToLower(),
                 Reason = reason,
                 RequestedBy = requestedBy,
-                RequestedAt = DateTime.Now,
+                RequestedAt = DateTime.UtcNow.AddHours(3),
                 IsResolved = false
             };
 
@@ -658,7 +658,7 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
             statusChange.IsResolved = true;
             statusChange.Resolution = resolution;
             statusChange.ResolvedBy = resolvedBy;
-            statusChange.ResolvedAt = DateTime.Now;
+            statusChange.ResolvedAt = DateTime.UtcNow.AddHours(3);
             statusChange.AdminNotes = adminNotes ?? (resolution == "Rejected" ? "Request was rejected" : null);
 
             await dbcontext.SaveChangesAsync();

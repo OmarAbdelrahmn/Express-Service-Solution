@@ -15,7 +15,7 @@ public class HungerDisability
     public DateOnly ShiftDate { get; set; }
     public int CompanyId { get; set; }
     public int AcceptedDailyOrders { get; set; }
-    public DateTime CreatedAt { get; set; } = DateTime.Now;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow.AddHours(3);
     public RiderDetails Rider { get; set; } = default!;
     public Company Company { get; set; } = default!;
 

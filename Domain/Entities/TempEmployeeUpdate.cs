@@ -44,7 +44,7 @@ public class TempEmployeeUpdate
     public bool? NewINKSA { get; set; }
 
     public bool IsNewEmployee { get; set; } // If employee doesn't exist in DB
-    public DateTime UploadedAt { get; set; } = DateTime.Now;
+    public DateTime UploadedAt { get; set; } = DateTime.UtcNow.AddHours(3);
     public string? UploadedBy { get; set; }
     public bool IsResolved { get; set; } = false;
     public string? Resolution { get; set; } // "Approved" or "Rejected"
@@ -60,7 +60,7 @@ public class TempEmployeeStatusChange
     public string Action { get; set; } = string.Empty; // "Enable" or "Disable"
     public string Reason { get; set; } = string.Empty;
     public string RequestedBy { get; set; } = string.Empty;
-    public DateTime RequestedAt { get; set; } = DateTime.Now;
+    public DateTime RequestedAt { get; set; } = DateTime.UtcNow.AddHours(3);
 
     public bool IsResolved { get; set; } = false;
     public string? Resolution { get; set; } // "Approved" or "Rejected"
@@ -80,7 +80,7 @@ public class TempVehicleOperation
     public string VehicleNumber { get; set; } = string.Empty;
     public VehicleStatusType VehicleStatusType { get; set; }
     public string? Reason { get; set; } = string.Empty;
-    public DateTime RequestedAt { get; set; } = DateTime.Now;
+    public DateTime RequestedAt { get; set; } = DateTime.UtcNow.AddHours(3);
     public string RequestedBy { get; set; } = string.Empty;
 
     public bool IsResolved { get; set; } = false;

@@ -24,7 +24,7 @@ public class Vehicle
     public string? ExstraImage { get; set; } 
     public string? ExstraImage1 { get; set; } 
     public string Location { get; set; } = string.Empty;
-    public DateTime CreatedAt { get; set; } = DateTime.Now;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow.AddHours(3);
 
     public RiderDetails? RiderDetails { get; set; }
 

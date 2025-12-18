@@ -691,8 +691,10 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
                 new Error("GetVehicleError", $"Failed to retrieve vehicle: {ex.Message}", 500));
         }
     }
-    public async Task<Result<UnavailableVehiclesResponse>> GetUnavailableVehiclesAsync(string statusFilter = "all")
+    public async Task<Result<UnavailableVehiclesResponse>> GetUnavailableVehiclesAsync(string statusFilter)
     {
+        statusFilter = statusFilter ??  "all";
+
         try
         {
             var validFilters = new[] { "all", "unavailable", "problem", "stolen", "breakup" };
@@ -784,7 +786,7 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
                         RiderName = rider?.Employee.NameAR ?? "N/A",
                         RiderNameE = rider?.Employee.NameEN ?? "N/A",
                         Reason = item.LatestProblem?.Reason ?? "Unknown",
-                        Since = item.LatestProblem?.Timestamp ?? DateTime.Now,
+                        Since = item.LatestProblem?.Timestamp ?? DateTime.UtcNow.AddHours(3),
                         ProblemsCount = item.ProblemsCount,
                         Manufacturer = vehicle?.Manufacturer,
                         ManufactureYear = vehicle?.ManufactureYear ?? 0
@@ -1103,7 +1105,7 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
 
             var groups = new Dictionary<string, List<VehicleWithRiderDto>>
         {
-            { "Available", new List<VehicleWithRiderDto>() },
+            { "Returned", new List<VehicleWithRiderDto>() },
             { "Taken", new List<VehicleWithRiderDto>() },
             { "Problem", new List<VehicleWithRiderDto>() },
             { "Stolen", new List<VehicleWithRiderDto>() },
@@ -1134,7 +1136,7 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
                     Location = vehicle.Location, // ADDED
                     OwnerId = vehicle.OwnerId,
                     LicenseExpiryDate = vehicle.LicenseExpiryDate,
-                    CurrentStatus = vehicleStatus?.ToString() ?? "Available",
+                    CurrentStatus = vehicleStatus?.ToString() ?? "Returned",
                     StatusSince = statusSince,
                     ActiveProblemsCount = status.Count(s => s.StatusType == VehicleStatusType.Problem),
                     HasActiveProblem = status.Any(s => s.StatusType == VehicleStatusType.Problem),
@@ -1166,7 +1168,7 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
                     VehicleStatusType.Problem => "Problem",
                     VehicleStatusType.Stolen => "Stolen",
                     VehicleStatusType.BreakUp => "BreakUp",
-                    _ => "Available"
+                    _ => "Returned"
                 };
 
                 groups[groupKey].Add(dto);
@@ -1175,7 +1177,7 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
             var response = new GroupedVehicleStatusResponse
             {
                 TotalVehicles = vehicles.Count,
-                GeneratedAt = DateTime.Now,
+                GeneratedAt = DateTime.UtcNow.AddHours(3),
                 Groups = groups.Select(g => new VehicleStatusGroupDto
                 {
                     Status = g.Key,
@@ -1184,7 +1186,7 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
                 }).ToList(),
                 Summary = new VehicleStatusSummary
                 {
-                    AvailableCount = groups["Available"].Count,
+                    AvailableCount = groups["Returned"].Count,
                     TakenCount = groups["Taken"].Count,
                     ProblemCount = groups["Problem"].Count,
                     StolenCount = groups["Stolen"].Count,
@@ -1267,7 +1269,7 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
                 VehicleNumber = vehicle.VehicleNumber,
                 VehicleStatusType = VehicleStatusType.Taken,
                 Reason = reason,
-                RequestedAt = DateTime.Now,
+                RequestedAt = DateTime.UtcNow.AddHours(3),
                 RequestedBy = request.ResolvedBy,
                 IsResolved = false
             };
@@ -1321,7 +1323,7 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
                 VehicleNumber = vehicle.VehicleNumber,
                 VehicleStatusType = VehicleStatusType.Returned,
                 Reason = reason,
-                RequestedAt = DateTime.Now,
+                RequestedAt = DateTime.UtcNow.AddHours(3),
                 RequestedBy = request.ResolvedBy,
                 IsResolved = false
             };
@@ -1367,7 +1369,7 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
                 VehicleNumber = vehicle.VehicleNumber,
                 VehicleStatusType = VehicleStatusType.Problem,
                 Reason = reason,
-                RequestedAt = DateTime.Now,
+                RequestedAt = DateTime.UtcNow.AddHours(3),
                 RequestedBy = request.ResolvedBy,
                 IsResolved = false
             };
@@ -1448,7 +1450,7 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
                 operation.IsResolved = true;
                 operation.Resolution = request.Resolution;
                 operation.ResolvedBy = request.ResolvedBy;
-                operation.ResolvedAt = DateTime.Now;
+                operation.ResolvedAt = DateTime.UtcNow.AddHours(3);
                 operation.AdminNotes = note;
             }
             catch (Exception ex)

@@ -198,7 +198,7 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
                 FailedRecords: failedRecords,
                 Results: results,
                 Errors: errors,
-                ProcessedAt: DateTime.Now
+                ProcessedAt: DateTime.UtcNow.AddHours(3)
             );
 
             return Result.Success(response);
@@ -384,7 +384,7 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
                 FailedRecords: failedRecords,
                 Results: results,
                 Errors: errors,
-                ProcessedAt: DateTime.Now
+                ProcessedAt: DateTime.UtcNow.AddHours(3)
             );
 
             return Result.Success(response);
@@ -622,7 +622,7 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
                     Location = data.Location!,
                     OwnerName = data.OwnerName!,
                     OwnerId = data.OwnerId,
-                    CreatedAt = DateTime.Now
+                    CreatedAt = DateTime.UtcNow.AddHours(3)
                 };
 
                 await _dbcontext.Vehicles.AddAsync(vehicle);
@@ -748,7 +748,7 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
                     StatusType = newStatusType,
                     Reason = $"Status updated via import by {uploadedBy}",
                     IsActive = true,
-                    Timestamp = DateTime.Now
+                    Timestamp = DateTime.UtcNow.AddHours(3)
                 });
             }
         }
@@ -793,7 +793,7 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
                         StatusType = VehicleStatusType.Returned,
                         Reason = "Replaced by import",
                         IsActive = false,
-                        Timestamp = DateTime.Now
+                        Timestamp = DateTime.UtcNow.AddHours(3)
                     });
                 }
             }
@@ -832,7 +832,7 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
                 StatusType = VehicleStatusType.Taken,
                 Reason = $"Assigned via import by {uploadedBy}",
                 IsActive = true,
-                Timestamp = DateTime.Now
+                Timestamp = DateTime.UtcNow.AddHours(3)
             });
 
             return (true, null);
@@ -1464,7 +1464,7 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
                     Status = data.Status!,
                     IBAN = data.IBAN,
                     INKSA = data.INKSA,
-                    CreatedAt = DateTime.Now
+                    CreatedAt = DateTime.UtcNow.AddHours(3)
                 };
 
                 await _dbcontext.Employees.AddAsync(employee);
@@ -1610,7 +1610,7 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
                     TshirtSize = data.TshirtSize,
                     LicenseNumber = data.LicenseNumber,
                     CompanyId = data.CompanyId.Value,
-                    CreatedAt = DateTime.Now
+                    CreatedAt = DateTime.UtcNow.AddHours(3)
                 };
 
                 await _dbcontext.RiderDetails.AddAsync(rider);

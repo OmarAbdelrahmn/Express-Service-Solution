@@ -33,7 +33,8 @@ public interface IVehicleService
     Task<Result<IEnumerable<VehicleHistoryDto>>> GetVehicleHistoryAsync1(string vehicleNumber);
     Task<Result<IEnumerable<VehicleWithRiderDto>>> GetAllVehiclesWithRidersAsync();
     Task<Result<VehicleWithRiderDto>> GetVehicleWithRiderByVehicleNumberAsync(string vehicleNumber);
-    Task<Result<UnavailableVehiclesResponse>> GetUnavailableVehiclesAsync(string statusFilter = "all");
+    Task<Result<UnavailableVehiclesResponse>> GetUnavailableVehiclesAsync(string statusFilter);
+    //Task<Result<UnavailableVehiclesResponse>> GetUnavailableVehiclesAsync1(string statusFilter = "all");
     Task<Result> MarkVehicleAsBreakUpAsync(string vehicleNumber, string reason);
     Task<Result> RecoverStolenVehicleAsync(string vehicleNumber, string recoveryDetails);
     Task<Result<GroupedVehicleStatusResponse>> GetVehiclesGroupedByStatusAsync();
