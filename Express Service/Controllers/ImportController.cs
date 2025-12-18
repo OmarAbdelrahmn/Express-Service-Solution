@@ -202,4 +202,109 @@ public class ImportController(IImportService service) : ControllerBase
         });
     }
 
+
+    [HttpPost("update-working-ids")]
+    public async Task<IActionResult> UpdateRiderWorkingIdsAsync(IFormFile file)
+    {
+        if (file == null || file.Length == 0)
+        {
+            return BadRequest(new { error = "No file uploaded or file is empty" });
+        }
+
+        if (!file.FileName.EndsWith(".xlsx") && !file.FileName.EndsWith(".xls"))
+        {
+            return BadRequest(new { error = "File must be Excel format (.xlsx or .xls)" });
+        }
+
+        var uploadedBy = User?.Identity?.Name ?? "System";
+
+        var result = await service.UpdateRiderWorkingIdsAsync(file, uploadedBy);
+
+        if (result.IsSuccess)
+        {
+            return Ok(new
+            {
+                success = true,
+                data = result.Value,
+                summary = new
+                {
+                    totalRecords = result.Value.TotalRecords,
+                    successfulUpdates = result.Value.SuccessfulUpdates,
+                    failedRecords = result.Value.FailedRecords,
+                    iqamaNotFound = result.Value.IqamaNotFound,
+                    riderDetailsNotFound = result.Value.RiderDetailsNotFound,
+                    successRate = result.Value.TotalRecords > 0
+                        ? $"{(result.Value.SuccessfulUpdates * 100.0 / result.Value.TotalRecords):F1}%"
+                        : "0%"
+                },
+                notFoundIqamas = result.Value.NotFoundIqamas
+            });
+        }
+
+        return result.ToProblem();
+    }
+
+    [HttpGet("working-id-template-info")]
+    public IActionResult GetWorkingIdTemplateInfo()
+    {
+        return Ok(new
+        {
+            requiredColumns = new[]
+            {
+            "IqamaNumber / رقم الإقامة (Must exist in database)",
+            "WorkingId / معرف العمل (New Working ID to assign)"
+        },
+            columnVariations = new
+            {
+                iqamaNumber = new[]
+                {
+                "IqamaNumber", "Iqama Number", "IqamaNo", "Iqama No",
+                "رقم الاقامة", "رقم الإقامة", "الاقامة"
+            },
+                workingId = new[]
+                {
+                "WorkingId", "Working Id", "Working ID", "WorkingID",
+                "معرف العمل", "معرف الشغل", "رقم العمل"
+            }
+            },
+            importBehavior = new
+            {
+                employeeNotFound = "IqamaNo not found in database - will be skipped and listed in response",
+                riderDetailsNotFound = "Employee exists but has no RiderDetails - will be skipped",
+                successfulUpdate = "Working ID will be updated and old value will be returned in response",
+                transactionSafety = "Each row is processed in its own transaction"
+            },
+            response = new
+            {
+                totalRecords = "Total number of rows processed",
+                successfulUpdates = "Number of successfully updated Working IDs",
+                failedRecords = "Number of records that failed to update",
+                iqamaNotFound = "Number of Iqama numbers not found in database",
+                riderDetailsNotFound = "Number of employees without RiderDetails",
+                notFoundIqamas = "List of all Iqama numbers that were not found",
+                results = "Detailed results for each row with old and new Working IDs"
+            },
+            notes = new[]
+            {
+            "Column order doesn't matter - matched by name (Arabic or English)",
+            "IqamaNo must exist in Employees table",
+            "Employee must have associated RiderDetails record",
+            "Old Working ID value is returned in response for reference",
+            "Rider name (AR & EN) included in response for verification",
+            "All not-found Iqama numbers are listed separately",
+            "Maximum file size: 10MB",
+            "Each update is transactional - failures don't affect other rows"
+        },
+            exampleExcel = new
+            {
+                headers = new[] { "IqamaNumber", "WorkingId" },
+                sampleData = new[]
+                {
+                new { IqamaNumber = "2234567890", WorkingId = "WID001" },
+                new { IqamaNumber = "2345678901", WorkingId = "WID002" },
+                new { IqamaNumber = "2456789012", WorkingId = "WID003" }
+            }
+            }
+        });
+    }
 }

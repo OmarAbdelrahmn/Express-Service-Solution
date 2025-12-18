@@ -1665,6 +1665,354 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
             return (false, false, $"Rider processing error: {ex.Message}");
         }
     }
+
+
+    public async Task<Result<WorkingIdUpdateResponse>> UpdateRiderWorkingIdsAsync(
+        IFormFile file,
+        string uploadedBy)
+    {
+        if (file == null || file.Length == 0)
+            return Result.Failure<WorkingIdUpdateResponse>(
+                new Error("InvalidFile", "File is empty or null", 400));
+
+        if (!file.FileName.EndsWith(".xlsx") && !file.FileName.EndsWith(".xls"))
+            return Result.Failure<WorkingIdUpdateResponse>(
+                new Error("InvalidFormat", "File must be Excel format (.xlsx or .xls)", 400));
+
+        var results = new List<WorkingIdUpdateRowResult>();
+        var errors = new List<string>();
+        var notFoundIqamas = new List<string>();
+        int successfulUpdates = 0;
+        int failedRecords = 0;
+        int iqamaNotFound = 0;
+        int riderDetailsNotFound = 0;
+
+        try
+        {
+            using var stream = file.OpenReadStream();
+            using var workbook = new XLWorkbook(stream);
+            var worksheet = workbook.Worksheet(1);
+
+            if (worksheet == null)
+            {
+                return Result.Failure<WorkingIdUpdateResponse>(
+                    new Error("InvalidWorksheet", "Could not read worksheet", 400));
+            }
+
+            var headerRow = FindWorkingIdHeaderRow(worksheet);
+
+            if (headerRow == null)
+            {
+                return Result.Failure<WorkingIdUpdateResponse>(
+                    new Error("EmptyFile", "Excel file has no header row", 400));
+            }
+
+            // Map columns by finding their positions
+            var columnMap = BuildWorkingIdColumnMapping(headerRow);
+            if (!columnMap.IsValid)
+            {
+                return Result.Failure<WorkingIdUpdateResponse>(
+                    new Error("InvalidColumns", columnMap.ErrorMessage!, 400));
+            }
+
+            var dataRows = worksheet.RowsUsed()
+                .Where(r => r.RowNumber() > headerRow.RowNumber())
+                .ToList();
+
+            var rowNumber = headerRow.RowNumber();
+
+            foreach (var row in dataRows)
+            {
+                rowNumber++;
+
+                using var transaction = await _dbcontext.Database.BeginTransactionAsync();
+                try
+                {
+                    var rowData = ParseWorkingIdRowData(row, columnMap, rowNumber);
+
+                    if (!rowData.IsValid)
+                    {
+                        failedRecords++;
+                        results.Add(new WorkingIdUpdateRowResult(
+                            rowNumber,
+                            false,
+                            rowData.IqamaNo?.ToString() ?? "N/A",
+                            rowData.NewWorkingId,
+                            null,
+                            null,
+                            null,
+                            rowData.ErrorMessage
+                        ));
+                        continue;
+                    }
+
+                    // Find employee and rider details
+                    var employee = await _dbcontext.Employees
+                        .Include(e => e.RiderDetails)
+                        .FirstOrDefaultAsync(e => e.IqamaNo == rowData.IqamaNo!.Value);
+
+                    if (employee == null)
+                    {
+                        iqamaNotFound++;
+                        failedRecords++;
+                        notFoundIqamas.Add(rowData.IqamaNo!.Value.ToString());
+
+                        results.Add(new WorkingIdUpdateRowResult(
+                            rowNumber,
+                            false,
+                            rowData.IqamaNo!.Value.ToString(),
+                            rowData.NewWorkingId,
+                            null,
+                            null,
+                            null,
+                            "Employee with this Iqama number not found"
+                        ));
+
+                        await transaction.RollbackAsync();
+                        continue;
+                    }
+
+                    if (employee.RiderDetails == null)
+                    {
+                        riderDetailsNotFound++;
+                        failedRecords++;
+
+                        results.Add(new WorkingIdUpdateRowResult(
+                            rowNumber,
+                            false,
+                            rowData.IqamaNo!.Value.ToString(),
+                            rowData.NewWorkingId,
+                            null,
+                            employee.NameEN,
+                            employee.NameAR,
+                            "Employee exists but has no RiderDetails record"
+                        ));
+
+                        await transaction.RollbackAsync();
+                        continue;
+                    }
+
+                    // Update WorkingId
+                    string? oldWorkingId = employee.RiderDetails.WorkingId;
+                    employee.RiderDetails.WorkingId = rowData.NewWorkingId;
+
+                    await _dbcontext.SaveChangesAsync();
+                    await transaction.CommitAsync();
+
+                    successfulUpdates++;
+                    results.Add(new WorkingIdUpdateRowResult(
+                        rowNumber,
+                        true,
+                        rowData.IqamaNo!.Value.ToString(),
+                        rowData.NewWorkingId,
+                        oldWorkingId,
+                        employee.NameEN,
+                        employee.NameAR,
+                        null
+                    ));
+                }
+                catch (Exception ex)
+                {
+                    await transaction.RollbackAsync();
+                    failedRecords++;
+                    errors.Add($"Row {rowNumber}: {ex.Message}");
+
+                    results.Add(new WorkingIdUpdateRowResult(
+                        rowNumber,
+                        false,
+                        "N/A",
+                        null,
+                        null,
+                        null,
+                        null,
+                        $"Exception: {ex.Message}"
+                    ));
+                }
+            }
+
+            var response = new WorkingIdUpdateResponse(
+                TotalRecords: dataRows.Count,
+                SuccessfulUpdates: successfulUpdates,
+                FailedRecords: failedRecords,
+                IqamaNotFound: iqamaNotFound,
+                RiderDetailsNotFound: riderDetailsNotFound,
+                Results: results,
+                NotFoundIqamas: notFoundIqamas,
+                Errors: errors,
+                ProcessedAt: DateTime.UtcNow.AddHours(3)
+            );
+
+            return Result.Success(response);
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<WorkingIdUpdateResponse>(
+                new Error("ProcessingError", $"Failed to process Excel file: {ex.Message}", 500));
+        }
+    }
+
+    private IXLRow FindWorkingIdHeaderRow(IXLWorksheet worksheet)
+    {
+        var knownColumns = new[]
+        {
+        "IqamaNumber", "Iqama Number", "IqamaNo", "Iqama No",
+        "رقم الاقامة", "رقم الإقامة", "الاقامة",
+        "WorkingId", "Working Id", "Working ID",
+        "معرف العمل", "معرف الشغل", "رقم العمل"
+    };
+
+        for (int i = 1; i <= Math.Min(10, worksheet.RowsUsed().Count()); i++)
+        {
+            var row = worksheet.Row(i);
+            var cellValues = new List<string>();
+
+            foreach (var cell in row.CellsUsed())
+            {
+                try
+                {
+                    string value = cell.IsMerged()
+                        ? cell.MergedRange().FirstCell().GetString().Trim()
+                        : cell.GetString().Trim();
+
+                    if (!string.IsNullOrWhiteSpace(value))
+                        cellValues.Add(value);
+                }
+                catch { }
+            }
+
+            int matchCount = 0;
+            foreach (var cellValue in cellValues)
+            {
+                foreach (var knownCol in knownColumns)
+                {
+                    if (cellValue.Equals(knownCol, StringComparison.OrdinalIgnoreCase) ||
+                        cellValue.Replace(" ", "").Equals(knownCol.Replace(" ", ""), StringComparison.OrdinalIgnoreCase))
+                    {
+                        matchCount++;
+                        break;
+                    }
+                }
+            }
+
+            if (matchCount >= 2)
+                return row;
+        }
+
+        for (int i = 1; i <= Math.Min(10, worksheet.RowsUsed().Count()); i++)
+        {
+            var row = worksheet.Row(i);
+            var nonEmptyCells = row.CellsUsed().Count(c =>
+                !string.IsNullOrWhiteSpace(GetCellValueSafe(c)));
+
+            if (nonEmptyCells >= 2)
+                return row;
+        }
+
+        return worksheet.Row(1);
+    }
+
+    private WorkingIdColumnMapping BuildWorkingIdColumnMapping(IXLRow headerRow)
+    {
+        var mapping = new WorkingIdColumnMapping();
+        var cells = headerRow.CellsUsed().ToList();
+
+        var actualHeaders = new List<string>();
+        foreach (var cell in cells)
+        {
+            try
+            {
+                string val = cell.IsMerged()
+                    ? cell.MergedRange().FirstCell().GetString()
+                    : cell.GetString();
+                actualHeaders.Add($"Col{cell.Address.ColumnNumber}({cell.Address.ColumnLetter})='{val}'");
+            }
+            catch { }
+        }
+
+        mapping.IqamaNoCol = FindColumn(cells,
+            "IqamaNumber", "Iqama Number", "IqamaNo", "Iqama No",
+            "رقم الاقامة", "رقم الإقامة", "الاقامة");
+
+        mapping.WorkingIdCol = FindColumn(cells,
+            "WorkingId", "Working Id", "Working ID", "WorkingID",
+            "معرف العمل", "معرف الشغل", "رقم العمل");
+
+        var missing = new List<string>();
+        if (mapping.IqamaNoCol == 0) missing.Add("Iqama Number");
+        if (mapping.WorkingIdCol == 0) missing.Add("Working ID");
+
+        if (missing.Any())
+        {
+            mapping.IsValid = false;
+            mapping.ErrorMessage = $"Required columns missing: {string.Join(", ", missing)}\n" +
+                                  $"Columns found:\n{string.Join("\n", actualHeaders)}";
+        }
+        else
+        {
+            mapping.IsValid = true;
+        }
+
+        return mapping;
+    }
+
+    private WorkingIdRowData ParseWorkingIdRowData(IXLRow row, WorkingIdColumnMapping map, int rowNumber)
+    {
+        var data = new WorkingIdRowData { RowNumber = rowNumber };
+
+        try
+        {
+            var iqamaStr = GetCellValue(row, map.IqamaNoCol);
+            if (string.IsNullOrWhiteSpace(iqamaStr))
+            {
+                data.IsValid = false;
+                data.ErrorMessage = "Iqama Number is required";
+                return data;
+            }
+
+            if (!long.TryParse(iqamaStr.Replace(" ", ""), out long iqamaNo) || iqamaNo <= 0)
+            {
+                data.IsValid = false;
+                data.ErrorMessage = $"Invalid Iqama Number: {iqamaStr}";
+                return data;
+            }
+            data.IqamaNo = iqamaNo;
+
+            data.NewWorkingId = GetCellValue(row, map.WorkingIdCol);
+            if (string.IsNullOrWhiteSpace(data.NewWorkingId))
+            {
+                data.IsValid = false;
+                data.ErrorMessage = "Working ID is required";
+                return data;
+            }
+
+            data.IsValid = true;
+        }
+        catch (Exception ex)
+        {
+            data.IsValid = false;
+            data.ErrorMessage = $"Error parsing row: {ex.Message}";
+        }
+
+        return data;
+    }
+
+
+    internal class WorkingIdColumnMapping
+    {
+        public bool IsValid { get; set; }
+        public string? ErrorMessage { get; set; }
+        public int IqamaNoCol { get; set; }
+        public int WorkingIdCol { get; set; }
+    }
+
+    internal class WorkingIdRowData
+    {
+        public int RowNumber { get; set; }
+        public bool IsValid { get; set; }
+        public string? ErrorMessage { get; set; }
+        public long? IqamaNo { get; set; }
+        public string? NewWorkingId { get; set; }
+    }
 }
 
 internal class VehicleColumnMapping

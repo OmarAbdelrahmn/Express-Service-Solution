@@ -15,6 +15,10 @@ public interface IImportService
     Task<Result<VehicleImportResponse>> ImportVehiclesAsync(
     IFormFile file,
     string uploadedBy);
+
+    Task<Result<WorkingIdUpdateResponse>> UpdateRiderWorkingIdsAsync(
+    IFormFile file,
+    string uploadedBy);
 }
 
 // DTOs
@@ -67,5 +71,28 @@ public record VehicleImportRowResult(
     string? AssignedRiderIqama,
     List<string> Changes,
     List<string> Warnings,
+    string? ErrorMessage
+);
+
+public record WorkingIdUpdateResponse(
+    int TotalRecords,
+    int SuccessfulUpdates,
+    int FailedRecords,
+    int IqamaNotFound,
+    int RiderDetailsNotFound,
+    List<WorkingIdUpdateRowResult> Results,
+    List<string> NotFoundIqamas,
+    List<string> Errors,
+    DateTime ProcessedAt
+);
+
+public record WorkingIdUpdateRowResult(
+    int RowNumber,
+    bool Success,
+    string IqamaNo,
+    string? NewWorkingId,
+    string? OldWorkingId,
+    string? RiderNameEN,
+    string? RiderNameAR,
     string? ErrorMessage
 );

@@ -48,6 +48,7 @@ public static class ApplicationDependencies
         Services.AddScoped<ITemp, Temp>();
         Services.AddScoped<IHungerDisabilityService, HungerDisabilityService>();
         Services.AddScoped<IImportService, ImportService>();
+        Services.AddScoped<IRiderWorkingIdHistoryService, RiderWorkingIdHistoryService>();
 
 
         Services.AddAuth(configuration)

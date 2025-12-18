@@ -4,13 +4,18 @@ using Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 using System;
 using System.Collections.Generic;
-using System.Text;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace Application.Service.Riders;
 
-public class RiderSub(ApplicationDbcontext dbcontext) : IRiderSub
+public class RiderSub(
+    ApplicationDbcontext dbcontext,
+    IRiderWorkingIdHistoryService workingIdHistoryService) : IRiderSub
 {
     private readonly ApplicationDbcontext _dbcontext = dbcontext;
+    private readonly IRiderWorkingIdHistoryService _workingIdHistoryService = workingIdHistoryService;
 
     public async Task<Result<RiderSubstitutionResponse>> StartSubstitution(
         StartSubstitutionRequest request,
@@ -19,39 +24,60 @@ public class RiderSub(ApplicationDbcontext dbcontext) : IRiderSub
         using var transaction = await _dbcontext.Database.BeginTransactionAsync(cancellationToken);
         try
         {
-            var actualRider = await _dbcontext.RiderDetails
-                .Include(r => r.Employee)
-                .Include(r => r.Company)
-                .FirstOrDefaultAsync(r => r.WorkingId == request.ActualRiderWorkingId, cancellationToken);
+            var hasActiveSubstitution = await _dbcontext.RiderShiftSubstitutions
+                .AnyAsync(s => s.ActualRiderWorkingId == request.ActualRiderWorkingId && s.IsActive,
+                         cancellationToken);
 
-            if (actualRider is null)
+            if (hasActiveSubstitution)
                 return Result.Failure<RiderSubstitutionResponse>(
-                    new Error("NotFound", "Actual rider not found", 404));
+                    new Error("AlreadyExists",
+                             $"WorkingId {request.ActualRiderWorkingId} already has an active substitution",
+                             400));
+
+            var ownershipInfo = await _workingIdHistoryService.WhoHasWorkingId(
+                request.ActualRiderWorkingId,
+                cancellationToken);
+
+            RiderDetails? actualRider = null;
+            long? originalRiderIqamaNo = null;
+
+            if (ownershipInfo.IsSuccess && ownershipInfo.Value.IsCurrentlyAssigned)
+            {
+                var riderResult = await _workingIdHistoryService.GetRiderByWorkingId(
+                    request.ActualRiderWorkingId,
+                    cancellationToken);
+
+                if (riderResult.IsSuccess)
+                {
+                    actualRider = riderResult.Value;
+                    originalRiderIqamaNo = ownershipInfo.Value.CurrentRiderIqamaNo;
+                }
+            }
+            else if (ownershipInfo.IsSuccess && ownershipInfo.Value.PreviousOwners.Any())
+            {
+                var lastOwner = ownershipInfo.Value.PreviousOwners.First();
+                originalRiderIqamaNo = lastOwner.RiderIqamaNo;
+            }
 
             var substituteRider = await _dbcontext.RiderDetails
                 .Include(r => r.Employee)
                 .Include(r => r.Company)
-                .FirstOrDefaultAsync(r => r.WorkingId == request.SubstituteWorkingId, cancellationToken);
+                .FirstOrDefaultAsync(r => r.WorkingId == request.SubstituteWorkingId,
+                                   cancellationToken);
 
             if (substituteRider is null)
                 return Result.Failure<RiderSubstitutionResponse>(
-                    new Error("NotFound", "Substitute working ID not found", 404));
+                    new Error("the substitution rider is Not Found", "Substitute rider not found", 404));
 
-            if (substituteRider.WorkingId == actualRider.WorkingId)
+            if (substituteRider.WorkingId == request.ActualRiderWorkingId)
                 return Result.Failure<RiderSubstitutionResponse>(
-                    new Error("InvalidOperation", "Cannot substitute with own working ID", 400));
-
-            var hasActiveSubstitution = await _dbcontext.RiderShiftSubstitutions
-                .AnyAsync(s => s.ActualRiderId == actualRider.Id && s.IsActive, cancellationToken);
-
-            if (hasActiveSubstitution)
-                return Result.Failure<RiderSubstitutionResponse>(
-                    new Error("AlreadyExists", "Rider already has an active substitution", 400));
+                    new Error("InvalidOperation", "Cannot substitute with same WorkingId", 400));
 
             var substitution = new RiderShiftSubstitution
             {
-                ActualRiderId = actualRider.Id,
-                ActualRiderWorkingId = actualRider.WorkingId!,
+                ActualRiderId = actualRider?.Id,
+                ActualRiderWorkingId = request.ActualRiderWorkingId,
+                OriginalRiderIqamaNo = originalRiderIqamaNo,
                 SubstituteRiderId = substituteRider.Id,
                 SubstituteWorkingId = substituteRider.WorkingId!,
                 StartDate = DateTime.UtcNow.AddHours(3),
@@ -65,10 +91,15 @@ public class RiderSub(ApplicationDbcontext dbcontext) : IRiderSub
             await _dbcontext.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
 
+            var actualRiderName = actualRider?.Employee?.NameEN
+                ?? (originalRiderIqamaNo.HasValue
+                    ? $"[IqamaNo: {originalRiderIqamaNo}]"
+                    : $"[WorkingId {request.ActualRiderWorkingId}]");
+
             var response = new RiderSubstitutionResponse(
                 substitution.Id,
-                actualRider.Employee.NameEN,
-                actualRider.WorkingId!,
+                actualRiderName,
+                substitution.ActualRiderWorkingId,
                 substituteRider.Employee.NameEN,
                 substitution.SubstituteWorkingId,
                 substitution.StartDate,
@@ -100,12 +131,12 @@ public class RiderSub(ApplicationDbcontext dbcontext) : IRiderSub
                     .ThenInclude(r => r.Employee)
                 .Include(s => s.SubstituteRider)
                     .ThenInclude(r => r.Employee)
-                .FirstOrDefaultAsync(s => s.ActualRider.WorkingId == WorkingId && s.IsActive,
+                .FirstOrDefaultAsync(s => s.ActualRiderWorkingId == WorkingId && s.IsActive,
                     cancellationToken);
 
             if (substitution is null)
                 return Result.Failure<RiderSubstitutionResponse>(
-                    new Error("NotFound", "No active substitution found for this working ID", 404));
+                    new Error("NotFound", "No active substitution found for this WorkingId", 404));
 
             substitution.EndDate = DateTime.UtcNow.AddHours(3);
             substitution.IsActive = false;
@@ -113,10 +144,15 @@ public class RiderSub(ApplicationDbcontext dbcontext) : IRiderSub
             await _dbcontext.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
 
+            var actualRiderName = substitution.ActualRider?.Employee?.NameEN
+                ?? (substitution.OriginalRiderIqamaNo.HasValue
+                    ? $"[IqamaNo: {substitution.OriginalRiderIqamaNo}]"
+                    : $"[WorkingId {substitution.ActualRiderWorkingId}]");
+
             var response = new RiderSubstitutionResponse(
                 substitution.Id,
-                substitution.ActualRider.Employee.NameEN,
-                substitution.ActualRider.WorkingId ?? "0",
+                actualRiderName,
+                substitution.ActualRiderWorkingId,
                 substitution.SubstituteRider.Employee.NameEN,
                 substitution.SubstituteWorkingId,
                 substitution.StartDate,
@@ -146,20 +182,29 @@ public class RiderSub(ApplicationDbcontext dbcontext) : IRiderSub
                 .Include(s => s.SubstituteRider)
                     .ThenInclude(r => r.Employee)
                 .Where(s => s.IsActive)
-                .Select(s => new RiderSubstitutionResponse(
+                .ToListAsync(cancellationToken);
+
+            var responses = substitutions.Select(s =>
+            {
+                var actualRiderName = s.ActualRider?.Employee?.NameEN
+                    ?? (s.OriginalRiderIqamaNo.HasValue
+                        ? $"[IqamaNo: {s.OriginalRiderIqamaNo}]"
+                        : $"[WorkingId {s.ActualRiderWorkingId}]");
+
+                return new RiderSubstitutionResponse(
                     s.Id,
-                    s.ActualRider.Employee.NameEN,
-                    s.ActualRider.WorkingId ?? "0",
+                    actualRiderName,
+                    s.ActualRiderWorkingId,
                     s.SubstituteRider.Employee.NameEN,
                     s.SubstituteWorkingId,
                     s.StartDate,
                     s.EndDate,
                     s.Reason,
                     s.IsActive
-                ))
-                .ToListAsync(cancellationToken);
+                );
+            });
 
-            return Result.Success<IEnumerable<RiderSubstitutionResponse>>(substitutions);
+            return Result.Success(responses);
         }
         catch (Exception ex)
         {
@@ -179,22 +224,32 @@ public class RiderSub(ApplicationDbcontext dbcontext) : IRiderSub
                     .ThenInclude(r => r.Employee)
                 .Include(s => s.SubstituteRider)
                     .ThenInclude(r => r.Employee)
-                .Where(s => s.ActualRiderWorkingId == riderWorkingId || s.SubstituteWorkingId == riderWorkingId)
+                .Where(s => s.ActualRiderWorkingId == riderWorkingId ||
+                           s.SubstituteWorkingId == riderWorkingId)
                 .OrderByDescending(s => s.StartDate)
-                .Select(s => new RiderSubstitutionResponse(
+                .ToListAsync(cancellationToken);
+
+            var responses = substitutions.Select(s =>
+            {
+                var actualRiderName = s.ActualRider?.Employee?.NameEN
+                    ?? (s.OriginalRiderIqamaNo.HasValue
+                        ? $"[IqamaNo: {s.OriginalRiderIqamaNo}]"
+                        : $"[WorkingId {s.ActualRiderWorkingId}]");
+
+                return new RiderSubstitutionResponse(
                     s.Id,
-                    s.ActualRider.Employee.NameEN,
-                    s.ActualRider.WorkingId ?? "0",
+                    actualRiderName,
+                    s.ActualRiderWorkingId,
                     s.SubstituteRider.Employee.NameEN,
                     s.SubstituteWorkingId,
                     s.StartDate,
                     s.EndDate,
                     s.Reason,
                     s.IsActive
-                ))
-                .ToListAsync(cancellationToken);
+                );
+            });
 
-            return Result.Success<IEnumerable<RiderSubstitutionResponse>>(substitutions);
+            return Result.Success(responses);
         }
         catch (Exception ex)
         {
@@ -215,20 +270,29 @@ public class RiderSub(ApplicationDbcontext dbcontext) : IRiderSub
                     .ThenInclude(r => r.Employee)
                 .Where(s => !s.IsActive)
                 .OrderByDescending(s => s.EndDate)
-                .Select(s => new RiderSubstitutionResponse(
+                .ToListAsync(cancellationToken);
+
+            var responses = substitutions.Select(s =>
+            {
+                var actualRiderName = s.ActualRider?.Employee?.NameEN
+                    ?? (s.OriginalRiderIqamaNo.HasValue
+                        ? $"[IqamaNo: {s.OriginalRiderIqamaNo}]"
+                        : $"[WorkingId {s.ActualRiderWorkingId}]");
+
+                return new RiderSubstitutionResponse(
                     s.Id,
-                    s.ActualRider.Employee.NameEN,
-                    s.ActualRider.WorkingId ?? "0",
+                    actualRiderName,
+                    s.ActualRiderWorkingId,
                     s.SubstituteRider.Employee.NameEN,
                     s.SubstituteWorkingId,
                     s.StartDate,
                     s.EndDate,
                     s.Reason,
                     s.IsActive
-                ))
-                .ToListAsync(cancellationToken);
+                );
+            });
 
-            return Result.Success<IEnumerable<RiderSubstitutionResponse>>(substitutions);
+            return Result.Success(responses);
         }
         catch (Exception ex)
         {
@@ -248,20 +312,29 @@ public class RiderSub(ApplicationDbcontext dbcontext) : IRiderSub
                 .Include(s => s.SubstituteRider)
                     .ThenInclude(r => r.Employee)
                 .OrderByDescending(s => s.StartDate)
-                .Select(s => new RiderSubstitutionResponse(
+                .ToListAsync(cancellationToken);
+
+            var responses = substitutions.Select(s =>
+            {
+                var actualRiderName = s.ActualRider?.Employee?.NameEN
+                    ?? (s.OriginalRiderIqamaNo.HasValue
+                        ? $"[IqamaNo: {s.OriginalRiderIqamaNo}]"
+                        : $"[WorkingId {s.ActualRiderWorkingId}]");
+
+                return new RiderSubstitutionResponse(
                     s.Id,
-                    s.ActualRider.Employee.NameEN,
-                    s.ActualRider.WorkingId ?? "0",
+                    actualRiderName,
+                    s.ActualRiderWorkingId,
                     s.SubstituteRider.Employee.NameEN,
                     s.SubstituteWorkingId,
                     s.StartDate,
                     s.EndDate,
                     s.Reason,
                     s.IsActive
-                ))
-                .ToListAsync(cancellationToken);
+                );
+            });
 
-            return Result.Success<IEnumerable<RiderSubstitutionResponse>>(substitutions);
+            return Result.Success(responses);
         }
         catch (Exception ex)
         {

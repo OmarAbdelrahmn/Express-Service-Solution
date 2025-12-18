@@ -11,10 +11,8 @@ namespace Domain;
 
 public class ApplicationDbcontext(DbContextOptions<ApplicationDbcontext> options) : IdentityDbContext<ApplicationUser,ApplicationRole,string>(options)
 {
-    //public required DbSet<RefreshToken> RefreshTokens { get; set; }
 
     public required DbSet<ApplicationUser> ApplicationUsers { get; set; }
-
     public required DbSet<ApplicationRole> ApplicationRoles { get; set; }
     public required DbSet<Company> Companies{ get; set; }
     public required DbSet<Employees> Employees{ get; set; }
@@ -25,13 +23,13 @@ public class ApplicationDbcontext(DbContextOptions<ApplicationDbcontext> options
     public required DbSet<RiderShiftSubstitution> RiderShiftSubstitutions{ get; set; }
     public required DbSet<Vehicle> Vehicles { get; set; }
     public required DbSet<DeletedEmployees> DeletedEmployees { get; set; }
-    //public required DbSet<ArchivedRiderShift> ArchivedRiderShifts { get; set; }
     public required DbSet<RiderCompanyHistory> RiderCompanyHistory { get; set; }
     public required DbSet<RiderVehicleStatus> RiderVehicleStatus { get; set; }
     public required DbSet<TempRiderShiftComparison> TempRiderShiftComparisons { get; set; }
     public required DbSet<TempEmployeeUpdate> TempEmployeeUpdates { get; set; }
     public required DbSet<TempEmployeeStatusChange> TempEmployeeStatusChanges { get; set; }
     public required DbSet<TempVehicleOperation> TempVehicleOperations { get; set; }
+    public required DbSet<RiderWorkingIdHistory> RiderWorkingIdHistories { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -135,19 +133,50 @@ public class ApplicationDbcontext(DbContextOptions<ApplicationDbcontext> options
             entity.HasIndex(e => e.IsResolved);
             entity.HasIndex(e => e.RequestedAt);
         });
-        //modelBuilder.Entity<EmployeeDocuments>()
-        //.HasOne(ed => ed.Employee)
-        //.WithOne(r => r.EmployeeDocuments)
-        //.HasForeignKey(ed => ed.EmployeeIqamaNo);
-        modelBuilder.Entity<RiderShiftSubstitution>()
-    .Property(x => x.EndDate)
-    .HasDefaultValueSql("GETUTCDATE()");
-        modelBuilder.Entity<Employees>()
-        .Property(x => x.DateOfBirth)
-        .HasConversion(
-            v => v.ToDateTime(TimeOnly.MinValue),
-            v => DateOnly.FromDateTime(v)
-        );
+        modelBuilder.Entity<RiderShiftSubstitution>(entity =>
+        {
+            entity.HasKey(s => s.Id);
+
+            entity.HasIndex(s => new { s.ActualRiderWorkingId, s.IsActive });
+            entity.HasIndex(s => new { s.SubstituteWorkingId, s.IsActive });
+
+            entity.HasOne(s => s.ActualRider)
+                .WithMany()
+                .HasForeignKey(s => s.ActualRiderId)
+                .OnDelete(DeleteBehavior.Restrict)
+                .IsRequired(false); 
+
+            entity.HasOne(s => s.SubstituteRider)
+                .WithMany()
+                .HasForeignKey(s => s.SubstituteRiderId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<RiderWorkingIdHistory>(entity =>
+        {
+            entity.HasKey(h => h.Id);
+
+            entity.HasIndex(h => h.WorkingId);
+            entity.HasIndex(h => h.RiderIqamaNo);
+            entity.HasIndex(h => new { h.WorkingId, h.IsActive });
+            entity.HasIndex(h => new { h.RiderIqamaNo, h.IsActive });
+
+            entity.Property(h => h.WorkingId)
+                .IsRequired()
+                .HasMaxLength(50);
+
+            entity.HasOne(h => h.Employee)
+                .WithMany()
+                .HasForeignKey(h => h.RiderIqamaNo)
+                .HasPrincipalKey(e => e.IqamaNo)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(h => h.Company)
+                .WithMany()
+                .HasForeignKey(h => h.CompanyId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
 
         foreach (var property in modelBuilder.Model.GetEntityTypes()
        .SelectMany(t => t.GetProperties())

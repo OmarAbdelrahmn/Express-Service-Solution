@@ -15,9 +15,11 @@ using static Microsoft.EntityFrameworkCore.DbLoggerCategory.Database;
 
 namespace Application.Service.Riders;
 
-public class RiderService(ApplicationDbcontext dbcontext) : IRiderService
+public class RiderService(ApplicationDbcontext dbcontext,IRiderWorkingIdHistoryService workingIdHistoryService) : IRiderService
 {
     private readonly ApplicationDbcontext dbcontext = dbcontext;
+    private readonly IRiderWorkingIdHistoryService _workingIdHistoryService = workingIdHistoryService;
+
     public async Task<Result<EmployeeStatisticsResponse>> GetEmployeeStatistics()
     {
         try
@@ -183,6 +185,15 @@ public class RiderService(ApplicationDbcontext dbcontext) : IRiderService
 
             await dbcontext.Employees.AddAsync(employee);
             await dbcontext.SaveChangesAsync();
+
+            await _workingIdHistoryService.RecordWorkingIdChange(
+            Request.IqamaNo,
+            Request.WorkingId,
+            Company.Id,
+            $"Initial assignment - Company: {Company.Name}",
+            default
+        );
+
             await transaction.CommitAsync();
             return Result.Success();
 
@@ -256,6 +267,32 @@ public class RiderService(ApplicationDbcontext dbcontext) : IRiderService
                 return Result.Failure<RiderResponse>(
                     new Error("NotFound", "No rider details found for this employee", 400));
 
+            bool workingIdChanged = false;
+            int? newCompanyId = null;
+            string? newWorkingId = null;
+
+            if (!string.IsNullOrWhiteSpace(request.WorkingId) &&
+                request.WorkingId != riderDetails.WorkingId)
+            {
+                newWorkingId = request.WorkingId;
+                workingIdChanged = true;
+            }
+
+            if (request.CompanyName is not null)
+            {
+                var company = await dbcontext.Companies
+                    .FirstOrDefaultAsync(c => c.Name == request.CompanyName);
+
+                if (company is null)
+                    return Result.Failure<RiderResponse>(
+                        new Error("no company found", $"no company found with name {request.CompanyName}", 400));
+
+                if (company.Id != riderDetails.CompanyId)
+                {
+                    newCompanyId = company.Id;
+                    workingIdChanged = true;
+                }
+            }
 
             if (request.IqamaEndM.HasValue)
                 employee.IqamaEndM = request.IqamaEndM.Value;
@@ -318,8 +355,23 @@ public class RiderService(ApplicationDbcontext dbcontext) : IRiderService
                 riderDetails.CompanyId = company.Id;
             }
 
-
             await dbcontext.SaveChangesAsync();
+
+            if (workingIdChanged)
+            {
+                var finalWorkingId = newWorkingId ?? riderDetails.WorkingId!;
+                var finalCompanyId = newCompanyId ?? riderDetails.CompanyId;
+
+                var company = await dbcontext.Companies.FindAsync(finalCompanyId);
+
+                await _workingIdHistoryService.RecordWorkingIdChange(
+                    IqamaNo,
+                    finalWorkingId,
+                    finalCompanyId,
+                    $"Updated - Company: {company?.Name ?? "Unknown"}",
+                    default
+                );
+            }
 
             var response = MapToResponse(employee, riderDetails);
             await transaction.CommitAsync();
@@ -493,15 +545,63 @@ public class RiderService(ApplicationDbcontext dbcontext) : IRiderService
     }
     public async Task<Result> ChangeWorkinId(string OldWorkinId, string NewWorkingId)
     {
-        var rider = await dbcontext.RiderDetails.FirstOrDefaultAsync(r => r.WorkingId == OldWorkinId);
+        using var transaction = await dbcontext.Database.BeginTransactionAsync();
 
-        if (rider is null)
-            return Result.Failure(new Error("Not Found", "No rider found with the specified old working ID", 404));
+        try
+        {
+            // Find the rider with the old WorkingId
+            var rider = await dbcontext.RiderDetails
+                .Include(r => r.Employee)
+                .Include(r => r.Company)
+                .FirstOrDefaultAsync(r => r.WorkingId == OldWorkinId);
 
-        rider.WorkingId = NewWorkingId;
-        await dbcontext.SaveChangesAsync();
+            if (rider is null)
+                return Result.Failure(
+                    new Error("NotFound", "No rider found with the specified old working ID", 404));
 
-        return Result.Success();
+            // Check if new WorkingId is already in use
+            var newIdExists = await dbcontext.RiderDetails
+                .AnyAsync(r => r.WorkingId == NewWorkingId && r.Id != rider.Id);
+
+            if (newIdExists)
+                return Result.Failure(
+                    new Error("AlreadyExists", $"WorkingId {NewWorkingId} is already assigned to another rider", 400));
+
+            // Check if new WorkingId exists in history (to prevent conflicts)
+            var historyCheck = await _workingIdHistoryService.WhoHasWorkingId(
+                NewWorkingId,
+                default);
+
+            if (historyCheck.IsSuccess && historyCheck.Value.IsCurrentlyAssigned)
+            {
+                return Result.Failure(
+                    new Error("AlreadyExists",
+                        $"WorkingId {NewWorkingId} is currently assigned to {historyCheck.Value.CurrentRiderName}",
+                        400));
+            }
+
+            // Update the WorkingId
+            rider.WorkingId = NewWorkingId;
+            await dbcontext.SaveChangesAsync();
+
+            // ✅ Record the change in history
+            await _workingIdHistoryService.RecordWorkingIdChange(
+                rider.EmployeeIqamaNo,
+                NewWorkingId,
+                rider.CompanyId,
+                $"WorkingId changed from {OldWorkinId} to {NewWorkingId}",
+                default
+            );
+
+            await transaction.CommitAsync();
+
+            return Result.Success();
+        }
+        catch (Exception ex)
+        {
+            await transaction.RollbackAsync();
+            return Result.Failure(new Error("ServerError", ex.Message, 500));
+        }
     }
     public async Task<Result> AddETOR(long IqamaNo, EMTOR request)
     {
