@@ -1,0 +1,68 @@
+﻿using Microsoft.EntityFrameworkCore.Migrations;
+
+#nullable disable
+
+namespace Domain.Migrations
+{
+    /// <inheritdoc />
+    public partial class trynull : Migration
+    {
+        /// <inheritdoc />
+        protected override void Up(MigrationBuilder migrationBuilder)
+        {
+            migrationBuilder.AlterColumn<int>(
+                name: "ActualRiderId",
+                table: "RiderShiftSubstitutions",
+                type: "int",
+                maxLength: 50,
+                nullable: true,
+                oldClrType: typeof(int),
+                oldType: "int",
+                oldMaxLength: 50);
+
+            migrationBuilder.UpdateData(
+                table: "AspNetUsers",
+                keyColumn: "Id",
+                keyValue: "59724D2D-E2B5-4C67-AB6F-D93478347B03",
+                column: "PasswordHash",
+                value: "AQAAAAIAAYagAAAAEESLOfYLD3xUw8ZfSJsmviYw+CtkBm1bPyA/y/EUfTJmWJzMsqep0TlWavmsuRsfkA==");
+
+            migrationBuilder.UpdateData(
+                table: "AspNetUsers",
+                keyColumn: "Id",
+                keyValue: "59726D2D-E2B5-4C67-AB6F-D93478317B03",
+                column: "PasswordHash",
+                value: "AQAAAAIAAYagAAAAEM5qPsnjPfwhgmBb5cFmvMWRz2ca5XB000SsQEEg1Hydt1qJowIVQ8ofVVNjVg4jww==");
+        }
+
+        /// <inheritdoc />
+        protected override void Down(MigrationBuilder migrationBuilder)
+        {
+            migrationBuilder.AlterColumn<int>(
+                name: "ActualRiderId",
+                table: "RiderShiftSubstitutions",
+                type: "int",
+                maxLength: 50,
+                nullable: false,
+                defaultValue: 0,
+                oldClrType: typeof(int),
+                oldType: "int",
+                oldMaxLength: 50,
+                oldNullable: true);
+
+            migrationBuilder.UpdateData(
+                table: "AspNetUsers",
+                keyColumn: "Id",
+                keyValue: "59724D2D-E2B5-4C67-AB6F-D93478347B03",
+                column: "PasswordHash",
+                value: "AQAAAAIAAYagAAAAECYZuxEsw1admP9p4OzkIj/DliARu/GRYnbk11SooOHJ/Xozd94JUY7t8zb4kvU/uw==");
+
+            migrationBuilder.UpdateData(
+                table: "AspNetUsers",
+                keyColumn: "Id",
+                keyValue: "59726D2D-E2B5-4C67-AB6F-D93478317B03",
+                column: "PasswordHash",
+                value: "AQAAAAIAAYagAAAAEI9cGFJjCH909Ivk0Pmm7bOOwkCJ5KWVdWJduCq0E7kAT7KdqQ2oXJZgIIOjwHJA+w==");
+        }
+    }
+}

@@ -1332,12 +1332,13 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
         CancellationToken cancellationToken)
     {
         var substitution = await dbcontext.Set<RiderShiftSubstitution>()
-            .Include(s => s.SubstituteRider)
-                .ThenInclude(r => r.Company)
-            .Include(s => s.SubstituteRider)
-                .ThenInclude(r => r.Employee)
-            .FirstOrDefaultAsync(s => s.ActualRiderWorkingId == WorkingId && s.IsActive,
-                                cancellationToken);
+        .AsNoTracking()  // ✅ ADD THIS
+        .Include(s => s.SubstituteRider)
+            .ThenInclude(r => r.Company)
+        .Include(s => s.SubstituteRider)
+            .ThenInclude(r => r.Employee)
+        .FirstOrDefaultAsync(s => s.ActualRiderWorkingId == WorkingId && s.IsActive,
+                            cancellationToken);
 
         if (substitution != null)
         {
@@ -1345,14 +1346,12 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
         }
 
         var currentHistory = await dbcontext.RiderWorkingIdHistories
-            .Include(h => h.Employee)
-                .ThenInclude(e => e.RiderDetails)
-                    .ThenInclude(rd => rd.Company)
-            .Include(h => h.Employee)
-                .ThenInclude(e => e.RiderDetails)
-                    .ThenInclude(rd => rd.Employee)
-            .FirstOrDefaultAsync(h => h.WorkingId == WorkingId && h.IsActive,
-                                cancellationToken);
+        .AsNoTracking()  
+        .Include(h => h.Employee)
+            .ThenInclude(e => e.RiderDetails)
+                .ThenInclude(rd => rd.Company)
+        .FirstOrDefaultAsync(h => h.WorkingId == WorkingId && h.IsActive,
+                            cancellationToken);
 
         if (currentHistory?.Employee?.RiderDetails != null)
         {
@@ -1360,6 +1359,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
         }
 
         var rider = await dbcontext.RiderDetails
+            .AsNoTracking()  
             .Include(r => r.Company)
             .Include(r => r.Employee)
             .FirstOrDefaultAsync(r => r.WorkingId == WorkingId, cancellationToken);

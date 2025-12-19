@@ -24,6 +24,7 @@ public class RiderSub(
         using var transaction = await _dbcontext.Database.BeginTransactionAsync(cancellationToken);
         try
         {
+            // Check if there's already an active substitution for this WorkingId
             var hasActiveSubstitution = await _dbcontext.RiderShiftSubstitutions
                 .AnyAsync(s => s.ActualRiderWorkingId == request.ActualRiderWorkingId && s.IsActive,
                          cancellationToken);
@@ -34,6 +35,7 @@ public class RiderSub(
                              $"WorkingId {request.ActualRiderWorkingId} already has an active substitution",
                              400));
 
+            // Get ownership information for the WorkingId
             var ownershipInfo = await _workingIdHistoryService.WhoHasWorkingId(
                 request.ActualRiderWorkingId,
                 cancellationToken);
@@ -41,24 +43,40 @@ public class RiderSub(
             RiderDetails? actualRider = null;
             long? originalRiderIqamaNo = null;
 
+            // Case 1: WorkingId is currently active and assigned
             if (ownershipInfo.IsSuccess && ownershipInfo.Value.IsCurrentlyAssigned)
             {
                 var riderResult = await _workingIdHistoryService.GetRiderByWorkingId(
                     request.ActualRiderWorkingId,
                     cancellationToken);
 
-                if (riderResult.IsSuccess)
+                if (riderResult.IsSuccess && riderResult.Value != null)
                 {
                     actualRider = riderResult.Value;
                     originalRiderIqamaNo = ownershipInfo.Value.CurrentRiderIqamaNo;
                 }
             }
+            // Case 2: WorkingId is old/inactive - get the last owner's rider details
             else if (ownershipInfo.IsSuccess && ownershipInfo.Value.PreviousOwners.Any())
             {
                 var lastOwner = ownershipInfo.Value.PreviousOwners.First();
                 originalRiderIqamaNo = lastOwner.RiderIqamaNo;
-            }
 
+                // Fetch the actual rider details from the last owner
+                actualRider = await _dbcontext.RiderDetails
+                    .Include(r => r.Employee)
+                    .Include(r => r.Company)
+                    .FirstOrDefaultAsync(r => r.EmployeeIqamaNo == lastOwner.RiderIqamaNo,
+                                       cancellationToken);
+
+                // If rider not found by IqamaNo, this might be a deleted rider
+                // In that case, actualRider remains null but we have the IqamaNo for tracking
+            }
+            // Case 3: WorkingId doesn't exist in system at all
+            // actualRider remains null, originalRiderIqamaNo remains null
+            // This allows creating substitutions for future/temporary WorkingIds
+
+            // Get substitute rider details
             var substituteRider = await _dbcontext.RiderDetails
                 .Include(r => r.Employee)
                 .Include(r => r.Company)
@@ -67,17 +85,19 @@ public class RiderSub(
 
             if (substituteRider is null)
                 return Result.Failure<RiderSubstitutionResponse>(
-                    new Error("the substitution rider is Not Found", "Substitute rider not found", 404));
+                    new Error("NotFound", "Substitute rider not found", 404));
 
+            // Validate that substitute is not the same as actual
             if (substituteRider.WorkingId == request.ActualRiderWorkingId)
                 return Result.Failure<RiderSubstitutionResponse>(
                     new Error("InvalidOperation", "Cannot substitute with same WorkingId", 400));
 
+            // Create the substitution record
             var substitution = new RiderShiftSubstitution
             {
-                ActualRiderId = actualRider?.Id,
+                ActualRiderId = actualRider?.Id,  // May be null if WorkingId doesn't exist or rider deleted
                 ActualRiderWorkingId = request.ActualRiderWorkingId,
-                OriginalRiderIqamaNo = originalRiderIqamaNo,
+                OriginalRiderIqamaNo = originalRiderIqamaNo,  // Tracked even if rider deleted
                 SubstituteRiderId = substituteRider.Id,
                 SubstituteWorkingId = substituteRider.WorkingId!,
                 StartDate = DateTime.UtcNow.AddHours(3),
@@ -91,10 +111,11 @@ public class RiderSub(
             await _dbcontext.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
 
+            // Build appropriate display name for the actual rider
             var actualRiderName = actualRider?.Employee?.NameEN
                 ?? (originalRiderIqamaNo.HasValue
-                    ? $"[IqamaNo: {originalRiderIqamaNo}]"
-                    : $"[WorkingId {request.ActualRiderWorkingId}]");
+                    ? $"Former Rider [IqamaNo: {originalRiderIqamaNo}]"
+                    : $"Unassigned WorkingId [{request.ActualRiderWorkingId}]");
 
             var response = new RiderSubstitutionResponse(
                 substitution.Id,
@@ -146,8 +167,8 @@ public class RiderSub(
 
             var actualRiderName = substitution.ActualRider?.Employee?.NameEN
                 ?? (substitution.OriginalRiderIqamaNo.HasValue
-                    ? $"[IqamaNo: {substitution.OriginalRiderIqamaNo}]"
-                    : $"[WorkingId {substitution.ActualRiderWorkingId}]");
+                    ? $"Former Rider [IqamaNo: {substitution.OriginalRiderIqamaNo}]"
+                    : $"Unassigned WorkingId [{substitution.ActualRiderWorkingId}]");
 
             var response = new RiderSubstitutionResponse(
                 substitution.Id,
@@ -188,8 +209,8 @@ public class RiderSub(
             {
                 var actualRiderName = s.ActualRider?.Employee?.NameEN
                     ?? (s.OriginalRiderIqamaNo.HasValue
-                        ? $"[IqamaNo: {s.OriginalRiderIqamaNo}]"
-                        : $"[WorkingId {s.ActualRiderWorkingId}]");
+                        ? $"Former Rider [IqamaNo: {s.OriginalRiderIqamaNo}]"
+                        : $"Unassigned WorkingId [{s.ActualRiderWorkingId}]");
 
                 return new RiderSubstitutionResponse(
                     s.Id,
@@ -233,8 +254,8 @@ public class RiderSub(
             {
                 var actualRiderName = s.ActualRider?.Employee?.NameEN
                     ?? (s.OriginalRiderIqamaNo.HasValue
-                        ? $"[IqamaNo: {s.OriginalRiderIqamaNo}]"
-                        : $"[WorkingId {s.ActualRiderWorkingId}]");
+                        ? $"Former Rider [IqamaNo: {s.OriginalRiderIqamaNo}]"
+                        : $"Unassigned WorkingId [{s.ActualRiderWorkingId}]");
 
                 return new RiderSubstitutionResponse(
                     s.Id,
@@ -276,8 +297,8 @@ public class RiderSub(
             {
                 var actualRiderName = s.ActualRider?.Employee?.NameEN
                     ?? (s.OriginalRiderIqamaNo.HasValue
-                        ? $"[IqamaNo: {s.OriginalRiderIqamaNo}]"
-                        : $"[WorkingId {s.ActualRiderWorkingId}]");
+                        ? $"Former Rider [IqamaNo: {s.OriginalRiderIqamaNo}]"
+                        : $"Unassigned WorkingId [{s.ActualRiderWorkingId}]");
 
                 return new RiderSubstitutionResponse(
                     s.Id,
@@ -318,8 +339,8 @@ public class RiderSub(
             {
                 var actualRiderName = s.ActualRider?.Employee?.NameEN
                     ?? (s.OriginalRiderIqamaNo.HasValue
-                        ? $"[IqamaNo: {s.OriginalRiderIqamaNo}]"
-                        : $"[WorkingId {s.ActualRiderWorkingId}]");
+                        ? $"Former Rider [IqamaNo: {s.OriginalRiderIqamaNo}]"
+                        : $"Unassigned WorkingId [{s.ActualRiderWorkingId}]");
 
                 return new RiderSubstitutionResponse(
                     s.Id,

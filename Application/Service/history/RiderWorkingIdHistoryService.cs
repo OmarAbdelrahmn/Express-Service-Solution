@@ -22,8 +22,6 @@ public class RiderWorkingIdHistoryService(ApplicationDbcontext dbcontext)
         string? notes = null,
         CancellationToken cancellationToken = default)
     {
-        using var transaction = await _dbcontext.Database.BeginTransactionAsync(cancellationToken);
-
         try
         {
             // Verify rider exists
@@ -44,7 +42,6 @@ public class RiderWorkingIdHistoryService(ApplicationDbcontext dbcontext)
             if (existingActive != null)
             {
                 // Already active, no change needed
-                await transaction.CommitAsync(cancellationToken);
                 return Result.Success();
             }
 
@@ -74,13 +71,11 @@ public class RiderWorkingIdHistoryService(ApplicationDbcontext dbcontext)
 
             await _dbcontext.RiderWorkingIdHistories.AddAsync(newHistory, cancellationToken);
             await _dbcontext.SaveChangesAsync(cancellationToken);
-            await transaction.CommitAsync(cancellationToken);
 
             return Result.Success();
         }
         catch (Exception ex)
         {
-            await transaction.RollbackAsync(cancellationToken);
             return Result.Failure(new Error("ServerError", ex.Message, 500));
         }
     }

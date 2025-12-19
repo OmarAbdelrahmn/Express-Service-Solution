@@ -146,6 +146,15 @@ public class ApplicationDbcontext(DbContextOptions<ApplicationDbcontext> options
                 .OnDelete(DeleteBehavior.Restrict)
                 .IsRequired(false); 
 
+            entity.Navigation(s => s.ActualRider)
+                .IsRequired(false);
+
+            entity.Property(s => s.ActualRiderId)
+                .IsRequired(false);
+            
+            entity.Property(s => s.EndDate)
+                .IsRequired(false);
+
             entity.HasOne(s => s.SubstituteRider)
                 .WithMany()
                 .HasForeignKey(s => s.SubstituteRiderId)

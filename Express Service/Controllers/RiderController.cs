@@ -15,7 +15,7 @@ public class RiderController(IRiderService service) : ControllerBase
     private readonly IRiderService service = service;
     
     [HttpGet("")]
-    [Authorize(Roles = "Master,Admin,Member")]
+   // [Authorize(Roles = "Master,Admin,Member")]
     public async Task<IActionResult> GetAllRiders()
     {
         var result = await service.GetAllEmployee();
@@ -93,7 +93,7 @@ public class RiderController(IRiderService service) : ControllerBase
     }
 
     [HttpPost("change-working-id")]
-    [Authorize(Roles = "Master,Admin")]
+    //[Authorize(Roles = "Master,Admin")]
     public async Task<IActionResult> ChangeWorkingId([FromQuery] string oldWorkingId, [FromQuery] string newWorkingId)
     {
         var result = await service.ChangeWorkinId(oldWorkingId, newWorkingId);

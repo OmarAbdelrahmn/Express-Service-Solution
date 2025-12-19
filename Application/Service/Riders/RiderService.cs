@@ -186,13 +186,21 @@ public class RiderService(ApplicationDbcontext dbcontext,IRiderWorkingIdHistoryS
             await dbcontext.Employees.AddAsync(employee);
             await dbcontext.SaveChangesAsync();
 
-            await _workingIdHistoryService.RecordWorkingIdChange(
+            var historyResult = await _workingIdHistoryService.RecordWorkingIdChange(
             Request.IqamaNo,
             Request.WorkingId,
             Company.Id,
             $"Initial assignment - Company: {Company.Name}",
-            default
+            cancellationToken: default  // ✅ Use named parameter
         );
+
+            // ✅ Check if history recording failed
+            if (historyResult.IsFailure)
+            {
+                await transaction.RollbackAsync();
+                return Result.Failure(new Error("HistoryError",
+                    $"Failed to record history: {historyResult.Error.Description}", 500));
+            }
 
             await transaction.CommitAsync();
             return Result.Success();
@@ -362,15 +370,24 @@ public class RiderService(ApplicationDbcontext dbcontext,IRiderWorkingIdHistoryS
                 var finalWorkingId = newWorkingId ?? riderDetails.WorkingId!;
                 var finalCompanyId = newCompanyId ?? riderDetails.CompanyId;
 
-                var company = await dbcontext.Companies.FindAsync(finalCompanyId);
+                var company = await dbcontext.Companies
+                    .AsNoTracking()  
+                    .FirstOrDefaultAsync(c => c.Id == finalCompanyId);
 
-                await _workingIdHistoryService.RecordWorkingIdChange(
+                var historyResult = await _workingIdHistoryService.RecordWorkingIdChange(
                     IqamaNo,
                     finalWorkingId,
                     finalCompanyId,
                     $"Updated - Company: {company?.Name ?? "Unknown"}",
-                    default
+                    cancellationToken: default 
                 );
+
+                if (historyResult.IsFailure)
+                {
+                    await transaction.RollbackAsync();
+                    return Result.Failure<RiderResponse>(new Error("HistoryError",
+                        $"Failed to record history: {historyResult.Error.Description}", 500));
+                }
             }
 
             var response = MapToResponse(employee, riderDetails);
@@ -549,7 +566,6 @@ public class RiderService(ApplicationDbcontext dbcontext,IRiderWorkingIdHistoryS
 
         try
         {
-            // Find the rider with the old WorkingId
             var rider = await dbcontext.RiderDetails
                 .Include(r => r.Employee)
                 .Include(r => r.Company)
@@ -559,7 +575,6 @@ public class RiderService(ApplicationDbcontext dbcontext,IRiderWorkingIdHistoryS
                 return Result.Failure(
                     new Error("NotFound", "No rider found with the specified old working ID", 404));
 
-            // Check if new WorkingId is already in use
             var newIdExists = await dbcontext.RiderDetails
                 .AnyAsync(r => r.WorkingId == NewWorkingId && r.Id != rider.Id);
 
@@ -567,7 +582,6 @@ public class RiderService(ApplicationDbcontext dbcontext,IRiderWorkingIdHistoryS
                 return Result.Failure(
                     new Error("AlreadyExists", $"WorkingId {NewWorkingId} is already assigned to another rider", 400));
 
-            // Check if new WorkingId exists in history (to prevent conflicts)
             var historyCheck = await _workingIdHistoryService.WhoHasWorkingId(
                 NewWorkingId,
                 default);
@@ -584,14 +598,22 @@ public class RiderService(ApplicationDbcontext dbcontext,IRiderWorkingIdHistoryS
             rider.WorkingId = NewWorkingId;
             await dbcontext.SaveChangesAsync();
 
-            // ✅ Record the change in history
-            await _workingIdHistoryService.RecordWorkingIdChange(
+            // ✅ Record the change in history AFTER saving
+            var historyResult = await _workingIdHistoryService.RecordWorkingIdChange(
                 rider.EmployeeIqamaNo,
                 NewWorkingId,
                 rider.CompanyId,
                 $"WorkingId changed from {OldWorkinId} to {NewWorkingId}",
-                default
+                cancellationToken: default  // ✅ Use named parameter
             );
+
+            // ✅ Check if history recording failed
+            if (historyResult.IsFailure)
+            {
+                await transaction.RollbackAsync();
+                return Result.Failure(new Error("HistoryError",
+                    $"Failed to record history: {historyResult.Error.Description}", 500));
+            }
 
             await transaction.CommitAsync();
 
