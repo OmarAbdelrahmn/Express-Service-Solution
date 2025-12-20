@@ -7,7 +7,9 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Application.Service;
 
-public class HungerDisabilityService(ApplicationDbcontext dbcontext) : IHungerDisabilityService
+public class HungerDisabilityService(
+    ApplicationDbcontext dbcontext,
+    IRiderWorkingIdHistoryService workingIdHistoryService) : IHungerDisabilityService
 {
     private const int DAILY_TARGET = 14;
 
@@ -35,6 +37,7 @@ public class HungerDisabilityService(ApplicationDbcontext dbcontext) : IHungerDi
             var rows = worksheet.RowsUsed().Skip(1);
             totalRecords = rows.Count();
 
+            // Load all riders with their details
             var allRiders = await dbcontext.RiderDetails
                 .Include(r => r.Employee)
                     .ThenInclude(e => e.Housing)
@@ -46,6 +49,7 @@ public class HungerDisabilityService(ApplicationDbcontext dbcontext) : IHungerDi
                 .Where(r => !string.IsNullOrWhiteSpace(r.WorkingId))
                 .ToDictionary(r => r.WorkingId!, r => r);
 
+            // Get active substitutions for fallback
             var activeSubstitutions = await dbcontext.Set<RiderShiftSubstitution>()
                 .Where(s => s.IsActive)
                 .Include(s => s.SubstituteRider)
@@ -72,55 +76,62 @@ public class HungerDisabilityService(ApplicationDbcontext dbcontext) : IHungerDi
                         continue;
                     }
 
-                    if (!ridersByWorkingId.TryGetValue(rowData.ActualWorkingId!, out var actualRider))
+                    // Try to resolve the WorkingId using the new history system
+                    var (riderId, riderDetails, resolutionMethod) = await ResolveWorkingIdAsync(
+                        rowData.ActualWorkingId!,
+                        ridersByWorkingId,
+                        substitutionDict,
+                        cancellationToken);
+
+                    if (riderId == 0 || riderDetails == null)
                     {
                         errors.Add(new ImportError(rowNumber, rowData.ActualWorkingId!,
-                            $"Rider with Working ID {rowData.ActualWorkingId} not found in database"));
+                            $"Rider with Working ID {rowData.ActualWorkingId} not found in database or history"));
                         continue;
                     }
 
                     var existingRecord = await dbcontext.Set<HungerDisability>()
-                        .AnyAsync(h => h.ActualRiderId == actualRider.Id && h.ShiftDate == shiftDate, cancellationToken);
+                        .AnyAsync(h => h.ActualRiderId == riderId && h.ShiftDate == shiftDate, cancellationToken);
 
                     if (existingRecord)
                     {
                         errors.Add(new ImportError(rowNumber, rowData.ActualWorkingId!,
-                            $"Record already exists for rider {actualRider.Employee.NameEN} on {shiftDate}"));
+                            $"Record already exists for rider {riderDetails.Employee.NameEN} on {shiftDate}"));
                         continue;
                     }
 
-                    if (recordsToAdd.Any(r => r.ActualRiderId == actualRider.Id && r.ShiftDate == shiftDate))
+                    if (recordsToAdd.Any(r => r.ActualRiderId == riderId && r.ShiftDate == shiftDate))
                     {
                         errors.Add(new ImportError(rowNumber, rowData.ActualWorkingId!,
-                            $"Duplicate entry in Excel for rider {actualRider.Employee.NameEN} on {shiftDate}"));
+                            $"Duplicate entry in Excel for rider {riderDetails.Employee.NameEN} on {shiftDate}"));
                         continue;
-                    }
-
-                    RiderDetails? substituteRider = null;
-                    if (substitutionDict.TryGetValue(rowData.ActualWorkingId!, out var substitution))
-                    {
-                        substituteRider = substitution.SubstituteRider;
                     }
 
                     var record = new HungerDisability
                     {
-                        ActualRiderId = actualRider.Id,
-                        ActualWorkingId = actualRider.WorkingId!,
-                        SubstituteRiderId = substituteRider?.Id,
-                        SubstituteWorkingId = substituteRider?.WorkingId,
+                        ActualRiderId = riderId,
+                        ActualWorkingId = rowData.ActualWorkingId!,
+                        SubstituteRiderId = resolutionMethod == "Substitution" ? riderId : null,
+                        SubstituteWorkingId = resolutionMethod == "Substitution" ? riderDetails.WorkingId : null,
                         ShiftDate = shiftDate,
                         Days = rowData.Days!.Value,
-                        CompanyId = actualRider.CompanyId,
+                        CompanyId = riderDetails.CompanyId,
                         AcceptedDailyOrders = rowData.AcceptedDailyOrders!.Value,
                         CreatedAt = DateTime.UtcNow.AddHours(3)
                     };
 
                     recordsToAdd.Add(record);
 
-                    if (substituteRider != null)
+                    // Add informational message about resolution
+                    if (resolutionMethod == "WorkingIdHistory")
                     {
                         errors.Add(new ImportError(rowNumber, rowData.ActualWorkingId!,
-                            $"ℹ️ INFO: Disabled rider {actualRider.Employee.NameEN} has substitute {substituteRider.Employee.NameEN} (ID: {substituteRider.WorkingId})"));
+                            $"ℹ️ INFO: WorkingId {rowData.ActualWorkingId} resolved via history to {riderDetails.Employee.NameEN} (Current ID: {riderDetails.WorkingId})"));
+                    }
+                    else if (resolutionMethod == "Substitution")
+                    {
+                        errors.Add(new ImportError(rowNumber, rowData.ActualWorkingId!,
+                            $"ℹ️ INFO: Disabled rider WorkingId {rowData.ActualWorkingId} has substitute {riderDetails.Employee.NameEN} (ID: {riderDetails.WorkingId})"));
                     }
                 }
                 catch (Exception ex)
@@ -143,6 +154,45 @@ public class HungerDisabilityService(ApplicationDbcontext dbcontext) : IHungerDi
             return Result.Failure<HungerDisabilityImportResult>(
                 new Error("ServerError", $"Error reading Excel file: {ex.Message}", 500));
         }
+    }
+
+    private async Task<(int riderId, RiderDetails? riderDetails, string resolutionMethod)> ResolveWorkingIdAsync(
+        string workingId,
+        Dictionary<string, RiderDetails> ridersByWorkingId,
+        Dictionary<string, RiderShiftSubstitution> substitutionDict,
+        CancellationToken cancellationToken)
+    {
+        // 1. Try direct lookup (current active WorkingId)
+        if (ridersByWorkingId.TryGetValue(workingId, out var directRider))
+        {
+            return (directRider.Id, directRider, "Direct");
+        }
+
+        // 2. Try WorkingIdHistory (WorkingId might have been reassigned)
+        var historyResult = await workingIdHistoryService.WhoHasWorkingId(workingId, cancellationToken);
+
+        if (historyResult.IsSuccess && historyResult.Value.IsCurrentlyAssigned)
+        {
+            // WorkingId is currently assigned to someone
+            var currentRiderResult = await workingIdHistoryService.GetRiderByWorkingId(workingId, cancellationToken);
+
+            if (currentRiderResult.IsSuccess && currentRiderResult.Value != null)
+            {
+                return (currentRiderResult.Value.Id, currentRiderResult.Value, "WorkingIdHistory");
+            }
+        }
+
+        // 3. Try substitution system (disabled rider with active substitute)
+        if (substitutionDict.TryGetValue(workingId, out var substitution))
+        {
+            var substituteRider = substitution.SubstituteRider;
+            if (substituteRider != null)
+            {
+                return (substituteRider.Id, substituteRider, "Substitution");
+            }
+        }
+
+        return (0, null, "NotFound");
     }
 
     public async Task<Result<IEnumerable<HungerDisabilityAggregatedResponse>>> GetReportsByDateRangeAsync(
@@ -173,7 +223,6 @@ public class HungerDisabilityService(ApplicationDbcontext dbcontext) : IHungerDi
                     new Error("NotFound", $"No records found between {startDate} and {endDate}", 404));
             }
 
-            // Get substitute rider information
             var substituteIds = records.Where(r => r.SubstituteRiderId.HasValue)
                 .Select(r => r.SubstituteRiderId!.Value).Distinct().ToList();
 
@@ -183,17 +232,14 @@ public class HungerDisabilityService(ApplicationDbcontext dbcontext) : IHungerDi
                 .AsNoTracking()
                 .ToDictionaryAsync(r => r.Id, r => r, cancellationToken);
 
-            // Calculate the last shift date (one day before endDate)
             var lastShiftDate = endDate.AddDays(-1);
 
-            // Get last day orders for all riders
             var lastDayOrders = await dbcontext.Set<HungerDisability>()
                 .Where(h => h.ShiftDate == lastShiftDate &&
                            records.Select(r => r.ActualRiderId).Contains(h.ActualRiderId))
                 .AsNoTracking()
                 .ToDictionaryAsync(h => h.ActualRiderId, h => h.AcceptedDailyOrders, cancellationToken);
 
-            // Group by rider and housing
             var aggregated = records.GroupBy(r => new
             {
                 r.ActualRiderId,
@@ -211,14 +257,10 @@ public class HungerDisabilityService(ApplicationDbcontext dbcontext) : IHungerDi
                 var totalDays = g.Sum(x => x.Days);
                 var totalOrders = g.Sum(x => x.AcceptedDailyOrders);
                 var days = (endDate.DayNumber - startDate.DayNumber);
-
                 var target = days * DAILY_TARGET;
-
-
                 var difference = totalOrders - target;
                 var performancePercentage = target > 0 ? Math.Round((decimal)totalOrders / target * 100, 2) : 0;
 
-                // Get substitute info
                 var firstRecord = g.First();
                 string? substituteNameEN = null;
                 string? substituteNameAR = null;
@@ -229,7 +271,6 @@ public class HungerDisabilityService(ApplicationDbcontext dbcontext) : IHungerDi
                     substituteNameAR = sub.Employee.NameAR;
                 }
 
-                // Get last day orders
                 var lastDayOrderCount = lastDayOrders.TryGetValue(g.Key.ActualRiderId, out var orders) ? orders : 0;
 
                 return new HungerDisabilityAggregatedResponse(
@@ -267,6 +308,7 @@ public class HungerDisabilityService(ApplicationDbcontext dbcontext) : IHungerDi
         }
     }
 
+
     public async Task<Result<IEnumerable<HungerDisabilityAggregatedResponse>>> GetReportsByMonthAsync(
         int year,
         int month,
@@ -276,7 +318,6 @@ public class HungerDisabilityService(ApplicationDbcontext dbcontext) : IHungerDi
         {
             var startDate = new DateOnly(year, month, 1);
             var endDate = startDate.AddMonths(1).AddDays(-1);
-
             return await GetReportsByDateRangeAsync(startDate, endDate, cancellationToken);
         }
         catch (Exception ex)
@@ -294,7 +335,6 @@ public class HungerDisabilityService(ApplicationDbcontext dbcontext) : IHungerDi
         {
             var startDate = new DateOnly(year, 1, 1);
             var endDate = new DateOnly(year, 12, 31);
-
             return await GetReportsByDateRangeAsync(startDate, endDate, cancellationToken);
         }
         catch (Exception ex)
@@ -344,7 +384,6 @@ public class HungerDisabilityService(ApplicationDbcontext dbcontext) : IHungerDi
                     .FirstOrDefaultAsync(r => r.Id == firstRecord.SubstituteRiderId.Value, cancellationToken);
             }
 
-            // Calculate the last shift date (one day before endDate)
             var lastShiftDate = endDate.AddDays(-1);
             var lastDayRecord = records.FirstOrDefault(r => r.ShiftDate == lastShiftDate);
             var lastDayOrders = lastDayRecord?.AcceptedDailyOrders ?? 0;
@@ -402,22 +441,17 @@ public class HungerDisabilityService(ApplicationDbcontext dbcontext) : IHungerDi
             }
 
             var reports = aggregatedResult.Value.ToList();
-
             var totalRiders = reports.Count;
             var totalDays = reports.Sum(r => r.TotalDays);
             var totalOrders = reports.Sum(r => r.TotalOrders);
             var totalTarget = reports.Sum(r => r.Target);
             var totalDifference = totalOrders - totalTarget;
-
             var ridersAboveTarget = reports.Count(r => r.DifferenceFromTarget >= 0);
             var ridersBelowTarget = totalRiders - ridersAboveTarget;
-
             var ridersWithSubstitutes = reports.Count(r => r.HasSubstitute);
             var ridersWithoutSubstitutes = totalRiders - ridersWithSubstitutes;
-
             var averageOrdersPerRider = totalRiders > 0 ? Math.Round((decimal)totalOrders / totalRiders, 2) : 0;
             var averageOrdersPerDay = totalDays > 0 ? Math.Round((decimal)totalOrders / totalDays, 2) : 0;
-
 
             var housingBreakdown = reports.GroupBy(r => r.HousingName)
                 .Select(g => new HousingSummaryDetail(
@@ -454,7 +488,6 @@ public class HungerDisabilityService(ApplicationDbcontext dbcontext) : IHungerDi
         }
     }
 
-    // Helper Methods
     private static ExcelColumnMapping FindColumnIndices(IXLWorksheet worksheet)
     {
         var headerRow = worksheet.FirstRowUsed();

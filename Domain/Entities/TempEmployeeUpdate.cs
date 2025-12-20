@@ -75,20 +75,26 @@ public class TempEmployeeStatusChange
 public class TempVehicleOperation
 {
     public int Id { get; set; }
+
     public long RiderIqamaNo { get; set; }
+    public RiderDetails Rider { get; set; } = default!;
+
     public string VehiclePlateNumber { get; set; } = string.Empty;
     public string VehicleNumber { get; set; } = string.Empty;
+    public Vehicle Vehicle { get; set; } = default!;
+
     public VehicleStatusType VehicleStatusType { get; set; }
-    public string? Reason { get; set; } = string.Empty;
-    public DateTime RequestedAt { get; set; } = DateTime.UtcNow.AddHours(3);
+    public string? Reason { get; set; }
+
+    public string? Permission { get; set; }
+    public DateTime? PermissionEndDate { get; set; }
+
+    public DateTime RequestedAt { get; set; }
     public string RequestedBy { get; set; } = string.Empty;
 
-    public bool IsResolved { get; set; } = false;
-    public string? Resolution { get; set; } // "Approved" or "Rejected"
+    public bool IsResolved { get; set; }
+    public string? Resolution { get; set; }
     public string? ResolvedBy { get; set; }
     public DateTime? ResolvedAt { get; set; }
     public string? AdminNotes { get; set; }
-
-    public RiderDetails Rider { get; set; } = default!;
-    public Vehicle Vehicle { get; set; } = default!;
 }

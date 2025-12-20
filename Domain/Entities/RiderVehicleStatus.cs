@@ -13,14 +13,16 @@ public class RiderVehicleStatus
     public string VehicleNumber { get; set; } = string.Empty;
     public Vehicle Vehicle { get; set; } = default!;
 
-    public VehicleStatusType StatusType { get; set; }   
+    public VehicleStatusType StatusType { get; set; }
     public string? Reason { get; set; }
+
+    public string? Permission { get; set; }
+    public DateTime? PermissionStartDate { get; set; }
+    public DateTime? PermissionEndDate { get; set; }
 
     public DateTime Timestamp { get; set; } = DateTime.UtcNow.AddHours(3);
 
     public bool IsActive { get; set; }
-
-
 }
 
 public enum VehicleStatusType
@@ -28,6 +30,6 @@ public enum VehicleStatusType
     Taken = 1,
     Returned = 2,
     Problem = 3,
-    Stolen = 4,     
+    Stolen = 4,
     BreakUp = 5
 }

@@ -9,10 +9,10 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Application.Service.Riders;
 
-public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftService
+public class RiderShiftService(ApplicationDbcontext dbcontext , IRiderWorkingIdHistoryService riderWorkingIdHistoryService) : IRiderShiftService
 {
     private readonly ApplicationDbcontext dbcontext = dbcontext;
-
+    private readonly IRiderWorkingIdHistoryService riderWorkingIdHistoryService = riderWorkingIdHistoryService;
 
     public async Task<Result<IEnumerable<AcceptedOrdersResponse>>> GetAcceptedOrdersByDateAsync(
         DateOnly shiftDate,
@@ -1331,40 +1331,50 @@ public class RiderShiftService(ApplicationDbcontext dbcontext) : IRiderShiftServ
         string WorkingId,
         CancellationToken cancellationToken)
     {
+        var rider = await dbcontext.RiderDetails
+            .AsNoTracking()
+            .Include(r => r.Company)
+            .Include(r => r.Employee)
+            .FirstOrDefaultAsync(r => r.WorkingId == WorkingId, cancellationToken);
+
+        if (rider != null)
+        {
+            return (rider.Id, null, false);
+        }
+
+        var historyResult = await riderWorkingIdHistoryService.WhoHasWorkingId(
+           WorkingId,
+           cancellationToken);
+
+        if (historyResult.IsSuccess && historyResult.Value.IsCurrentlyAssigned)
+        {
+            var currentRiderResult = await riderWorkingIdHistoryService.GetRiderByWorkingId(
+                WorkingId,
+                cancellationToken);
+
+            if (currentRiderResult.IsSuccess && currentRiderResult.Value != null)
+            {
+                var currentRider = currentRiderResult.Value;
+                return (currentRider.Id, WorkingId, false);
+            }
+        }
+
+
         var substitution = await dbcontext.Set<RiderShiftSubstitution>()
-        .AsNoTracking()  // ✅ ADD THIS
-        .Include(s => s.SubstituteRider)
-            .ThenInclude(r => r.Company)
-        .Include(s => s.SubstituteRider)
-            .ThenInclude(r => r.Employee)
-        .FirstOrDefaultAsync(s => s.ActualRiderWorkingId == WorkingId && s.IsActive,
-                            cancellationToken);
+           .AsNoTracking()
+           .Include(s => s.SubstituteRider)
+               .ThenInclude(r => r.Company)
+           .Include(s => s.SubstituteRider)
+               .ThenInclude(r => r.Employee)
+           .FirstOrDefaultAsync(s => s.ActualRiderWorkingId == WorkingId && s.IsActive,
+                               cancellationToken);
 
         if (substitution != null)
         {
             return (substitution.SubstituteRiderId, WorkingId, true);
         }
 
-        var currentHistory = await dbcontext.RiderWorkingIdHistories
-        .AsNoTracking()  
-        .Include(h => h.Employee)
-            .ThenInclude(e => e.RiderDetails)
-                .ThenInclude(rd => rd.Company)
-        .FirstOrDefaultAsync(h => h.WorkingId == WorkingId && h.IsActive,
-                            cancellationToken);
-
-        if (currentHistory?.Employee?.RiderDetails != null)
-        {
-            return (currentHistory.Employee.RiderDetails.Id, null, false);
-        }
-
-        var rider = await dbcontext.RiderDetails
-            .AsNoTracking()  
-            .Include(r => r.Company)
-            .Include(r => r.Employee)
-            .FirstOrDefaultAsync(r => r.WorkingId == WorkingId, cancellationToken);
-
-        return rider != null ? (rider.Id, null, false) : (0, null, false);
+        return (0, null, false);
     }
     private static RiderShiftResponse MapToResponse(RiderShift shift)
     {
