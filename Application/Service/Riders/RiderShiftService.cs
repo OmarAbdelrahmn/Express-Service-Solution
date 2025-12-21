@@ -231,13 +231,13 @@ public class RiderShiftService(ApplicationDbcontext dbcontext , IRiderWorkingIdH
                             $"WARNING: Shift has {realRejectedOrders} rejections (exceeds threshold of {rejectionThreshold}). Penalty: {penaltyAmount} SAR"));
                     }
                 
-                  if (isSubstitution)
-                {
-                        errors.Add(new ImportError(
-                            rowNumber,
-                            shiftData.WorkingId!,
-                            $"INFO: WorkingId {shiftData.WorkingId} is being substituted by {riderWhoWorked.Employee.NameEN} (ID: {riderWhoWorked.WorkingId})"));
-                    }
+                //  if (isSubstitution)
+                //{
+                //        errors.Add(new ImportError(
+                //            rowNumber,
+                //            shiftData.WorkingId!,
+                //            $"INFO: WorkingId {shiftData.WorkingId} is being substituted by {riderWhoWorked.Employee.NameEN} (ID: {riderWhoWorked.WorkingId})"));
+                //    }
                 }
             catch (Exception ex)
             {

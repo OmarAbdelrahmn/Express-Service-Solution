@@ -58,6 +58,36 @@ public class ApplicationDbcontext(DbContextOptions<ApplicationDbcontext> options
         .HasForeignKey(r => r.VehicleNumber)
         .HasPrincipalKey(v => v.VehicleNumber);
 
+        modelBuilder.Entity<RiderVehicleStatus>(entity =>
+        {
+
+
+            entity.Property(rvs => rvs.Permission)
+            .IsRequired(false)
+                .HasMaxLength(500);
+
+            entity.Property(rvs => rvs.PermissionStartDate).IsRequired(false);
+            entity.Property(rvs => rvs.PermissionEndDate).IsRequired(false);
+
+            entity.Property(rvs => rvs.Timestamp)
+                .HasDefaultValueSql("GETDATE()")
+                .HasColumnType("datetime2");
+
+            entity.Property(rvs => rvs.IsActive)
+                .HasDefaultValue(false);
+
+            entity.Property(rvs => rvs.StatusType)
+                .IsRequired()
+                .HasConversion<int>();
+
+            entity.HasIndex(rvs => new { rvs.VehicleNumber, rvs.IsActive, rvs.StatusType });
+            entity.HasIndex(rvs => new { rvs.EmployeeIqamaNo, rvs.IsActive });
+            entity.HasIndex(rvs => rvs.Timestamp);
+            entity.HasIndex(rvs => new { rvs.VehicleNumber, rvs.IsActive, rvs.PermissionEndDate })
+                .HasFilter("[PermissionEndDate] IS NOT NULL");
+        });
+
+
         modelBuilder.Entity<TempEmployeeUpdate>(entity =>
         {
             entity.HasKey(e => e.Id);
@@ -72,7 +102,6 @@ public class ApplicationDbcontext(DbContextOptions<ApplicationDbcontext> options
             entity.HasIndex(e => e.UploadedAt);
         });
 
-        // TempEmployeeStatusChange configuration
         modelBuilder.Entity<TempEmployeeStatusChange>(entity =>
         {
             entity.HasKey(e => e.Id);
@@ -99,41 +128,70 @@ public class ApplicationDbcontext(DbContextOptions<ApplicationDbcontext> options
             entity.HasIndex(e => e.RequestedAt);
         });
 
-        // TempVehicleOperation configuration
         modelBuilder.Entity<TempVehicleOperation>(entity =>
         {
-            entity.HasKey(e => e.Id);
 
-            entity.HasOne(e => e.Rider)
+
+            entity.Property(t => t.VehicleStatusType)
+                .IsRequired()
+                .HasConversion<int>();
+
+            entity.Property(t => t.Reason)
+                .HasMaxLength(500);
+
+            entity.Property(t => t.Permission)
+                .HasMaxLength(500)
+                            .IsRequired(false);
+
+            entity.Property(t => t.PermissionEndDate)
+            .IsRequired(false);
+
+            entity.Property(t => t.RequestedAt)
+                .HasDefaultValueSql("GETDATE()")
+                .HasColumnType("datetime2");
+
+            entity.Property(t => t.RequestedBy)
+                .IsRequired()
+                .HasMaxLength(200);
+
+            entity.Property(t => t.IsResolved)
+                .HasDefaultValue(false);
+
+            entity.Property(t => t.Resolution)
+                .HasMaxLength(50);
+
+            entity.Property(t => t.ResolvedBy)
+                .HasMaxLength(200);
+
+            entity.Property(t => t.ResolvedAt)
+                .HasColumnType("datetime2");
+
+            entity.Property(t => t.AdminNotes)
+                .HasMaxLength(1000);
+
+            entity.HasOne(t => t.Rider)
                 .WithMany()
-                .HasForeignKey(e => e.RiderIqamaNo)
+                .HasForeignKey(t => t.RiderIqamaNo)
                 .HasPrincipalKey(r => r.EmployeeIqamaNo)
                 .OnDelete(DeleteBehavior.Cascade);
 
-            entity.HasOne(e => e.Vehicle)
+            entity.HasOne(t => t.Vehicle)
                 .WithMany()
-                .HasForeignKey(e => e.VehicleNumber)
+                .HasForeignKey(t => t.VehicleNumber)
                 .HasPrincipalKey(v => v.VehicleNumber)
                 .OnDelete(DeleteBehavior.Cascade);
 
-            entity.Property(e => e.VehiclePlateNumber)
-                .IsRequired()
-                .HasMaxLength(20);
-
-            entity.Property(e => e.Reason)
-                .IsRequired()
-                .HasMaxLength(500);
-
-            entity.Property(e => e.RequestedBy)
-                .IsRequired()
-                .HasMaxLength(100);
-
+            entity.HasIndex(t => new { t.RiderIqamaNo, t.IsResolved });
+            entity.HasIndex(t => new { t.IsResolved, t.VehicleStatusType })
+                .HasFilter("[IsResolved] = 0");
             entity.HasIndex(e => e.RiderIqamaNo);
             entity.HasIndex(e => e.VehicleNumber);
             entity.HasIndex(e => e.IsResolved);
             entity.HasIndex(e => e.RequestedAt);
         });
-        modelBuilder.Entity<RiderShiftSubstitution>(entity =>
+
+    
+    modelBuilder.Entity<RiderShiftSubstitution>(entity =>
         {
             entity.HasKey(s => s.Id);
 

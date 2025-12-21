@@ -42,9 +42,9 @@ public interface IVehicleService
     Task<Result<IEnumerable<Vehicle>>> GetProblemVehiclesAsync();
 
 
-    Task<Result> RequestTakeVehicleAsync(SVehicleResolutionRequest request, string reason = "work");
-    Task<Result> RequestReturnVehicleAsync(SVehicleResolutionRequest request, string reason = "leave the work");
-    Task<Result> RequestReportProblemAsync(SVehicleResolutionRequest request, string reason = "problem at vehicle");
+    Task<Result> RequestTakeVehicleAsync(SVehicleResolutionRequest request,string UserId, string reason = "work");
+    Task<Result> RequestReturnVehicleAsync(SVehicleResolutionRequest request,string UserId, string reason = "leave the work");
+    Task<Result> RequestReportProblemAsync(SVehicleResolutionRequest request,string UserId, string reason = "problem at vehicle");
     Task<Result<IEnumerable<TempVehicleOperationResponse>>> GetPendingOperationsAsync();
     Task<Result> ResolveOperationAsync(VehicleResolutionRequest request);
 

@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations.Schema;
 using System.Text;
 
 namespace Domain.Entities;
@@ -9,7 +10,6 @@ public class RiderVehicleStatus
     public int Id { get; set; }
 
     public long? EmployeeIqamaNo { get; set; }
-
     public string VehicleNumber { get; set; } = string.Empty;
     public Vehicle Vehicle { get; set; } = default!;
 

@@ -54,19 +54,7 @@ public interface IHungerDisabilityService
         CancellationToken cancellationToken = default);
 }
 
-/// <summary>
-/// Aggregated response for disabled riders - sums orders across multiple days
-/// Target = TotalDays × 15 orders/day
-/// </summary>
-/// <summary>
-/// Overall summary with top and bottom performers
-/// </summary>
 
-
-
-/// <summary>
-/// Excel import result
-/// </summary>
 public record HungerDisabilityImportResult(
     int TotalRecords,
     int SuccessCount,

@@ -102,7 +102,7 @@ public class VehicleController : ControllerBase
     }
 
     [HttpGet("taken")]
-    [Authorize(Roles = "Master,Admin,Member")]
+    //[Authorize(Roles = "Master,Admin,Member")]
     public async Task<IActionResult> GetTakenVehicles([FromQuery] string statusFilter)
     {
         var result = await _service.GetUnavailableVehiclesAsync(statusFilter);
@@ -130,9 +130,11 @@ public class VehicleController : ControllerBase
     public async Task<IActionResult> TakeVehicle(
         [FromQuery] long IqamaNo,
         [FromQuery] string vehicleNumber,
-        [FromQuery] string reason)
+        [FromQuery] string reason,
+        [FromQuery] string permission,
+        [FromQuery] DateTime permissionenddate)
     {
-        var result = await _service.TakeVehicleAsync(IqamaNo, vehicleNumber, reason);
+        var result = await _service.TakeVehicleAsync(IqamaNo, vehicleNumber, reason, permission, permissionenddate);
         return result.IsSuccess ? Ok(new ApiMessage("Vehicle taken successfully")) : result.ToProblem();
     }
 

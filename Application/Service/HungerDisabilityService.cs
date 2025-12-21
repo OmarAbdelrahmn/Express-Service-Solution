@@ -51,11 +51,14 @@ public class HungerDisabilityService(
 
             // Get active substitutions for fallback
             var activeSubstitutions = await dbcontext.Set<RiderShiftSubstitution>()
-                .Where(s => s.IsActive)
-                .Include(s => s.SubstituteRider)
-                    .ThenInclude(r => r.Employee)
-                .AsNoTracking()
-                .ToListAsync(cancellationToken);
+            .Where(s => s.IsActive)
+            .Include(s => s.SubstituteRider)
+                .ThenInclude(r => r.Employee)
+            .Include(s => s.SubstituteRider)
+                .ThenInclude(r => r.Company)
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
+
 
             var substitutionDict = activeSubstitutions
                 .ToDictionary(s => s.ActualRiderWorkingId, s => s);
@@ -76,14 +79,16 @@ public class HungerDisabilityService(
                         continue;
                     }
 
-                    // Try to resolve the WorkingId using the new history system
-                    var (riderId, riderDetails, resolutionMethod) = await ResolveWorkingIdAsync(
+
+
+                    var (actualRiderId, substituteRiderId, riderDetails, resolutionMethod) =
+                    await ResolveWorkingIdAsync(
                         rowData.ActualWorkingId!,
                         ridersByWorkingId,
                         substitutionDict,
                         cancellationToken);
 
-                    if (riderId == 0 || riderDetails == null)
+                    if (actualRiderId == 0 || riderDetails == null)
                     {
                         errors.Add(new ImportError(rowNumber, rowData.ActualWorkingId!,
                             $"Rider with Working ID {rowData.ActualWorkingId} not found in database or history"));
@@ -91,7 +96,8 @@ public class HungerDisabilityService(
                     }
 
                     var existingRecord = await dbcontext.Set<HungerDisability>()
-                        .AnyAsync(h => h.ActualRiderId == riderId && h.ShiftDate == shiftDate, cancellationToken);
+                   .AnyAsync(h => h.ActualRiderId == actualRiderId && h.ShiftDate == shiftDate,
+                       cancellationToken);
 
                     if (existingRecord)
                     {
@@ -100,22 +106,24 @@ public class HungerDisabilityService(
                         continue;
                     }
 
-                    if (recordsToAdd.Any(r => r.ActualRiderId == riderId && r.ShiftDate == shiftDate))
+                    if (recordsToAdd.Any(r => r.ActualRiderId == actualRiderId && r.ShiftDate == shiftDate))
                     {
                         errors.Add(new ImportError(rowNumber, rowData.ActualWorkingId!,
-                            $"Duplicate entry in Excel for rider {riderDetails.Employee.NameEN} on {shiftDate}"));
+                            $"Duplicate entry in Excel for this rider on {shiftDate}"));
                         continue;
                     }
 
                     var record = new HungerDisability
                     {
-                        ActualRiderId = riderId,
-                        ActualWorkingId = rowData.ActualWorkingId!,
-                        SubstituteRiderId = resolutionMethod == "Substitution" ? riderId : null,
-                        SubstituteWorkingId = resolutionMethod == "Substitution" ? riderDetails.WorkingId : null,
+                        ActualRiderId = actualRiderId,                    // ✅ Disabled rider's ID
+                        ActualWorkingId = rowData.ActualWorkingId!,       // ✅ From Excel (disabled rider's WorkingId)
+                        SubstituteRiderId = substituteRiderId,            // ✅ Substitute's ID (if exists)
+                        SubstituteWorkingId = substituteRiderId.HasValue
+                         ? riderDetails.WorkingId
+                         : null,                                        // ✅ Substitute's WorkingId
                         ShiftDate = shiftDate,
                         Days = rowData.Days!.Value,
-                        CompanyId = riderDetails.CompanyId,
+                        CompanyId = riderDetails.CompanyId,               // Use substitute's company for reporting
                         AcceptedDailyOrders = rowData.AcceptedDailyOrders!.Value,
                         CreatedAt = DateTime.UtcNow.AddHours(3)
                     };
@@ -156,7 +164,12 @@ public class HungerDisabilityService(
         }
     }
 
-    private async Task<(int riderId, RiderDetails? riderDetails, string resolutionMethod)> ResolveWorkingIdAsync(
+    private async Task<(
+        int actualRiderId,           // Disabled rider's ID (for record storage)
+        int? substituteRiderId,      // Substitute rider's ID (who did the work)
+        RiderDetails? riderDetails,  // Details to use for Company/Housing
+        string resolutionMethod
+    )> ResolveWorkingIdAsync(
         string workingId,
         Dictionary<string, RiderDetails> ridersByWorkingId,
         Dictionary<string, RiderShiftSubstitution> substitutionDict,
@@ -165,7 +178,7 @@ public class HungerDisabilityService(
         // 1. Try direct lookup (current active WorkingId)
         if (ridersByWorkingId.TryGetValue(workingId, out var directRider))
         {
-            return (directRider.Id, directRider, "Direct");
+            return (directRider.Id, null, directRider, "Direct");
         }
 
         // 2. Try WorkingIdHistory (WorkingId might have been reassigned)
@@ -173,12 +186,11 @@ public class HungerDisabilityService(
 
         if (historyResult.IsSuccess && historyResult.Value.IsCurrentlyAssigned)
         {
-            // WorkingId is currently assigned to someone
             var currentRiderResult = await workingIdHistoryService.GetRiderByWorkingId(workingId, cancellationToken);
 
             if (currentRiderResult.IsSuccess && currentRiderResult.Value != null)
             {
-                return (currentRiderResult.Value.Id, currentRiderResult.Value, "WorkingIdHistory");
+                return (currentRiderResult.Value.Id, null, currentRiderResult.Value, "WorkingIdHistory");
             }
         }
 
@@ -186,13 +198,40 @@ public class HungerDisabilityService(
         if (substitutionDict.TryGetValue(workingId, out var substitution))
         {
             var substituteRider = substitution.SubstituteRider;
-            if (substituteRider != null)
+            if (substituteRider == null)
+                return (0, null, null, "NotFound");
+
+            // ✅ KEY FIX: Get the DISABLED rider's ID (not substitute's ID)
+            int? actualRiderId = substitution.ActualRiderId;
+
+            // If ActualRider was deleted but we have their IqamaNo, try to find them
+            if (!actualRiderId.HasValue && substitution.OriginalRiderIqamaNo.HasValue)
             {
-                return (substituteRider.Id, substituteRider, "Substitution");
+                var actualRider = await dbcontext.RiderDetails
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(r => r.EmployeeIqamaNo == substitution.OriginalRiderIqamaNo.Value,
+                        cancellationToken);
+
+                if (actualRider != null)
+                    actualRiderId = actualRider.Id;
             }
+
+            // If we still can't find the disabled rider, we can't create a valid record
+            if (!actualRiderId.HasValue)
+            {
+                return (0, null, null, "NotFound");
+            }
+
+            // ✅ CORRECT: Return disabled rider's ID for ActualRiderId, substitute's ID separately
+            return (
+                actualRiderId.Value,      // ✅ Disabled rider's ID
+                substituteRider.Id,       // ✅ Substitute rider's ID
+                substituteRider,          // ✅ Use substitute's details for Company/Housing
+                "Substitution"
+            );
         }
 
-        return (0, null, "NotFound");
+        return (0, null, null, "NotFound");
     }
 
     public async Task<Result<IEnumerable<HungerDisabilityAggregatedResponse>>> GetReportsByDateRangeAsync(

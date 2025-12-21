@@ -503,10 +503,16 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
 
     #region Request-Based Operations (Member Requests)
 
-    public async Task<Result> RequestTakeVehicleAsync(SVehicleResolutionRequest request, string reason = "work")
+    public async Task<Result> RequestTakeVehicleAsync(SVehicleResolutionRequest request,string UserId, string reason = "work")
     {
         try
         {
+            var userName = await dbcontext.Users
+                .Where(u => u.Id == UserId)
+                .Select(u => u.UserName)
+                .FirstOrDefaultAsync();
+
+
             var rider = await dbcontext.RiderDetails
                 .Include(r => r.Employee)
                 .FirstOrDefaultAsync(r => r.EmployeeIqamaNo == request.RiderIqamaNo);
@@ -546,7 +552,7 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
                 VehicleStatusType = VehicleStatusType.Taken,
                 Reason = reason,
                 RequestedAt = DateTime.UtcNow.AddHours(3),
-                RequestedBy = request.ResolvedBy,
+                RequestedBy = userName!,
                 IsResolved = false
             };
 
@@ -562,10 +568,15 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
         }
     }
 
-    public async Task<Result> RequestReturnVehicleAsync(SVehicleResolutionRequest request, string reason = "leave the work")
+    public async Task<Result> RequestReturnVehicleAsync(SVehicleResolutionRequest request,string UserId, string reason = "leave the work")
     {
         try
         {
+            var userName = await dbcontext.Users
+                .Where(u => u.Id == UserId)
+                .Select(u => u.UserName)
+                .FirstOrDefaultAsync();
+
             var rider = await dbcontext.RiderDetails
                 .Include(r => r.Employee)
                 .FirstOrDefaultAsync(r => r.EmployeeIqamaNo == request.RiderIqamaNo);
@@ -601,7 +612,7 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
                 VehicleStatusType = VehicleStatusType.Returned,
                 Reason = reason,
                 RequestedAt = DateTime.UtcNow.AddHours(3),
-                RequestedBy = request.ResolvedBy,
+                RequestedBy = userName!,
                 IsResolved = false
             };
 
@@ -617,10 +628,15 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
         }
     }
 
-    public async Task<Result> RequestReportProblemAsync(SVehicleResolutionRequest request, string reason = "problem at vehicle")
+    public async Task<Result> RequestReportProblemAsync(SVehicleResolutionRequest request,string UserId, string reason = "problem at vehicle")
     {
         try
         {
+            var userName = await dbcontext.Users
+                .Where(u => u.Id == UserId)
+                .Select(u => u.UserName)
+                .FirstOrDefaultAsync();
+
             var rider = await dbcontext.RiderDetails
                 .Include(r => r.Employee)
                 .FirstOrDefaultAsync(r => r.EmployeeIqamaNo == request.RiderIqamaNo);
@@ -647,7 +663,7 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
                 VehicleStatusType = VehicleStatusType.Problem,
                 Reason = reason,
                 RequestedAt = DateTime.UtcNow.AddHours(3),
-                RequestedBy = request.ResolvedBy,
+                RequestedBy = userName!,
                 IsResolved = false
             };
 
@@ -726,7 +742,7 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
                         }
 
                         operation.Permission = request.Permission;
-                        operation.PermissionEndDate = null;
+                        operation.PermissionEndDate = request.PermissionEndDate;
                     }
 
                     var executeResult = await ExecuteOperation(operation);
@@ -1157,9 +1173,9 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
             StatusType = VehicleStatusType.Taken,
             Reason = operation.Reason,
             IsActive = true,
-            Permission = operation.Permission, 
-            PermissionStartDate = DateTime.UtcNow.AddHours(3),
-            PermissionEndDate = operation.PermissionEndDate // From admin's resolution
+            Permission = operation.Permission, // NEW permission from admin's resolution
+            PermissionStartDate = DateTime.UtcNow.AddHours(3), // Start NOW
+            PermissionEndDate = null // End date from admin's resolution
         });
 
         await dbcontext.SaveChangesAsync();
@@ -1187,7 +1203,7 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
         await EndPermission(activeStatus);
         rider.VehicleNumber = null;
 
-        // Create return status
+
         dbcontext.RiderVehicleStatus.Add(new RiderVehicleStatus
         {
             EmployeeIqamaNo = operation.RiderIqamaNo,
@@ -1195,9 +1211,9 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
             StatusType = VehicleStatusType.Returned,
             Reason = operation.Reason,
             IsActive = false,
-            Permission = activeStatus.Permission,
-            PermissionStartDate = activeStatus.PermissionStartDate,
-            PermissionEndDate = DateTime.UtcNow.AddHours(3) // End date is now
+            Permission = activeStatus.Permission, // Use existing permission from Taken status
+            PermissionStartDate = activeStatus.PermissionStartDate, // Keep original start date
+            PermissionEndDate = DateTime.UtcNow.AddHours(3) // End permission NOW
         });
 
         await dbcontext.SaveChangesAsync();
@@ -1225,7 +1241,6 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
         await EndPermission(activeStatus);
         rider.VehicleNumber = null;
 
-        // Create problem status with ended permission
         dbcontext.RiderVehicleStatus.Add(new RiderVehicleStatus
         {
             EmployeeIqamaNo = operation.RiderIqamaNo,
@@ -1233,9 +1248,9 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
             StatusType = VehicleStatusType.Problem,
             Reason = operation.Reason,
             IsActive = true,
-            Permission = activeStatus.Permission,
-            PermissionStartDate = activeStatus.PermissionStartDate,
-            PermissionEndDate = DateTime.UtcNow.AddHours(3) // End permission on problem report
+            Permission = activeStatus.Permission, // Use existing permission from Taken status
+            PermissionStartDate = activeStatus.PermissionStartDate, // Keep original start date
+            PermissionEndDate = DateTime.UtcNow.AddHours(3) // End permission NOW (problem reported)
         });
 
         await dbcontext.SaveChangesAsync();
@@ -1873,12 +1888,13 @@ public record VehicleOperationValidation(
 );
 
 public record VehicleResolutionRequest(
-    int RiderIqamaNo,
+    long RiderIqamaNo,
     string Resolution, // "Approved" or "Rejected"
     string ResolvedBy,
     string Plate,
     string? Note,
     string? Permission, // Required for "Take" operations when approved
+    DateTime? PermissionEndDate
 );
 
 public record SVehicleResolutionRequest

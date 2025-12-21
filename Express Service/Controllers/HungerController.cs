@@ -9,7 +9,7 @@ namespace Express_Service.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-[Authorize(Roles = "Master,Admin")]
+//[Authorize(Roles = "Master,Admin")]
 
 public class HungerController(IHungerDisabilityService service) : ControllerBase
 {
