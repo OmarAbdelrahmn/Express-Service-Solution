@@ -307,4 +307,22 @@ public class ImportController(IImportService service) : ControllerBase
             }
         });
     }
+
+    [HttpPost("bulk-import-housing")]
+    public async Task<IActionResult> BulkAssignToHousing(IFormFile file)
+    {
+        if (file == null || file.Length == 0)
+            return BadRequest(new { message = "No file uploaded" });
+
+        if (!file.FileName.EndsWith(".xlsx") && !file.FileName.EndsWith(".xls"))
+            return BadRequest(new { message = "Only Excel files (.xlsx, .xls) are allowed" });
+
+        var userName = "omar";
+
+        var response = await service.BulkAssignEmployeesToHousingAsync(file, userName);
+
+        return response.IsSuccess
+            ? Ok(response.Value)
+            : response.ToProblem();
+    }
 }

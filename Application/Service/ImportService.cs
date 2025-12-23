@@ -15,6 +15,258 @@ namespace Application.Service;
 public class ImportService(ApplicationDbcontext dbcontext) : IImportService
 {
     private readonly ApplicationDbcontext _dbcontext = dbcontext;
+    public async Task<Result<HousingAssignmentResponse>> BulkAssignEmployeesToHousingAsync(
+     IFormFile file,
+     string uploadedBy)
+    {
+        if (file == null || file.Length == 0)
+            return Result.Failure<HousingAssignmentResponse>(
+                new Error("InvalidFile", "File is empty or null", 400));
+
+        if (!file.FileName.EndsWith(".xlsx") && !file.FileName.EndsWith(".xls"))
+            return Result.Failure<HousingAssignmentResponse>(
+                new Error("InvalidFormat", "File must be Excel format (.xlsx or .xls)", 400));
+
+        var results = new List<HousingAssignmentRowResult>();
+        var errors = new List<string>();
+        int successfulAssignments = 0;
+        int failedRecords = 0;
+        int employeeNotFound = 0;
+        int housingNotFound = 0;
+        int alreadyAssigned = 0;
+
+        try
+        {
+            using var stream = file.OpenReadStream();
+            using var workbook = new XLWorkbook(stream);
+            var worksheet = workbook.Worksheet(1);
+
+            if (worksheet == null)
+            {
+                return Result.Failure<HousingAssignmentResponse>(
+                    new Error("InvalidWorksheet", "Could not read worksheet", 400));
+            }
+
+            var headerRow = FindHousingHeaderRow(worksheet);
+
+            if (headerRow == null)
+            {
+                return Result.Failure<HousingAssignmentResponse>(
+                    new Error("EmptyFile", "Excel file has no header row", 400));
+            }
+
+            var columnMap = BuildHousingColumnMapping(headerRow);
+            if (!columnMap.IsValid)
+            {
+                return Result.Failure<HousingAssignmentResponse>(
+                    new Error("InvalidColumns", columnMap.ErrorMessage!, 400));
+            }
+
+            // Load housing lookup dictionary
+            var housings = await _dbcontext.Housings
+                .AsNoTracking()
+                .ToDictionaryAsync(h => h.Name.Trim().ToLower(), h => h.Id);
+
+            var dataRows = worksheet.RowsUsed()
+                .Where(r => r.RowNumber() > headerRow.RowNumber())
+                .ToList();
+
+            var rowNumber = headerRow.RowNumber();
+
+            foreach (var row in dataRows)
+            {
+                rowNumber++;
+
+                using var transaction = await _dbcontext.Database.BeginTransactionAsync();
+                try
+                {
+                    var rowData = ParseHousingRowData(row, columnMap, rowNumber);
+
+                    if (!rowData.IsValid)
+                    {
+                        failedRecords++;
+                        results.Add(new HousingAssignmentRowResult(
+                            rowNumber,
+                            false,
+                            rowData.IqamaNo?.ToString() ?? "N/A",
+                            "N/A",
+                            "N/A",
+                            rowData.HousingName ?? "N/A",
+                            false,
+                            null,
+                            false,
+                            null,
+                            new List<string>(),
+                            rowData.ErrorMessage
+                        ));
+                        continue;
+                    }
+
+                    var warnings = new List<string>();
+
+                    // Find employee with rider details
+                    var employee = await _dbcontext.Employees
+                        .Include(e => e.Housing)
+                        .Include(e => e.RiderDetails)
+                            .ThenInclude(rd => rd.Company)
+                        .FirstOrDefaultAsync(e => e.IqamaNo == rowData.IqamaNo!.Value);
+
+                    if (employee == null)
+                    {
+                        employeeNotFound++;
+                        failedRecords++;
+                        results.Add(new HousingAssignmentRowResult(
+                            rowNumber,
+                            false,
+                            rowData.IqamaNo!.Value.ToString(),
+                            "N/A",
+                            "N/A",
+                            rowData.HousingName!,
+                            false,
+                            null,
+                            false,
+                            null,
+                            warnings,
+                            "Employee with this Iqama number not found"
+                        ));
+                        await transaction.RollbackAsync();
+                        continue;
+                    }
+
+                    // Check if this person is a rider
+                    bool isRider = employee.RiderDetails != null;
+                    string? companyName = employee.RiderDetails?.Company?.Name;
+
+                    if (isRider)
+                    {
+                        warnings.Add($"This is a rider from company: {companyName}");
+                    }
+
+                    // Find housing
+                    if (!housings.TryGetValue(rowData.HousingName!.Trim().ToLower(), out int housingId))
+                    {
+                        housingNotFound++;
+                        failedRecords++;
+                        results.Add(new HousingAssignmentRowResult(
+                            rowNumber,
+                            false,
+                            employee.IqamaNo.ToString(),
+                            employee.NameEN,
+                            employee.NameAR,
+                            rowData.HousingName!,
+                            isRider,
+                            companyName,
+                            false,
+                            null,
+                            warnings,
+                            $"Housing '{rowData.HousingName}' not found in database"
+                        ));
+                        await transaction.RollbackAsync();
+                        continue;
+                    }
+
+                    // Check if already assigned
+                    string? previousHousing = null;
+                    bool wasAlreadyAssigned = false;
+
+                    if (employee.HousingId.HasValue)
+                    {
+                        previousHousing = employee.Housing?.Name;
+
+                        if (employee.HousingId == housingId)
+                        {
+                            alreadyAssigned++;
+                            warnings.Add($"Already assigned to {rowData.HousingName}");
+
+                            results.Add(new HousingAssignmentRowResult(
+                                rowNumber,
+                                true,
+                                employee.IqamaNo.ToString(),
+                                employee.NameEN,
+                                employee.NameAR,
+                                rowData.HousingName!,
+                                isRider,
+                                companyName,
+                                true,
+                                previousHousing,
+                                warnings,
+                                null
+                            ));
+
+                            await transaction.CommitAsync();
+                            continue;
+                        }
+
+                        wasAlreadyAssigned = true;
+                        warnings.Add($"Changed housing from '{previousHousing}' to '{rowData.HousingName}'");
+                    }
+
+                    // Assign to housing (works for both employees and riders)
+                    employee.HousingId = housingId;
+
+                    await _dbcontext.SaveChangesAsync();
+                    await transaction.CommitAsync();
+
+                    successfulAssignments++;
+                    results.Add(new HousingAssignmentRowResult(
+                        rowNumber,
+                        true,
+                        employee.IqamaNo.ToString(),
+                        employee.NameEN,
+                        employee.NameAR,
+                        rowData.HousingName!,
+                        isRider,
+                        companyName,
+                        wasAlreadyAssigned,
+                        previousHousing,
+                        warnings,
+                        null
+                    ));
+                }
+                catch (Exception ex)
+                {
+                    await transaction.RollbackAsync();
+                    failedRecords++;
+                    errors.Add($"Row {rowNumber}: {ex.Message}");
+
+                    results.Add(new HousingAssignmentRowResult(
+                        rowNumber,
+                        false,
+                        "N/A",
+                        "N/A",
+                        "N/A",
+                        "N/A",
+                        false,
+                        null,
+                        false,
+                        null,
+                        new List<string>(),
+                        $"Exception: {ex.Message}"
+                    ));
+                }
+            }
+
+            var response = new HousingAssignmentResponse(
+                TotalRecords: dataRows.Count,
+                SuccessfulAssignments: successfulAssignments,
+                FailedRecords: failedRecords,
+                EmployeeNotFound: employeeNotFound,
+                HousingNotFound: housingNotFound,
+                AlreadyAssigned: alreadyAssigned,
+                Results: results,
+                Errors: errors,
+                ProcessedAt: DateTime.UtcNow.AddHours(3)
+            );
+
+            return Result.Success(response);
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<HousingAssignmentResponse>(
+                new Error("ProcessingError", $"Failed to process Excel file: {ex.Message}", 500));
+        }
+    }
+
 
     public async Task<Result<DirectImportResponse>> ImportEmployeesAndRidersAsync(
         IFormFile file,
@@ -2013,8 +2265,157 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
         public long? IqamaNo { get; set; }
         public string? NewWorkingId { get; set; }
     }
+
+    private IXLRow FindHousingHeaderRow(IXLWorksheet worksheet)
+    {
+        var knownColumns = new[]
+        {
+        "IqamaNumber", "Iqama Number", "IqamaNo", "Iqama No",
+        "رقم الاقامة", "رقم الإقامة", "الاقامة",
+        "HousingName", "Housing Name", "Housing", "السكن", "اسم السكن"
+    };
+
+        for (int i = 1; i <= Math.Min(10, worksheet.RowsUsed().Count()); i++)
+        {
+            var row = worksheet.Row(i);
+            var cellValues = new List<string>();
+
+            foreach (var cell in row.CellsUsed())
+            {
+                try
+                {
+                    string value = cell.IsMerged()
+                        ? cell.MergedRange().FirstCell().GetString().Trim()
+                        : cell.GetString().Trim();
+
+                    if (!string.IsNullOrWhiteSpace(value))
+                        cellValues.Add(value);
+                }
+                catch { }
+            }
+
+            int matchCount = 0;
+            foreach (var cellValue in cellValues)
+            {
+                foreach (var knownCol in knownColumns)
+                {
+                    if (cellValue.Equals(knownCol, StringComparison.OrdinalIgnoreCase) ||
+                        cellValue.Replace(" ", "").Equals(knownCol.Replace(" ", ""), StringComparison.OrdinalIgnoreCase))
+                    {
+                        matchCount++;
+                        break;
+                    }
+                }
+            }
+
+            if (matchCount >= 2)
+                return row;
+        }
+
+        return worksheet.Row(1);
+    }
+
+    private HousingColumnMapping BuildHousingColumnMapping(IXLRow headerRow)
+    {
+        var mapping = new HousingColumnMapping();
+        var cells = headerRow.CellsUsed().ToList();
+
+        var actualHeaders = new List<string>();
+        foreach (var cell in cells)
+        {
+            try
+            {
+                string val = cell.IsMerged()
+                    ? cell.MergedRange().FirstCell().GetString()
+                    : cell.GetString();
+                actualHeaders.Add($"Col{cell.Address.ColumnNumber}({cell.Address.ColumnLetter})='{val}'");
+            }
+            catch { }
+        }
+
+        mapping.IqamaNoCol = FindColumn(cells,
+            "IqamaNumber", "Iqama Number", "IqamaNo", "Iqama No",
+            "رقم الاقامة", "رقم الإقامة", "الاقامة");
+
+        mapping.HousingNameCol = FindColumn(cells,
+            "HousingName", "Housing Name", "Housing",
+            "السكن", "اسم السكن", "المسكن");
+
+        var missing = new List<string>();
+        if (mapping.IqamaNoCol == 0) missing.Add("Iqama Number");
+        if (mapping.HousingNameCol == 0) missing.Add("Housing Name");
+
+        if (missing.Any())
+        {
+            mapping.IsValid = false;
+            mapping.ErrorMessage = $"Required columns missing: {string.Join(", ", missing)}\n" +
+                                  $"Columns found:\n{string.Join("\n", actualHeaders)}";
+        }
+        else
+        {
+            mapping.IsValid = true;
+        }
+
+        return mapping;
+    }
+
+    private HousingRowData ParseHousingRowData(IXLRow row, HousingColumnMapping map, int rowNumber)
+    {
+        var data = new HousingRowData { RowNumber = rowNumber };
+
+        try
+        {
+            var iqamaStr = GetCellValue(row, map.IqamaNoCol);
+            if (string.IsNullOrWhiteSpace(iqamaStr))
+            {
+                data.IsValid = false;
+                data.ErrorMessage = "Iqama Number is required";
+                return data;
+            }
+
+            if (!long.TryParse(iqamaStr.Replace(" ", ""), out long iqamaNo) || iqamaNo <= 0)
+            {
+                data.IsValid = false;
+                data.ErrorMessage = $"Invalid Iqama Number: {iqamaStr}";
+                return data;
+            }
+            data.IqamaNo = iqamaNo;
+
+            data.HousingName = GetCellValue(row, map.HousingNameCol);
+            if (string.IsNullOrWhiteSpace(data.HousingName))
+            {
+                data.IsValid = false;
+                data.ErrorMessage = "Housing Name is required";
+                return data;
+            }
+
+            data.IsValid = true;
+        }
+        catch (Exception ex)
+        {
+            data.IsValid = false;
+            data.ErrorMessage = $"Error parsing row: {ex.Message}";
+        }
+
+        return data;
+    }
+}
+internal class HousingColumnMapping
+{
+    public bool IsValid { get; set; }
+    public string? ErrorMessage { get; set; }
+    public int IqamaNoCol { get; set; }
+    public int HousingNameCol { get; set; }
 }
 
+internal class HousingRowData
+{
+    public int RowNumber { get; set; }
+    public bool IsValid { get; set; }
+    public string? ErrorMessage { get; set; }
+    public long? IqamaNo { get; set; }
+    public string? HousingName { get; set; }
+}
 internal class VehicleColumnMapping
 {
     public bool IsValid { get; set; }

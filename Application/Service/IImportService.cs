@@ -19,8 +19,37 @@ public interface IImportService
     Task<Result<WorkingIdUpdateResponse>> UpdateRiderWorkingIdsAsync(
     IFormFile file,
     string uploadedBy);
-}
 
+    Task<Result<HousingAssignmentResponse>> BulkAssignEmployeesToHousingAsync(
+    IFormFile file,
+    string uploadedBy);
+}
+public record HousingAssignmentResponse(
+    int TotalRecords,
+    int SuccessfulAssignments,
+    int FailedRecords,
+    int EmployeeNotFound,
+    int HousingNotFound,
+    int AlreadyAssigned,
+    List<HousingAssignmentRowResult> Results,
+    List<string> Errors,
+    DateTime ProcessedAt
+);
+
+public record HousingAssignmentRowResult(
+    int RowNumber,
+    bool Success,
+    string IqamaNo,
+    string EmployeeNameEN,
+    string EmployeeNameAR,
+    string HousingName,
+    bool IsRider,  // NEW: Indicates if this person is a rider
+    string? CompanyName,  // NEW: Company name if rider
+    bool WasAlreadyAssigned,
+    string? PreviousHousing,
+    List<string> Warnings,
+    string? ErrorMessage
+);
 // DTOs
 public record DirectImportResponse(
     int TotalRecords,
