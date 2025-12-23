@@ -136,11 +136,11 @@ public class HungerDisabilityService(
                         errors.Add(new ImportError(rowNumber, rowData.ActualWorkingId!,
                             $"ℹ️ INFO: WorkingId {rowData.ActualWorkingId} resolved via history to {riderDetails.Employee.NameEN} (Current ID: {riderDetails.WorkingId})"));
                     }
-                    else if (resolutionMethod == "Substitution")
-                    {
-                        errors.Add(new ImportError(rowNumber, rowData.ActualWorkingId!,
-                            $"ℹ️ INFO: Disabled rider WorkingId {rowData.ActualWorkingId} has substitute {riderDetails.Employee.NameEN} (ID: {riderDetails.WorkingId})"));
-                    }
+                    //else if (resolutionMethod == "Substitution")
+                    //{
+                    //    errors.Add(new ImportError(rowNumber, rowData.ActualWorkingId!,
+                    //        $"ℹ️ INFO: Disabled rider WorkingId {rowData.ActualWorkingId} has substitute {riderDetails.Employee.NameEN} (ID: {riderDetails.WorkingId})"));
+                    //}
                 }
                 catch (Exception ex)
                 {

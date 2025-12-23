@@ -122,7 +122,11 @@ public class RiderWorkingIdHistoryService(ApplicationDbcontext dbcontext)
                 .OrderByDescending(h => h.StartDate)
                 .ToListAsync(cancellationToken);
 
-            var currentOwner = allHistory.FirstOrDefault(h => h.IsActive);
+            var currentOwner = await _dbcontext.RiderDetails
+                .Include(r => r.Employee)
+                .Include(r => r.Company)
+                .FirstOrDefaultAsync(r => r.WorkingId == workingId, cancellationToken);
+
 
             var previousOwners = allHistory
                 .Where(h => !h.IsActive && h.EndDate.HasValue)
@@ -137,7 +141,7 @@ public class RiderWorkingIdHistoryService(ApplicationDbcontext dbcontext)
 
             var info = new WorkingIdOwnershipInfo(
                 workingId,
-                currentOwner?.RiderIqamaNo,
+                currentOwner?.EmployeeIqamaNo,
                 currentOwner?.Employee?.NameEN,
                 currentOwner?.Company?.Name,
                 currentOwner != null,

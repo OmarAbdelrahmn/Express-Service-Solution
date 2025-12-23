@@ -24,7 +24,6 @@ public class RiderSub(
         using var transaction = await _dbcontext.Database.BeginTransactionAsync(cancellationToken);
         try
         {
-            // Check if there's already an active substitution for this WorkingId
             var hasActiveSubstitution = await _dbcontext.RiderShiftSubstitutions
                 .AnyAsync(s => s.ActualRiderWorkingId == request.ActualRiderWorkingId && s.IsActive,
                          cancellationToken);
@@ -35,7 +34,6 @@ public class RiderSub(
                              $"WorkingId {request.ActualRiderWorkingId} already has an active substitution",
                              400));
 
-            // Get ownership information for the WorkingId from history
             var ownershipInfo = await _workingIdHistoryService.WhoHasWorkingId(
                 request.ActualRiderWorkingId,
                 cancellationToken);
@@ -44,7 +42,6 @@ public class RiderSub(
             long? originalRiderIqamaNo = null;
             string actualRiderDisplayName = $"Unassigned WorkingId [{request.ActualRiderWorkingId}]";
 
-            // Case 1: WorkingId is currently active and assigned
             if (ownershipInfo.IsSuccess && ownershipInfo.Value.IsCurrentlyAssigned)
             {
                 var riderResult = await _workingIdHistoryService.GetRiderByWorkingId(

@@ -7,7 +7,7 @@ namespace Express_Service.Controllers;
 
 [Route("api/[controller]")]
 [ApiController]
-[Authorize(Roles = "Master,Admin")]
+//[Authorize(Roles = "Master,Admin")]
 public class SubstitutionController(IRiderSub service) : ControllerBase
 {
     private readonly IRiderSub service = service;

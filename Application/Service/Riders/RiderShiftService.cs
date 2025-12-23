@@ -1331,6 +1331,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext , IRiderWorkingIdH
         string WorkingId,
         CancellationToken cancellationToken)
     {
+        // First checks if rider exists directly
         var rider = await dbcontext.RiderDetails
             .AsNoTracking()
             .Include(r => r.Company)
@@ -1339,9 +1340,23 @@ public class RiderShiftService(ApplicationDbcontext dbcontext , IRiderWorkingIdH
 
         if (rider != null)
         {
+            // ✅ NEW: Check if this rider is currently substituting someone else
+            var substitutionWhereThisRiderIsSubstitute = await dbcontext.Set<RiderShiftSubstitution>()
+                .AsNoTracking()
+                .FirstOrDefaultAsync(s => s.SubstituteRiderId == rider.Id && s.IsActive, cancellationToken);
+
+            if (substitutionWhereThisRiderIsSubstitute != null)
+            {
+                // This rider is substituting someone else (e.g., 2040209 substituting for 444448)
+                // Return the substitute's info but with the actual rider's WorkingId
+                return (rider.Id, substitutionWhereThisRiderIsSubstitute.ActualRiderWorkingId, true);
+            }
+
+            // Not substituting anyone, just a regular rider
             return (rider.Id, null, false);
         }
 
+        // Then checks history
         var historyResult = await riderWorkingIdHistoryService.WhoHasWorkingId(
            WorkingId,
            cancellationToken);
@@ -1355,11 +1370,22 @@ public class RiderShiftService(ApplicationDbcontext dbcontext , IRiderWorkingIdH
             if (currentRiderResult.IsSuccess && currentRiderResult.Value != null)
             {
                 var currentRider = currentRiderResult.Value;
+
+                // ✅ NEW: Check if this rider is currently substituting someone else
+                var substitutionWhereThisRiderIsSubstitute = await dbcontext.Set<RiderShiftSubstitution>()
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(s => s.SubstituteRiderId == currentRider.Id && s.IsActive, cancellationToken);
+
+                if (substitutionWhereThisRiderIsSubstitute != null)
+                {
+                    return (currentRider.Id, substitutionWhereThisRiderIsSubstitute.ActualRiderWorkingId, true);
+                }
+
                 return (currentRider.Id, WorkingId, false);
             }
         }
 
-
+        // Finally checks if this WorkingId is being substituted by someone
         var substitution = await dbcontext.Set<RiderShiftSubstitution>()
            .AsNoTracking()
            .Include(s => s.SubstituteRider)
@@ -1371,6 +1397,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext , IRiderWorkingIdH
 
         if (substitution != null)
         {
+            // e.g., WorkingId "2040209" is disabled and substituted by someone with ID 2073991
             return (substitution.SubstituteRiderId, WorkingId, true);
         }
 
