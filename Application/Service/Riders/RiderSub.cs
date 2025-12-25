@@ -24,6 +24,7 @@ public class RiderSub(
         using var transaction = await _dbcontext.Database.BeginTransactionAsync(cancellationToken);
         try
         {
+            // Check if already has active substitution
             var hasActiveSubstitution = await _dbcontext.RiderShiftSubstitutions
                 .AnyAsync(s => s.ActualRiderWorkingId == request.ActualRiderWorkingId && s.IsActive,
                          cancellationToken);
@@ -34,45 +35,110 @@ public class RiderSub(
                              $"WorkingId {request.ActualRiderWorkingId} already has an active substitution",
                              400));
 
-            var ownershipInfo = await _workingIdHistoryService.WhoHasWorkingId(
-                request.ActualRiderWorkingId,
-                cancellationToken);
+
 
             RiderDetails? actualRider = null;
             long? originalRiderIqamaNo = null;
             string actualRiderDisplayName = $"Unassigned WorkingId [{request.ActualRiderWorkingId}]";
 
-            if (ownershipInfo.IsSuccess && ownershipInfo.Value.IsCurrentlyAssigned)
-            {
-                var riderResult = await _workingIdHistoryService.GetRiderByWorkingId(
-                    request.ActualRiderWorkingId,
-                    cancellationToken);
+            // STEP 1: Check current active riders
+            var currentRider = await _dbcontext.RiderDetails
+                .Include(r => r.Employee)
+                .Include(r => r.Company)
+                .FirstOrDefaultAsync(r => r.WorkingId == request.ActualRiderWorkingId,
+                                    cancellationToken);
 
-                if (riderResult.IsSuccess && riderResult.Value != null)
+            if (currentRider != null)
+            {
+                actualRider = currentRider;
+                originalRiderIqamaNo = currentRider.EmployeeIqamaNo;
+                actualRiderDisplayName = currentRider.Employee.NameEN;
+            }
+            else
+            {
+                var deletedEmployee = await _dbcontext.DeletedEmployees
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(d => d.WorkingId == request.ActualRiderWorkingId,
+                                        cancellationToken);
+
+                if (deletedEmployee != null)
                 {
-                    actualRider = riderResult.Value;
-                    originalRiderIqamaNo = ownershipInfo.Value.CurrentRiderIqamaNo;
-                    actualRiderDisplayName = actualRider.Employee.NameEN;
+                    originalRiderIqamaNo = deletedEmployee.IqamaNo;
+                    actualRiderDisplayName = $"Deleted Employee, Former ID: {request.ActualRiderWorkingId}]";
+
+                    // Check if this deleted employee was re-added
+                    var restoredRider = await _dbcontext.RiderDetails
+                        .Include(r => r.Employee)
+                        .Include(r => r.Company)
+                        .FirstOrDefaultAsync(r => r.EmployeeIqamaNo == deletedEmployee.IqamaNo,
+                                            cancellationToken);
+
+                    if (restoredRider != null)
+                    {
+                        actualRider = restoredRider;
+                        actualRiderDisplayName = $"{restoredRider.Employee.NameEN} [Former ID: {request.ActualRiderWorkingId}, Current ID: {restoredRider.WorkingId}]";
+                    }
+                }
+                else
+                {
+                    var ownershipInfo = await _workingIdHistoryService.WhoHasWorkingId(
+                        request.ActualRiderWorkingId,
+                        cancellationToken);
+
+                    if (ownershipInfo.IsSuccess)
+                    {
+                        // Currently assigned to someone
+                        if (ownershipInfo.Value.IsCurrentlyAssigned)
+                        {
+                            var riderResult = await _workingIdHistoryService.GetRiderByWorkingId(
+                                request.ActualRiderWorkingId,
+                                cancellationToken);
+
+                            if (riderResult.IsSuccess && riderResult.Value != null)
+                            {
+                                actualRider = riderResult.Value;
+                                originalRiderIqamaNo = ownershipInfo.Value.CurrentRiderIqamaNo;
+                                actualRiderDisplayName = actualRider.Employee.NameEN;
+                            }
+                        }
+                        // Has history but not currently assigned
+                        else if (ownershipInfo.Value.PreviousOwners.Any())
+                        {
+                            var lastOwner = ownershipInfo.Value.PreviousOwners.First();
+                            originalRiderIqamaNo = lastOwner.RiderIqamaNo;
+
+                            // Try to find the rider by IqamaNo
+                            actualRider = await _dbcontext.RiderDetails
+                                .Include(r => r.Employee)
+                                .Include(r => r.Company)
+                                .FirstOrDefaultAsync(r => r.EmployeeIqamaNo == lastOwner.RiderIqamaNo,
+                                                   cancellationToken);
+
+                            if (actualRider != null)
+                            {
+                                actualRiderDisplayName = $"{lastOwner.RiderName} [Former ID: {request.ActualRiderWorkingId}, Current ID: {actualRider.WorkingId}]";
+                            }
+                            else
+                            {
+                                // Check if in deleted employees
+                                var deletedFormer = await _dbcontext.DeletedEmployees
+                                    .AsNoTracking()
+                                    .FirstOrDefaultAsync(d => d.IqamaNo == lastOwner.RiderIqamaNo,
+                                                        cancellationToken);
+
+                                if (deletedFormer != null)
+                                {
+                                    actualRiderDisplayName = $"{lastOwner.RiderName} [Deleted, Former ID: {request.ActualRiderWorkingId}]";
+                                }
+                                else
+                                {
+                                    actualRiderDisplayName = $"{lastOwner.RiderName} [Former ID: {request.ActualRiderWorkingId}]";
+                                }
+                            }
+                        }
+                    }
                 }
             }
-            // Case 2: WorkingId has history but not currently assigned
-            else if (ownershipInfo.IsSuccess && ownershipInfo.Value.PreviousOwners.Any())
-            {
-                // Get the last owner from history
-                var lastOwner = ownershipInfo.Value.PreviousOwners.First();
-                originalRiderIqamaNo = lastOwner.RiderIqamaNo;
-
-                // Use the name from history
-                actualRiderDisplayName = $"{lastOwner.RiderName} [Former WorkingId: {request.ActualRiderWorkingId}]";
-
-                // Try to fetch the actual rider details (might be null if rider was deleted)
-                actualRider = await _dbcontext.RiderDetails
-                    .Include(r => r.Employee)
-                    .Include(r => r.Company)
-                    .FirstOrDefaultAsync(r => r.EmployeeIqamaNo == lastOwner.RiderIqamaNo,
-                                       cancellationToken);
-            }
-            // Case 3: WorkingId doesn't exist in system at all - keep default "Unassigned" message
 
             // Get substitute rider details
             var substituteRider = await _dbcontext.RiderDetails
@@ -129,6 +195,100 @@ public class RiderSub(
             return Result.Failure<RiderSubstitutionResponse>(
                 new Error("ServerError", ex.Message, 500));
         }
+    }
+
+
+
+    private async Task<string> BuildActualRiderDisplayName(
+        RiderDetails? actualRider,
+        long? originalRiderIqamaNo,
+        string actualRiderWorkingId,
+        CancellationToken cancellationToken)
+    {
+        // If we have the actual rider object, use it
+        if (actualRider?.Employee != null)
+        {
+            return actualRider.Employee.NameEN;
+        }
+
+        // ✅ NEW: Check deleted employees first
+        if (originalRiderIqamaNo.HasValue)
+        {
+            var deletedEmployee = await _dbcontext.DeletedEmployees
+                .AsNoTracking()
+                .FirstOrDefaultAsync(d => d.IqamaNo == originalRiderIqamaNo.Value,
+                                    cancellationToken);
+
+            if (deletedEmployee != null)
+            {
+                // Check if rider was restored
+                var restoredRider = await _dbcontext.RiderDetails
+                    .AsNoTracking()
+                    .Include(r => r.Employee)
+                    .FirstOrDefaultAsync(r => r.EmployeeIqamaNo == originalRiderIqamaNo.Value,
+                                        cancellationToken);
+
+                if (restoredRider != null)
+                {
+                    return $"{restoredRider.Employee.NameEN} [Former ID: {actualRiderWorkingId}, Current ID: {restoredRider.WorkingId}]";
+                }
+
+                return $"{deletedEmployee.NameEN} [Deleted, Former ID: {actualRiderWorkingId}]";
+            }
+        }
+
+        // Check WorkingIdHistory
+        var historyResult = await _workingIdHistoryService.WhoHasWorkingId(
+            actualRiderWorkingId,
+            cancellationToken);
+
+        if (historyResult.IsSuccess)
+        {
+            // If currently assigned
+            if (historyResult.Value.IsCurrentlyAssigned &&
+                !string.IsNullOrEmpty(historyResult.Value.CurrentRiderName))
+            {
+                return historyResult.Value.CurrentRiderName;
+            }
+
+            // If has previous owners
+            if (historyResult.Value.PreviousOwners.Any())
+            {
+                var lastOwner = historyResult.Value.PreviousOwners.First();
+
+                // Check if last owner is in deleted employees
+                var deletedLastOwner = await _dbcontext.DeletedEmployees
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(d => d.IqamaNo == lastOwner.RiderIqamaNo,
+                                        cancellationToken);
+
+                if (deletedLastOwner != null)
+                {
+                    return $"{lastOwner.RiderName} [Deleted, Former ID: {actualRiderWorkingId}]";
+                }
+
+                return $"{lastOwner.RiderName} [Former WorkingId: {actualRiderWorkingId}]";
+            }
+        }
+
+        // Check if IqamaNo exists in regular employees
+        if (originalRiderIqamaNo.HasValue)
+        {
+            var employeeByIqama = await _dbcontext.Employees
+                .AsNoTracking()
+                .FirstOrDefaultAsync(e => e.IqamaNo == originalRiderIqamaNo.Value,
+                    cancellationToken);
+
+            if (employeeByIqama != null)
+            {
+                return $"{employeeByIqama.NameEN} [IqamaNo: {originalRiderIqamaNo}]";
+            }
+
+            return $"Former Rider [IqamaNo: {originalRiderIqamaNo}]";
+        }
+
+        // Last resort fallback
+        return $"Unassigned WorkingId [{actualRiderWorkingId}]";
     }
 
     public async Task<Result<RiderSubstitutionResponse>> StopSubstitutionByWorkingId(
@@ -370,61 +530,5 @@ public class RiderSub(
         }
     }
 
-    /// <summary>
-    /// Helper method to build proper display name for actual rider using WorkingIdHistory
-    /// </summary>
-    private async Task<string> BuildActualRiderDisplayName(
-        RiderDetails? actualRider,
-        long? originalRiderIqamaNo,
-        string actualRiderWorkingId,
-        CancellationToken cancellationToken)
-    {
-        // If we have the actual rider object, use it
-        if (actualRider?.Employee != null)
-        {
-            return actualRider.Employee.NameEN;
-        }
 
-        // Check WorkingIdHistory for previous owner information
-        var historyResult = await _workingIdHistoryService.WhoHasWorkingId(
-            actualRiderWorkingId,
-            cancellationToken);
-
-        if (historyResult.IsSuccess)
-        {
-            // If currently assigned, get current rider name
-            if (historyResult.Value.IsCurrentlyAssigned &&
-                !string.IsNullOrEmpty(historyResult.Value.CurrentRiderName))
-            {
-                return historyResult.Value.CurrentRiderName;
-            }
-
-            // If has previous owners, use the most recent one
-            if (historyResult.Value.PreviousOwners.Any())
-            {
-                var lastOwner = historyResult.Value.PreviousOwners.First();
-                return $"{lastOwner.RiderName} [Former WorkingId: {actualRiderWorkingId}]";
-            }
-        }
-
-        // Fallback: Check if we have IqamaNo stored
-        if (originalRiderIqamaNo.HasValue)
-        {
-            // Try to get rider info from IqamaNo
-            var riderByIqama = await _dbcontext.Employees
-                .AsNoTracking()
-                .FirstOrDefaultAsync(e => e.IqamaNo == originalRiderIqamaNo.Value,
-                    cancellationToken);
-
-            if (riderByIqama != null)
-            {
-                return $"{riderByIqama.NameEN} [IqamaNo: {originalRiderIqamaNo}]";
-            }
-
-            return $"Former Rider [IqamaNo: {originalRiderIqamaNo}]";
-        }
-
-        // Last resort fallback
-        return $"Unassigned WorkingId [{actualRiderWorkingId}]";
-    }
 }

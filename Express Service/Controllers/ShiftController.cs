@@ -8,7 +8,7 @@ namespace Express_Service.Controllers;
 
 [Route("api/[controller]")]
 [ApiController]
-//[Authorize(Roles = "Master,Admin")]
+[Authorize(Roles = "Master,Admin")]
 public class ShiftController(IRiderShiftService service) : ControllerBase
 {
     private readonly IRiderShiftService service = service;

@@ -162,6 +162,14 @@ public class RiderShiftService(ApplicationDbcontext dbcontext , IRiderWorkingIdH
                            shiftData.WorkingId!,
                            cancellationToken
                        );
+                    if (riderId == -1)
+                    {
+                        errors.Add(new ImportError(
+                            rowNumber,
+                            shiftData.WorkingId!,
+                            $"WorkingId {shiftData.WorkingId} belongs to deleted employee. Shift cannot be imported."));
+                        continue;
+                    }
 
                     if (riderId == 0)
                     {
@@ -409,6 +417,14 @@ public class RiderShiftService(ApplicationDbcontext dbcontext , IRiderWorkingIdH
                         shiftData.WorkingId!,
                         cancellationToken
                     );
+                    if (riderId == -1)
+                    {
+                        errors.Add(new ImportError(
+                            rowNumber,
+                            shiftData.WorkingId!,
+                            $"ERROR: WorkingId {shiftData.WorkingId} belongs to deleted employee. Cannot create comparison."));
+                        continue;
+                    }
 
                     if (riderId == 0)
                     {
@@ -1376,8 +1392,21 @@ public class RiderShiftService(ApplicationDbcontext dbcontext , IRiderWorkingIdH
             }
         }
 
-        // No rider found
+        var deletedEmployee = await dbcontext.DeletedEmployees
+   .AsNoTracking()
+   .FirstOrDefaultAsync(d => d.WorkingId == WorkingId, cancellationToken);
+
+        if (deletedEmployee != null)
+        {
+            // Employee is truly deleted - use data from DeletedEmployees
+            // This allows historical shift data to still reference the rider
+            var deletedDisplayName = $"{deletedEmployee.NameEN ?? "Unknown"} [Deleted, Former ID: {WorkingId}]";
+            // Return a special marker (riderId = -1) to indicate this is a deleted employee reference
+            return (-1, WorkingId, false);
+        }
+
         return (0, null, false);
+
     }
     private static RiderShiftResponse MapToResponse(RiderShift shift)
     {

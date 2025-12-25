@@ -264,6 +264,7 @@ public class HungerDisabilityService(
 
             var substituteRiders = await dbcontext.RiderDetails
                 .Include(r => r.Employee)
+                .ThenInclude(e => e.Housing)
                 .Where(r => substituteIds.Contains(r.Id))
                 .AsNoTracking()
                 .ToDictionaryAsync(r => r.Id, r => r, cancellationToken);
@@ -282,12 +283,11 @@ public class HungerDisabilityService(
                 r.ActualWorkingId,
                 RiderNameEN = r.Rider.Employee.NameEN,
                 RiderNameAR = r.Rider.Employee.NameAR,
-                HousingId = r.Rider.Employee.HousingId,
-                HousingName = r.Rider.Employee.Housing?.Name,
                 r.CompanyId,
                 CompanyName = r.Company.Name,
                 r.SubstituteRiderId,
                 r.SubstituteWorkingId
+                // ❌ REMOVE HousingId and HousingName from here - they should be calculated per record
             }).Select(g =>
             {
                 var totalDays = g.Sum(x => x.Days);
@@ -300,11 +300,24 @@ public class HungerDisabilityService(
                 var firstRecord = g.First();
                 string? substituteNameEN = null;
                 string? substituteNameAR = null;
+                int? housingId = null;
+                string? housingName = null;
+
+                // ✅ Determine which housing to use
                 if (firstRecord.SubstituteRiderId.HasValue &&
                     substituteRiders.TryGetValue(firstRecord.SubstituteRiderId.Value, out var sub))
                 {
                     substituteNameEN = sub.Employee.NameEN;
                     substituteNameAR = sub.Employee.NameAR;
+                    // Use substitute's housing
+                    housingId = sub.Employee.HousingId;
+                    housingName = sub.Employee.Housing?.Name ?? "No Housing";
+                }
+                else
+                {
+                    // Use actual rider's housing
+                    housingId = firstRecord.Rider.Employee.HousingId;
+                    housingName = firstRecord.Rider.Employee.Housing?.Name ?? "No Housing";
                 }
 
                 var lastDayOrderCount = lastDayOrders.TryGetValue(g.Key.ActualRiderId, out var orders) ? orders : 0;
@@ -319,21 +332,22 @@ public class HungerDisabilityService(
                     SubstituteRiderNameEN: substituteNameEN,
                     SubstituteRiderNameAR: substituteNameAR,
                     HasSubstitute: firstRecord.SubstituteRiderId.HasValue,
-                    HousingId: g.Key.HousingId,
-                    HousingName: g.Key.HousingName ?? "No Housing",
+                    HousingId: housingId,
+                    HousingName: housingName,
                     TotalDays: totalDays,
                     TotalOrders: totalOrders,
                     Target: target,
                     DifferenceFromTarget: difference,
                     PerformancePercentage: performancePercentage,
-                    PerformanceStatus: difference >= 0 ? "✅ Above or Met Target" : "❌ Below Target",
+                    PerformanceStatus: difference >= 0 ? "✅" : "❌",
                     LastDayOrders: lastDayOrderCount,
                     RecordCount: g.Count()
                 );
             })
-            .OrderBy(x => x.HousingName)
-            .ThenBy(x => x.ActualWorkingId)
-            .ToList();
+             .OrderBy(x => x.HousingName)
+             .ThenByDescending(x => x.PerformancePercentage)
+             .ToList();
+
 
             return Result.Success<IEnumerable<HungerDisabilityAggregatedResponse>>(aggregated);
         }
@@ -417,8 +431,10 @@ public class HungerDisabilityService(
             {
                 substituteRider = await dbcontext.RiderDetails
                     .Include(r => r.Employee)
+                        .ThenInclude(e => e.Housing)  // ✅ ADD THIS LINE
                     .FirstOrDefaultAsync(r => r.Id == firstRecord.SubstituteRiderId.Value, cancellationToken);
             }
+
 
             var lastShiftDate = endDate.AddDays(-1);
             var lastDayRecord = records.FirstOrDefault(r => r.ShiftDate == lastShiftDate);
@@ -431,6 +447,20 @@ public class HungerDisabilityService(
             var difference = totalOrders - target;
             var performancePercentage = target > 0 ? Math.Round((decimal)totalOrders / target * 100, 2) : 0;
 
+            int? housingId;
+            string housingName;
+
+            if (substituteRider != null)
+            {
+                housingId = substituteRider.Employee.HousingId;
+                housingName = substituteRider.Employee.Housing?.Name ?? "No Housing";
+            }
+            else
+            {
+                housingId = firstRecord.Rider.Employee.HousingId;
+                housingName = firstRecord.Rider.Employee.Housing?.Name ?? "No Housing";
+            }
+
             var response = new HungerDisabilityAggregatedResponse(
                 ActualRiderId: firstRecord.ActualRiderId,
                 ActualWorkingId: firstRecord.ActualWorkingId,
@@ -441,8 +471,8 @@ public class HungerDisabilityService(
                 SubstituteRiderNameEN: substituteRider?.Employee.NameEN,
                 SubstituteRiderNameAR: substituteRider?.Employee.NameAR,
                 HasSubstitute: firstRecord.SubstituteRiderId.HasValue,
-                HousingId: firstRecord.Rider.Employee.HousingId,
-                HousingName: firstRecord.Rider.Employee.Housing?.Name ?? "No Housing",
+                HousingId: housingId,
+                HousingName: housingName,
                 TotalDays: totalDays,
                 TotalOrders: totalOrders,
                 Target: target,

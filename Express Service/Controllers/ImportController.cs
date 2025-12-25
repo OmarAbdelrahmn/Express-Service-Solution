@@ -325,4 +325,117 @@ public class ImportController(IImportService service) : ControllerBase
             ? Ok(response.Value)
             : response.ToProblem();
     }
+
+
+    [HttpPost("deleted-employees")]
+    public async Task<IActionResult> ImportDeletedEmployeesAsync(IFormFile file)
+    {
+        if (file == null || file.Length == 0)
+        {
+            return BadRequest(new { error = "No file uploaded or file is empty" });
+        }
+
+        if (!file.FileName.EndsWith(".xlsx") && !file.FileName.EndsWith(".xls"))
+        {
+            return BadRequest(new { error = "File must be Excel format (.xlsx or .xls)" });
+        }
+
+        var uploadedBy = User?.Identity?.Name ?? "System";
+
+        var result = await service.ImportDeletedEmployeesAsync(file, uploadedBy);
+
+        if (result.IsSuccess)
+        {
+            return Ok(new
+            {
+                success = true,
+                data = result.Value,
+                summary = new
+                {
+                    totalRecords = result.Value.TotalRecords,
+                    successfulImports = result.Value.SuccessfulImports,
+                    failedRecords = result.Value.FailedRecords,
+                    duplicateIqamas = result.Value.DuplicateIqamas,
+                    successRate = result.Value.TotalRecords > 0
+                        ? $"{(result.Value.SuccessfulImports * 100.0 / result.Value.TotalRecords):F1}%"
+                        : "0%"
+                }
+            });
+        }
+
+        return result.ToProblem();
+    }
+
+    [HttpGet("deleted-employees-template-info")]
+    public IActionResult GetDeletedEmployeesTemplateInfo()
+    {
+        return Ok(new
+        {
+            requiredColumns = new[]
+            {
+            "IqamaNumber / رقم الإقامة (MUST be unique)"
+        },
+            highlyRecommendedColumns = new[]
+            {
+            "WorkingId / معرف العمل (Present in ~90% of records, defaults to 'N/A' if missing)",
+            "NameEN / الاسم بالإنجليزية (Defaults to 'Unknown')",
+            "NameAR / الاسم بالعربية (Defaults to 'غير معروف')",
+            "CompanyName / اسم الشركة (Used to link to Company table)"
+        },
+            optionalColumns = new[]
+            {
+            "IqamaEndM / تاريخ انتهاء الاقامة ميلادي (Defaults to +1 year)",
+            "IqamaEndH / تاريخ انتهاء الاقامة هجري (Defaults to +1 year)",
+            "PassportNo / رقم الجواز",
+            "PassportEnd / تاريخ انتهاء الجواز",
+            "Sponsor / الكفيل (Defaults to 'الخدمة السريعة')",
+            "JobTitle / المسمى الوظيفي (Defaults to 'سائق دراجة نارية')",
+            "Country / الجنسية (Defaults to 'Unknown')",
+            "Phone / رقم الجوال (Defaults to '05')",
+            "DateOfBirth / تاريخ الميلاد (Defaults to 1990-01-01)",
+            "Status / الحالة (Defaults to 'disable')",
+            "IBAN / رقم الآيبان",
+            "INKSA / في السعودية (Defaults to true)",
+            "TshirtSize / مقاس القميص",
+            "LicenseNumber / رقم الرخصة"
+        },
+            importBehavior = new
+            {
+                duplicateIqamas = "Skipped - IqamaNo must be unique in DeletedEmployees table",
+                missingWorkingId = "Defaults to 'N/A' (90% of records have WorkingId)",
+                missingCompany = "CompanyId set to null if CompanyName not found",
+                missingNames = "NameEN defaults to 'Unknown', NameAR defaults to 'غير معروف'",
+                transactionSafety = "Each row processed in its own transaction",
+                statusDefault = "Always defaults to 'disable' if not provided"
+            },
+            useCases = new
+            {
+                description = "Import historical records of deleted employees/riders",
+                workingIdTracking = "Preserves WorkingId history for substitution lookups",
+                reportingPurposes = "Maintains deleted employee data for reports and audits",
+                dataRecovery = "Allows tracking of previously deleted employee information"
+            },
+            notes = new[]
+            {
+            "Only IqamaNo is strictly required - all other fields have defaults",
+            "WorkingId is highly recommended as it's present in 90% of records",
+            "Column order doesn't matter - columns matched by name (Arabic or English)",
+            "Duplicate IqamaNo will be skipped and reported in response",
+            "CompanyName must match exactly (case-insensitive) to link to Company table",
+            "Maximum file size: 10MB",
+            "All dates support multiple formats (dd/MM/yyyy, yyyy-MM-dd, etc.)",
+            "Hijri dates automatically converted to Gregorian"
+        },
+            exampleExcel = new
+            {
+                headers = new[] { "IqamaNumber", "NameEN", "NameAR", "WorkingId", "CompanyName" },
+                sampleData = new[]
+                {
+                new { IqamaNumber = "2234567890", NameEN = "Ali Ahmed", NameAR = "علي أحمد", WorkingId = "WID001", CompanyName = "Hunger" },
+                new { IqamaNumber = "2345678901", NameEN = "Mohammed Ali", NameAR = "محمد علي", WorkingId = "WID002", CompanyName = "Keta" },
+                new { IqamaNumber = "2456789012", NameEN = "Ahmed Hassan", NameAR = "أحمد حسن", WorkingId = "N/A", CompanyName = "ToYou" }
+            }
+            }
+        });
+    }
 }

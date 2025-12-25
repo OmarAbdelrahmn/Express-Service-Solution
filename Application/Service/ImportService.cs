@@ -15,6 +15,217 @@ namespace Application.Service;
 public class ImportService(ApplicationDbcontext dbcontext) : IImportService
 {
     private readonly ApplicationDbcontext _dbcontext = dbcontext;
+
+    public async Task<Result<DeletedEmployeeImportResponse>> ImportDeletedEmployeesAsync(
+    IFormFile file,
+    string uploadedBy)
+    {
+        if (file == null || file.Length == 0)
+            return Result.Failure<DeletedEmployeeImportResponse>(
+                new Error("InvalidFile", "File is empty or null", 400));
+
+        if (!file.FileName.EndsWith(".xlsx") && !file.FileName.EndsWith(".xls"))
+            return Result.Failure<DeletedEmployeeImportResponse>(
+                new Error("InvalidFormat", "File must be Excel format (.xlsx or .xls)", 400));
+
+        var results = new List<DeletedEmployeeImportRowResult>();
+        var errors = new List<string>();
+        int successfulImports = 0;
+        int failedRecords = 0;
+        int duplicateIqamas = 0;
+
+        try
+        {
+            using var stream = file.OpenReadStream();
+            using var workbook = new XLWorkbook(stream);
+            var worksheet = workbook.Worksheet(1);
+
+            if (worksheet == null)
+            {
+                return Result.Failure<DeletedEmployeeImportResponse>(
+                    new Error("InvalidWorksheet", "Could not read worksheet", 400));
+            }
+
+            var headerRow = FindDeletedEmployeeHeaderRow(worksheet);
+
+            if (headerRow == null)
+            {
+                return Result.Failure<DeletedEmployeeImportResponse>(
+                    new Error("EmptyFile", "Excel file has no header row", 400));
+            }
+
+            var columnMap = BuildDeletedEmployeeColumnMapping(headerRow);
+            if (!columnMap.IsValid)
+            {
+                return Result.Failure<DeletedEmployeeImportResponse>(
+                    new Error("InvalidColumns", columnMap.ErrorMessage!, 400));
+            }
+
+            // Load company lookup dictionary
+            var companies = await _dbcontext.Companies
+                .AsNoTracking()
+                .ToDictionaryAsync(c => c.Name.Trim().ToLower(), c => c.Id);
+
+            var dataRows = worksheet.RowsUsed()
+                .Where(r => r.RowNumber() > headerRow.RowNumber())
+                .ToList();
+
+            var rowNumber = headerRow.RowNumber();
+
+            foreach (var row in dataRows)
+            {
+                rowNumber++;
+
+                using var transaction = await _dbcontext.Database.BeginTransactionAsync();
+                try
+                {
+                    var rowData = ParseDeletedEmployeeRowData(row, columnMap, rowNumber);
+
+                    if (!rowData.IsValid)
+                    {
+                        failedRecords++;
+                        results.Add(new DeletedEmployeeImportRowResult(
+                            rowNumber,
+                            false,
+                            rowData.IqamaNo?.ToString() ?? "N/A",
+                            rowData.NameEN,
+                            rowData.NameAR,
+                            rowData.WorkingId,
+                            rowData.CompanyName,
+                            new List<string>(),
+                            rowData.ErrorMessage
+                        ));
+                        continue;
+                    }
+
+                    var warnings = new List<string>();
+
+                    // Check if already exists in DeletedEmployees
+                    var existingDeleted = await _dbcontext.DeletedEmployees
+                        .AnyAsync(e => e.IqamaNo == rowData.IqamaNo!.Value);
+
+                    if (existingDeleted)
+                    {
+                        duplicateIqamas++;
+                        failedRecords++;
+                        results.Add(new DeletedEmployeeImportRowResult(
+                            rowNumber,
+                            false,
+                            rowData.IqamaNo!.Value.ToString(),
+                            rowData.NameEN,
+                            rowData.NameAR,
+                            rowData.WorkingId,
+                            rowData.CompanyName,
+                            warnings,
+                            "Deleted employee with this Iqama already exists"
+                        ));
+                        await transaction.RollbackAsync();
+                        continue;
+                    }
+
+                    // Resolve CompanyId if CompanyName provided
+                    int? companyId = null;
+                    if (!string.IsNullOrWhiteSpace(rowData.CompanyName))
+                    {
+                        if (companies.TryGetValue(rowData.CompanyName.Trim().ToLower(), out int cId))
+                        {
+                            companyId = cId;
+                        }
+                        else
+                        {
+                            warnings.Add($"Company '{rowData.CompanyName}' not found - CompanyId set to null");
+                        }
+                    }
+
+                    // Create DeletedEmployee record
+                    var deletedEmployee = new DeletedEmployees
+                    {
+                        IqamaNo = rowData.IqamaNo!.Value,
+                        NameEN = rowData.NameEN ?? "Unknown",
+                        NameAR = rowData.NameAR ?? "غير معروف",
+                        IqamaEndM = rowData.IqamaEndM ?? DateOnly.FromDateTime(DateTime.Now.AddYears(1)),
+                        IqamaEndH = rowData.IqamaEndH ?? DateOnly.FromDateTime(DateTime.Now.AddYears(1)),
+                        PassportNo = rowData.PassportNo,
+                        PassportEnd = rowData.PassportEnd,
+                        Sponsor = rowData.Sponsor ?? "الخدمة السريعة",
+                        JobTitle = rowData.JobTitle ?? "سائق دراجة نارية",
+                        Country = rowData.Country ?? "Unknown",
+                        Phone = rowData.Phone ?? "05",
+                        DateOfBirth = rowData.DateOfBirth ?? DateTime.Parse("1990-01-01"),
+                        Status = rowData.Status ?? "disable",
+                        AcountStatus = rowData.AcountStatus ?? "قيد التشغيل",
+                        IBAN = rowData.IBAN,
+                        INKSA = rowData.INKSA,
+                        WorkingId = rowData.WorkingId ?? "N/A",
+                        TshirtSize = rowData.TshirtSize,
+                        LicenseNumber = rowData.LicenseNumber,
+                        CompanyId = companyId,
+                        HousingId = null,
+                        VehicleId = null,
+                        CreatedAt = DateTime.UtcNow.AddHours(3)
+                    };
+
+                    await _dbcontext.DeletedEmployees.AddAsync(deletedEmployee);
+                    await _dbcontext.SaveChangesAsync();
+                    await transaction.CommitAsync();
+
+                    successfulImports++;
+                    results.Add(new DeletedEmployeeImportRowResult(
+                        rowNumber,
+                        true,
+                        deletedEmployee.IqamaNo.ToString(),
+                        deletedEmployee.NameEN,
+                        deletedEmployee.NameAR,
+                        deletedEmployee.WorkingId,
+                        rowData.CompanyName,
+                        warnings,
+                        null
+                    ));
+
+                    if (string.IsNullOrWhiteSpace(rowData.WorkingId))
+                    {
+                        warnings.Add("WorkingId not provided - using default 'N/A'");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    await transaction.RollbackAsync();
+                    failedRecords++;
+                    errors.Add($"Row {rowNumber}: {ex.Message}");
+
+                    results.Add(new DeletedEmployeeImportRowResult(
+                        rowNumber,
+                        false,
+                        "N/A",
+                        null,
+                        null,
+                        null,
+                        null,
+                        new List<string>(),
+                        $"Exception: {ex.Message}"
+                    ));
+                }
+            }
+
+            var response = new DeletedEmployeeImportResponse(
+                TotalRecords: dataRows.Count,
+                SuccessfulImports: successfulImports,
+                FailedRecords: failedRecords,
+                DuplicateIqamas: duplicateIqamas,
+                Results: results,
+                Errors: errors,
+                ProcessedAt: DateTime.UtcNow.AddHours(3)
+            );
+
+            return Result.Success(response);
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<DeletedEmployeeImportResponse>(
+                new Error("ProcessingError", $"Failed to process Excel file: {ex.Message}", 500));
+        }
+    }
+
     public async Task<Result<HousingAssignmentResponse>> BulkAssignEmployeesToHousingAsync(
      IFormFile file,
      string uploadedBy)
@@ -2399,6 +2610,285 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
 
         return data;
     }
+
+    private IXLRow FindDeletedEmployeeHeaderRow(IXLWorksheet worksheet)
+    {
+        var knownColumns = new[]
+        {
+        "IqamaNumber", "Iqama Number", "رقم الاقامة", "رقم الإقامة",
+        "NameEN", "Name EN", "NameAR", "Name AR",
+        "WorkingId", "Working ID", "معرف العمل"
+    };
+
+        for (int i = 1; i <= Math.Min(10, worksheet.RowsUsed().Count()); i++)
+        {
+            var row = worksheet.Row(i);
+            var cellValues = new List<string>();
+
+            foreach (var cell in row.CellsUsed())
+            {
+                try
+                {
+                    string value = cell.IsMerged()
+                        ? cell.MergedRange().FirstCell().GetString().Trim()
+                        : cell.GetString().Trim();
+
+                    if (!string.IsNullOrWhiteSpace(value))
+                        cellValues.Add(value);
+                }
+                catch { }
+            }
+
+            int matchCount = 0;
+            foreach (var cellValue in cellValues)
+            {
+                foreach (var knownCol in knownColumns)
+                {
+                    if (cellValue.Equals(knownCol, StringComparison.OrdinalIgnoreCase) ||
+                        cellValue.Replace(" ", "").Equals(knownCol.Replace(" ", ""), StringComparison.OrdinalIgnoreCase))
+                    {
+                        matchCount++;
+                        break;
+                    }
+                }
+            }
+
+            if (matchCount >= 2)
+                return row;
+        }
+
+        return worksheet.Row(1);
+    }
+
+    private DeletedEmployeeColumnMapping BuildDeletedEmployeeColumnMapping(IXLRow headerRow)
+    {
+        var mapping = new DeletedEmployeeColumnMapping();
+        var cells = headerRow.CellsUsed().ToList();
+
+        var actualHeaders = new List<string>();
+        foreach (var cell in cells)
+        {
+            try
+            {
+                string val = cell.IsMerged()
+                    ? cell.MergedRange().FirstCell().GetString()
+                    : cell.GetString();
+                actualHeaders.Add($"Col{cell.Address.ColumnNumber}({cell.Address.ColumnLetter})='{val}'");
+            }
+            catch { }
+        }
+
+        // Map all columns (only IqamaNo is required)
+        mapping.IqamaNoCol = FindColumn(cells,
+            "IqamaNumber", "Iqama Number", "رقم الاقامة", "رقم الإقامة", "IqamaNo");
+
+        mapping.NameARCol = FindColumn(cells,
+            "NameAR", "Name AR", "الاسم بالعربية", "الاسم العربي", "Arabic Name");
+
+        mapping.NameENCol = FindColumn(cells,
+            "NameEN", "Name EN", "الاسم بالإنجليزية", "English Name", "Name");
+
+        mapping.WorkingIdCol = FindColumn(cells,
+            "WorkingId", "Working ID", "معرف العمل", "WorkID", "رقم العمل","المعرف");
+
+        mapping.CompanyNameCol = FindColumn(cells,
+            "CompanyName", "Company Name", "اسم الشركة", "الشركة");
+
+        mapping.IqamaEndMCol = FindColumn(cells,
+            "IqamaEndM", "Iqama End M", "تاريخ انتهاء الاقامة", "Iqama Expiry");
+
+        mapping.IqamaEndHCol = FindColumn(cells,
+            "IqamaEndH", "Iqama End H", "تاريخ انتهاء الاقامة هجري");
+
+        mapping.PassportNoCol = FindColumn(cells,
+            "PassportNo", "Passport Number", "رقم الجواز");
+
+        mapping.PassportEndCol = FindColumn(cells,
+            "PassportEnd", "Passport End", "تاريخ انتهاء الجواز");
+
+        mapping.SponsorCol = FindColumn(cells,
+            "Sponsor", "الكفيل", "اسم الكفيل");
+
+        mapping.JobTitleCol = FindColumn(cells,
+            "JobTitle", "Job Title", "المسمى الوظيفي", "الوظيفة");
+
+        mapping.CountryCol = FindColumn(cells,
+            "Country", "الجنسية", "البلد");
+
+        mapping.PhoneCol = FindColumn(cells,
+            "Phone", "رقم الجوال", "الجوال", "Mobile");
+
+        mapping.DateOfBirthCol = FindColumn(cells,
+            "DateOfBirth", "Date Of Birth", "تاريخ الميلاد");
+
+        mapping.StatusCol = FindColumn(cells,
+            "Status", "الحالة", "Employee Status");
+
+        mapping.AcountStatusCol = FindColumn(cells,
+            "AccountStatus", "حالة الحساب", "Account Status");
+
+        mapping.IBANCol = FindColumn(cells,
+            "IBAN", "رقم الآيبان", "الآيبان");
+
+        mapping.INKSACol = FindColumn(cells,
+            "INKSA", "في السعودية", "In KSA");
+
+        mapping.TshirtSizeCol = FindColumn(cells,
+            "TshirtSize", "Tshirt Size", "مقاس القميص");
+
+        mapping.LicenseNumberCol = FindColumn(cells,
+            "LicenseNumber", "License Number", "رقم الرخصة");
+
+        // Only IqamaNo is required
+        var missing = new List<string>();
+        if (mapping.IqamaNoCol == 0) missing.Add("Iqama Number");
+
+        if (missing.Any())
+        {
+            mapping.IsValid = false;
+            mapping.ErrorMessage = $"Required column missing: {string.Join(", ", missing)}\n" +
+                                  $"Columns found:\n{string.Join("\n", actualHeaders)}";
+        }
+        else
+        {
+            mapping.IsValid = true;
+        }
+
+        return mapping;
+    }
+
+    private DeletedEmployeeRowData ParseDeletedEmployeeRowData(
+        IXLRow row,
+        DeletedEmployeeColumnMapping map,
+        int rowNumber)
+    {
+        var data = new DeletedEmployeeRowData { RowNumber = rowNumber };
+
+        try
+        {
+            // Parse IqamaNo (REQUIRED)
+            var iqamaStr = GetCellValue(row, map.IqamaNoCol);
+            if (string.IsNullOrWhiteSpace(iqamaStr))
+            {
+                data.IsValid = false;
+                data.ErrorMessage = "Iqama Number is required";
+                return data;
+            }
+
+            if (!long.TryParse(iqamaStr.Replace(" ", ""), out long iqamaNo) || iqamaNo <= 0)
+            {
+                data.IsValid = false;
+                data.ErrorMessage = $"Invalid Iqama Number: {iqamaStr}";
+                return data;
+            }
+            data.IqamaNo = iqamaNo;
+
+            // Parse all optional fields
+            data.NameAR = GetCellValue(row, map.NameARCol);
+            data.NameEN = GetCellValue(row, map.NameENCol);
+            data.WorkingId = GetCellValue(row, map.WorkingIdCol); // ~90% have this
+            data.CompanyName = GetCellValue(row, map.CompanyNameCol);
+            data.IqamaEndM = ParseGregorianDate(GetCellValue(row, map.IqamaEndMCol));
+            data.IqamaEndH = ParseHijriDate(GetCellValue(row, map.IqamaEndHCol));
+            data.PassportNo = GetCellValue(row, map.PassportNoCol);
+            data.PassportEnd = ParseGregorianDate(GetCellValue(row, map.PassportEndCol));
+            data.Sponsor = GetCellValue(row, map.SponsorCol);
+            data.JobTitle = GetCellValue(row, map.JobTitleCol);
+            data.Country = GetCellValue(row, map.CountryCol);
+            data.Phone = GetCellValue(row, map.PhoneCol);
+            data.Status = GetCellValue(row, map.StatusCol);
+            data.AcountStatus = GetCellValue(row, map.AcountStatusCol);
+            data.IBAN = GetCellValue(row, map.IBANCol);
+            data.TshirtSize = GetCellValue(row, map.TshirtSizeCol);
+            data.LicenseNumber = GetCellValue(row, map.LicenseNumberCol);
+
+            // Parse DateOfBirth
+            var dobStr = GetCellValue(row, map.DateOfBirthCol);
+            if (!string.IsNullOrWhiteSpace(dobStr) && DateTime.TryParse(dobStr, out var dob))
+            {
+                data.DateOfBirth = dob;
+            }
+
+            // Parse INKSA
+            var inksaStr = GetCellValue(row, map.INKSACol);
+            data.INKSA = string.IsNullOrWhiteSpace(inksaStr) ||
+                         inksaStr.ToLower() == "yes" ||
+                         inksaStr == "1" ||
+                         inksaStr.ToLower() == "true";
+
+            data.IsValid = true;
+        }
+        catch (Exception ex)
+        {
+            data.IsValid = false;
+            data.ErrorMessage = $"Error parsing row: {ex.Message}";
+        }
+
+        return data;
+    }
+
+    // ✅ Internal Classes for Deleted Employee Import
+
+    internal class DeletedEmployeeColumnMapping
+    {
+        public bool IsValid { get; set; }
+        public string? ErrorMessage { get; set; }
+
+        // Required
+        public int IqamaNoCol { get; set; }
+
+        // Optional
+        public int NameARCol { get; set; }
+        public int NameENCol { get; set; }
+        public int WorkingIdCol { get; set; }
+        public int CompanyNameCol { get; set; }
+        public int IqamaEndMCol { get; set; }
+        public int IqamaEndHCol { get; set; }
+        public int PassportNoCol { get; set; }
+        public int PassportEndCol { get; set; }
+        public int SponsorCol { get; set; }
+        public int JobTitleCol { get; set; }
+        public int CountryCol { get; set; }
+        public int PhoneCol { get; set; }
+        public int DateOfBirthCol { get; set; }
+        public int StatusCol { get; set; }
+        public int AcountStatusCol { get; set; }
+        public int IBANCol { get; set; }
+        public int INKSACol { get; set; }
+        public int TshirtSizeCol { get; set; }
+        public int LicenseNumberCol { get; set; }
+    }
+
+    internal class DeletedEmployeeRowData
+    {
+        public int RowNumber { get; set; }
+        public bool IsValid { get; set; }
+        public string? ErrorMessage { get; set; }
+
+        // Required
+        public long? IqamaNo { get; set; }
+
+        // Optional
+        public string? NameAR { get; set; }
+        public string? NameEN { get; set; }
+        public string? WorkingId { get; set; }
+        public string? CompanyName { get; set; }
+        public DateOnly? IqamaEndM { get; set; }
+        public DateOnly? IqamaEndH { get; set; }
+        public string? PassportNo { get; set; }
+        public DateOnly? PassportEnd { get; set; }
+        public string? Sponsor { get; set; }
+        public string? JobTitle { get; set; }
+        public string? Country { get; set; }
+        public string? Phone { get; set; }
+        public DateTime? DateOfBirth { get; set; }
+        public string? Status { get; set; }
+        public string? AcountStatus { get; set; }
+        public string? IBAN { get; set; }
+        public bool INKSA { get; set; } = true;
+        public string? TshirtSize { get; set; }
+        public string? LicenseNumber { get; set; }
+    }
 }
 internal class HousingColumnMapping
 {
@@ -2459,7 +2949,7 @@ internal class VehicleRowData
 
 }
 
-    internal class ColumnMapping
+internal class ColumnMapping
 {
     public bool IsValid { get; set; }
     public string? ErrorMessage { get; set; }

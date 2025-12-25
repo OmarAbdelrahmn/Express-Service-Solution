@@ -23,6 +23,10 @@ public interface IImportService
     Task<Result<HousingAssignmentResponse>> BulkAssignEmployeesToHousingAsync(
     IFormFile file,
     string uploadedBy);
+
+    Task<Result<DeletedEmployeeImportResponse>> ImportDeletedEmployeesAsync(
+    IFormFile file,
+    string uploadedBy);
 }
 public record HousingAssignmentResponse(
     int TotalRecords,
@@ -123,5 +127,27 @@ public record WorkingIdUpdateRowResult(
     string? OldWorkingId,
     string? RiderNameEN,
     string? RiderNameAR,
+    string? ErrorMessage
+);
+
+public record DeletedEmployeeImportResponse(
+    int TotalRecords,
+    int SuccessfulImports,
+    int FailedRecords,
+    int DuplicateIqamas,
+    List<DeletedEmployeeImportRowResult> Results,
+    List<string> Errors,
+    DateTime ProcessedAt
+);
+
+public record DeletedEmployeeImportRowResult(
+    int RowNumber,
+    bool Success,
+    string IqamaNo,
+    string? NameEN,
+    string? NameAR,
+    string? WorkingId,
+    string? CompanyName,
+    List<string> Warnings,
     string? ErrorMessage
 );
