@@ -1,20 +1,18 @@
 ﻿using Application.Contracts.Employees;
 using Application.Service.Empolyee;
+using Domain;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using System.Threading.Tasks;
 
 namespace Express_Service.Controllers;
 
 [Route("api/vehicles")]
 [ApiController]
-public class VehicleController : ControllerBase
+public class VehicleController(IVehicleService service) : ControllerBase
 {
-    private readonly IVehicleService _service;
-
-    public VehicleController(IVehicleService service)
-    {
-        _service = service;
-    }
+    private readonly IVehicleService _service = service;
 
     [HttpPost]
     [Authorize(Roles = "Master,Admin")]
