@@ -23,8 +23,7 @@ public class Employees
     public string? IBAN { get; set; } = string.Empty;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow.AddHours(3);
     public bool INKSA { get; set; } = true;
-
-
+    public bool IsEmployee { get; set; } = false;
     public int? HousingId { get; set; }
     public Housing? Housing { get; set; } 
 

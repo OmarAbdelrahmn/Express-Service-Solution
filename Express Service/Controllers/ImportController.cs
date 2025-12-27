@@ -438,4 +438,128 @@ public class ImportController(IImportService service) : ControllerBase
             }
         });
     }
+
+
+    [HttpPost("vehicle-assignments")]
+    public async Task<IActionResult> ImportVehicleAssignmentsAsync(IFormFile file)
+    {
+        if (file == null || file.Length == 0)
+            return BadRequest(new { error = "No file uploaded or file is empty" });
+
+        if (!file.FileName.EndsWith(".xlsx") && !file.FileName.EndsWith(".xls"))
+            return BadRequest(new { error = "File must be Excel format (.xlsx or .xls)" });
+
+        var uploadedBy = User?.Identity?.Name ?? "System";
+
+        var result = await service.ImportVehicleAssignmentsAsync(file, uploadedBy);
+
+        if (result.IsSuccess)
+        {
+            return Ok(new
+            {
+                success = true,
+                data = result.Value,
+                summary = new
+                {
+                    totalRecords = result.Value.TotalRecords,
+                    successfulAssignments = result.Value.SuccessfulAssignments,
+                    employeesConvertedToRiders = result.Value.EmployeesConvertedToRiders,
+                    failedRecords = result.Value.FailedRecords,
+                    employeeNotFound = result.Value.EmployeeNotFound,
+                    vehicleNotFound = result.Value.VehicleNotFound,
+                    vehicleUnavailable = result.Value.VehicleUnavailable,
+                    successRate = result.Value.TotalRecords > 0
+                        ? $"{(result.Value.SuccessfulAssignments * 100.0 / result.Value.TotalRecords):F1}%"
+                        : "0%"
+                }
+            });
+        }
+
+        return result.ToProblem();
+    }
+
+    [HttpGet("vehicle-assignment-template-info")]
+    public IActionResult GetVehicleAssignmentTemplateInfo()
+    {
+        return Ok(new
+        {
+            requiredColumns = new[]
+            {
+            "IqamaNumber / رقم الإقامة (Employee Iqama - spaces will be removed)",
+            "PlateNumberA / رقم اللوحة (Arabic Plate Number - spaces will be removed)"
+        },
+            optionalColumns = new[]
+            {
+            "Permission / التصريح (Permission type - defaults to 'تصريح عام')",
+            "PermissionStartDate / تاريخ بداية التصريح (Format: dd/MM/yyyy or yyyy-MM-dd)",
+            "PermissionEndDate / تاريخ نهاية التصريح (Format: dd/MM/yyyy or yyyy-MM-dd)"
+        },
+            specialBehavior = new
+            {
+                autoConversion = "Employees without RiderDetails will be automatically converted to riders",
+                spaceRemoval = "All spaces removed from IqamaNo and PlateNumberA for matching",
+                housingLocation = "Vehicle location automatically updated to employee's housing name",
+                trafficPermission = "If permission contains 'مرور', defaults to 30-day period",
+                replaceVehicle = "If rider already has a vehicle, it will be returned and replaced"
+            },
+            permissionRules = new
+            {
+                defaultValue = "تصريح عام (if not provided)",
+                trafficDetection = "If contains 'مرور' → 'تصريح مرور' with 30-day default",
+                dateDefaults = "Traffic permissions get auto start/end dates if missing",
+                required = "Permission field is optional but recommended"
+            },
+            importBehavior = new
+            {
+                employeeNotFound = "Skipped - must exist in database",
+                noRiderDetails = "Auto-creates RiderDetails with WorkingId='AUTO_{IqamaNo}'",
+                vehicleNotFound = "Skipped - must exist in database",
+                vehicleUnavailable = "Skipped - vehicle must be available (not taken/stolen/problem)",
+                housingMissing = "Location set to 'غير محدد' if employee has no housing",
+                duplicateAssignment = "Replaces old vehicle assignment"
+            },
+            notes = new[]
+            {
+            "Spaces automatically removed from IqamaNo and PlateNumberA",
+            "Employee must exist - will not create new employees",
+            "Vehicle must exist - will not create new vehicles",
+            "Employees without RiderDetails converted automatically",
+            "Vehicle location updated to employee's housing name",
+            "Permission containing 'مرور' gets special handling",
+            "All assignments tracked in RiderVehicleStatus history",
+            "Transactional - each row processed independently",
+            "Maximum file size: 10MB"
+        },
+            exampleExcel = new
+            {
+                headers = new[]
+                {
+                "IqamaNumber",
+                "PlateNumberA",
+                "Permission",
+                "PermissionStartDate",
+                "PermissionEndDate"
+            },
+                sampleData = new[]
+                {
+                new
+                {
+                    IqamaNumber = "2234567890",
+                    PlateNumberA = "أ ب ج 1234",
+                    Permission = "تصريح عمل",
+                    PermissionStartDate = "01/01/2025",
+                    PermissionEndDate = "31/12/2025"
+                },
+                new
+                {
+                    IqamaNumber = "2345678901",
+                    PlateNumberA = "د هـ و 5678",
+                    Permission = "تصريح مرور",
+                    PermissionStartDate = "15/01/2025",
+                    PermissionEndDate = "15/02/2025"
+                }
+            }
+            }
+        });
+    }
 }

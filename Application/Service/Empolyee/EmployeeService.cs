@@ -24,7 +24,7 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
         var isexist = await dbcontext
             .Employees
             .AsNoTracking()
-            .Where(e => e.IqamaNo.ToString().StartsWith(IqamaNo.ToString()) && e.RiderDetails == null)
+            .Where(e => e.IqamaNo.ToString().StartsWith(IqamaNo.ToString()) && e.IsEmployee)
             .Include(e => e.Housing)
             .ToListAsync();
 
@@ -101,7 +101,7 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
         var isexist = await dbcontext
             .Employees
             .AsNoTracking()
-            .Where(c => c.RiderDetails == null)
+            .Where(c => c.IsEmployee == true)
             .Include(e => e.Housing)
             .ToListAsync();
 
@@ -143,6 +143,8 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
 
         var Em = Request.Adapt<Employees>();
 
+        Em.IsEmployee = true;
+
         await dbcontext.Employees.AddAsync(Em);
         await dbcontext.SaveChangesAsync();
 
@@ -152,16 +154,37 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
 
     public async Task<Result> DeleteAsync(long IqamaNo, CancellationToken cancellationToken = default)
     {
-        var employee = await dbcontext.Employees.Where(c => c.IqamaNo == IqamaNo && c.RiderDetails == null).FirstOrDefaultAsync();
+        var isexist = await dbcontext.Employees.Where(c => c.IqamaNo == IqamaNo && c.IsEmployee).FirstOrDefaultAsync();
 
-        if (employee is null)
+        if (isexist is null)
             return Result.Failure<EmpolyeeResponse>(error: new Error("No Employee Found", "no employee found with this Iqama", 400));
 
-        var Done = employee.Adapt<DeletedEmployees>();
+        var Done = new DeletedEmployees
+        {
+            IqamaNo = isexist.IqamaNo,
+            IqamaEndM = isexist.IqamaEndM,
+            IqamaEndH = isexist.IqamaEndH,
+            PassportNo = isexist.PassportNo,
+            PassportEnd = isexist.PassportEnd,
+            Sponsor = isexist.Sponsor,
+            JobTitle = isexist.JobTitle,
+            NameAR = isexist.NameAR,
+            NameEN = isexist.NameEN,
+            Country = isexist.Country,
+            Phone = isexist.Phone,
+            DateOfBirth = isexist.DateOfBirth.ToDateTime(TimeOnly.MaxValue),
+            Status = isexist.Status,
+            AcountStatus = isexist.Status,
+            IBAN = isexist.IBAN,
+            CreatedAt = isexist.CreatedAt,
+            INKSA = isexist.INKSA,
+            HousingId = isexist.HousingId
+        };
+
 
         await dbcontext.DeletedEmployees.AddAsync(Done, cancellationToken);
 
-        dbcontext.Employees.Remove(employee);
+        dbcontext.Employees.Remove(isexist);
 
         dbcontext.SaveChanges();
 
@@ -170,7 +193,7 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
 
     public async Task<Result<EmpolyeeResponse>> UpdateAsync(long IqamaNo, UEmpolyeeRequest request)
     {
-        var employee = await dbcontext.Employees.Where(c => c.IqamaNo == IqamaNo && c.RiderDetails == null).Include(c => c.Housing).FirstOrDefaultAsync();
+        var employee = await dbcontext.Employees.Where(c => c.IqamaNo == IqamaNo && c.IsEmployee).Include(c => c.Housing).FirstOrDefaultAsync();
 
         if (employee is null)
             return Result.Failure<EmpolyeeResponse>(error: new Error("No Employee Found", "no employee found with this Iqama", 400));
@@ -308,7 +331,7 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
     public async Task<Result<IEnumerable<EmpolyeeResponse>>> Filter(EmployeeFilter filter)
     {
         var query = dbcontext.Employees
-            .Where(e => e.RiderDetails == null)
+            .Where(e => e.IsEmployee)
             .Include(e => e.Housing)
             .AsQueryable();
 
@@ -401,7 +424,7 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
     {
 
         var query = dbcontext.Employees
-            .Where(e => e.RiderDetails == null)
+            .Where(e => e.IsEmployee)
             .Include(e => e.Housing)
             .AsQueryable();
 
@@ -497,7 +520,7 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
 
         keyword = keyword.ToLower();
 
-        var query = dbcontext.Employees.Where(e => e.RiderDetails == null)
+        var query = dbcontext.Employees.Where(e => e.IsEmployee)
             .Include(e => e.Housing)
             .Where(e =>
                 e.NameAR.ToLower().Contains(keyword) ||
@@ -676,7 +699,7 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
 
     private TempEmployeeStatusChangeResponse MapToResponse1(TempEmployeeStatusChange statusChange)
     {
-        var isRider = statusChange.Employee?.RiderDetails != null;
+        var isRider = statusChange.Employee?.IsEmployee == false;
         var employeeType = isRider ? "Rider" : "Employee";
 
         return new TempEmployeeStatusChangeResponse(
@@ -788,7 +811,7 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
                 NameAR: employee.NameAR,
                 NameEN: employee.NameEN,
                 CurrentStatus: employee.Status,
-                EmployeeType: employee.RiderDetails != null ? "Rider" : "Employee",
+                EmployeeType: !employee.IsEmployee ? "Rider" : "Employee",
                 CompanyName: employee.RiderDetails?.Company?.Name,
                 HousingName: employee.Housing?.Name,
                 TotalStatusChanges: historyItems.Count,
@@ -877,6 +900,20 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
             return Result.Failure<StatusChangeStatisticsDto>(
                 new Error("ServerError", $"Failed to get statistics: {ex.Message}", 500));
         }
+    }
+
+    public async Task<bool> Togle(long iqama)
+    {
+        var emp =await dbcontext.Employees.FirstOrDefaultAsync(x => x.IqamaNo == iqama);
+
+        if (emp == null)
+            return false;
+
+        emp.IsEmployee = !emp.IsEmployee;
+
+        await dbcontext.SaveChangesAsync();
+
+        return true;
     }
 }
 

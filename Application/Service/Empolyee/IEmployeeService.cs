@@ -12,6 +12,7 @@ namespace Application.Service.Empolyee;
 
 public interface IEmployeeService
 {
+    Task<bool> Togle(long iqama);
     Task<Result<IEnumerable<EmpolyeeResponse>>>GetAllEmployee();
     Task<Result<IEnumerable<DeletedEmployees>>>GetAlldeletedEmployee();
     Task<Result<IEnumerable<EmpolyeeResponse>>>Get(long IqamaNo);

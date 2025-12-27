@@ -28,7 +28,7 @@ public class RiderService(ApplicationDbcontext dbcontext,IRiderWorkingIdHistoryS
                 .CountAsync();
 
             var totalRiders = await dbcontext.Employees
-                .Where(e => e.RiderDetails != null)
+                .Where(e => !e.IsEmployee)
                 .CountAsync();
 
             // Calculate non-riders
@@ -53,7 +53,7 @@ public class RiderService(ApplicationDbcontext dbcontext,IRiderWorkingIdHistoryS
 
         var isexist = await dbcontext
            .Employees
-           .Where(r => r.IqamaNo.ToString().StartsWith(IqamaNo.ToString()) && r.RiderDetails != null)
+           .Where(r => r.IqamaNo.ToString().StartsWith(IqamaNo.ToString()) && r.IsEmployee == false)
            .Include(e => e.Housing)
            .Include(e => e.RiderDetails)
                .ThenInclude(rd => rd.Company)
@@ -83,11 +83,11 @@ public class RiderService(ApplicationDbcontext dbcontext,IRiderWorkingIdHistoryS
        emp.INKSA,
        emp.CreatedAt,
        emp.Housing?.Name ?? "none",
-       emp.RiderDetails.WorkingId!,
+       emp.RiderDetails?.WorkingId!,
          emp.IqamaNo,
-            emp.RiderDetails.TshirtSize!,
-            emp.RiderDetails.LicenseNumber!,
-            emp.RiderDetails.Company.Name
+            emp.RiderDetails?.TshirtSize,
+            emp.RiderDetails?.LicenseNumber,
+            emp.RiderDetails?.Company.Name
             )).ToList();
 
 
@@ -98,7 +98,7 @@ public class RiderService(ApplicationDbcontext dbcontext,IRiderWorkingIdHistoryS
         var isexist = await dbcontext
             .Employees
             .AsNoTracking()
-            .Where(r => r.RiderDetails != null)
+            .Where(r => r.IsEmployee == false)
             .Include(e => e.Housing)
             .Include(e => e.RiderDetails)
                 .ThenInclude(rd => rd.Company)
@@ -128,11 +128,11 @@ public class RiderService(ApplicationDbcontext dbcontext,IRiderWorkingIdHistoryS
        emp.INKSA,
        emp.CreatedAt,
        emp.Housing?.Name,
-       emp.RiderDetails.WorkingId!,
+       emp.RiderDetails?.WorkingId!,
          emp.IqamaNo,
-            emp.RiderDetails.TshirtSize!,
-            emp.RiderDetails.LicenseNumber!,
-            emp.RiderDetails.Company.Name
+            emp.RiderDetails?.TshirtSize,
+            emp.RiderDetails?.LicenseNumber,
+            emp.RiderDetails?.Company.Name
             )).ToList();
 
 
@@ -172,6 +172,7 @@ public class RiderService(ApplicationDbcontext dbcontext,IRiderWorkingIdHistoryS
                 Status = Request.Status,
                 IBAN = Request.IBAN,
                 INKSA = Request.INKSA,
+                IsEmployee = false,
             };
 
             employee.RiderDetails = new RiderDetails
@@ -218,32 +219,55 @@ public class RiderService(ApplicationDbcontext dbcontext,IRiderWorkingIdHistoryS
 
         try
         {
-            var isexist = await dbcontext.Employees.FindAsync(IqamaNo, cancellationToken);
+            var isexist = await dbcontext.Employees.Include(c=>c.RiderDetails).FirstOrDefaultAsync(c=>c.IqamaNo == IqamaNo);
 
             if (isexist is null)
                 return Result.Failure<EmpolyeeResponse>(error: new Error("No rider Found", "no rider found with this Iqama", 400));
 
-            var Done = isexist.Adapt<DeletedEmployees>();
 
-            var riderDetails = await dbcontext.RiderDetails.FirstOrDefaultAsync(r => r.EmployeeIqamaNo == IqamaNo, cancellationToken);
 
-            if (riderDetails == null)
+            if (isexist.RiderDetails == null)
             {
                 return Result.Failure<EmpolyeeResponse>(error: new Error("No Rider Details Found", "no rider details found for this employee", 400));
             }
 
 
-            Done.CompanyId = riderDetails.CompanyId;
-            Done.LicenseNumber = riderDetails.LicenseNumber;
-            Done.TshirtSize = riderDetails.TshirtSize;
-            Done.WorkingId = riderDetails.WorkingId;
-            dbcontext.RiderDetails.Remove(riderDetails);
+            var Done = new DeletedEmployees
+            {
+                IqamaNo = isexist.IqamaNo,
+                IqamaEndM = isexist.IqamaEndM,
+                IqamaEndH = isexist.IqamaEndH,
+                PassportNo = isexist.PassportNo,
+                PassportEnd = isexist.PassportEnd,
+                Sponsor = isexist.Sponsor,
+                JobTitle = isexist.JobTitle,
+                NameAR = isexist.NameAR,
+                NameEN = isexist.NameEN,
+                Country = isexist.Country,
+                Phone = isexist.Phone,
+                DateOfBirth = isexist.DateOfBirth.ToDateTime(TimeOnly.MaxValue),
+                Status = isexist.Status,
+                AcountStatus = isexist.Status,
+                IBAN = isexist.IBAN,
+                CreatedAt = isexist.CreatedAt,
+                INKSA = isexist.INKSA,
+                HousingId = isexist.HousingId,
+                WorkingId = isexist.RiderDetails.WorkingId,
+                TshirtSize = isexist.RiderDetails.TshirtSize,
+                LicenseNumber = isexist.RiderDetails.LicenseNumber,
+                CompanyId = isexist.RiderDetails.CompanyId,
+                VehicleId = 0
+            };
+
+
 
             await dbcontext.DeletedEmployees.AddAsync(Done, cancellationToken);
 
+            dbcontext.RiderDetails.Remove(isexist.RiderDetails);
             dbcontext.Employees.Remove(isexist);
-            dbcontext.SaveChanges();
-            await transaction.CommitAsync();
+
+            await dbcontext.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
 
             return Result.Success();
         }
@@ -264,7 +288,7 @@ public class RiderService(ApplicationDbcontext dbcontext,IRiderWorkingIdHistoryS
         .Include(e => e.Housing)
         .Include(e => e.RiderDetails)
             .ThenInclude(rd => rd.Company)
-        .FirstOrDefaultAsync(e => e.IqamaNo == IqamaNo && e.RiderDetails != null);
+        .FirstOrDefaultAsync(e => e.IqamaNo == IqamaNo && !e.IsEmployee);
 
             if (employee is null)
                 return Result.Failure<RiderResponse>(error: new Error("No rider Found", "no rider found with this Iqama", 400));
@@ -452,7 +476,7 @@ public class RiderService(ApplicationDbcontext dbcontext,IRiderWorkingIdHistoryS
     public async Task<Result<IEnumerable<RiderResponse>>> Filter(EmployeeFilterr filter)
     {
         var query = dbcontext.Employees
-            .Where(e => e.RiderDetails != null)
+            .Where(e => !e.IsEmployee)
             .Include(e => e.RiderDetails)
                 .ThenInclude(rd => rd.Company)
             .Include(e => e.Housing)
@@ -675,7 +699,7 @@ public class RiderService(ApplicationDbcontext dbcontext,IRiderWorkingIdHistoryS
             .Include(e => e.Housing)
             .Include(e => e.RiderDetails)
                 .ThenInclude(rd => rd.Company)
-            .FirstOrDefaultAsync(e => e.IqamaNo == Id && e.RiderDetails != null);
+            .FirstOrDefaultAsync(e => e.IqamaNo == Id && !e.IsEmployee);
 
         if (rider is null)
             return Result.Failure<RiderResponse>(error: new Error("No rider Found", "no rider found with this Iqama", 400));
@@ -713,7 +737,7 @@ public class RiderService(ApplicationDbcontext dbcontext,IRiderWorkingIdHistoryS
         var isexist = await dbcontext
             .Employees
             .AsNoTracking()
-            .Where(r => r.RiderDetails != null && r.RiderDetails.VehicleNumber == null && r.Status == "disable")
+            .Where(r => r.IsEmployee == false && r.RiderDetails.VehicleNumber == null && r.Status == "disable")
             .Include(e => e.Housing)
             .Include(e => e.RiderDetails)
                 .ThenInclude(rd => rd.Company)

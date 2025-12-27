@@ -4,6 +4,7 @@ using Domain;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Domain.Migrations
 {
     [DbContext(typeof(ApplicationDbcontext))]
-    partial class ApplicationDbcontextModelSnapshot : ModelSnapshot
+    [Migration("20251225171812_uslhfwiefwl")]
+    partial class uslhfwiefwl
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -169,7 +172,7 @@ namespace Domain.Migrations
                             IsDisable = false,
                             LockoutEnabled = false,
                             NormalizedUserName = "ADMIN",
-                            PasswordHash = "AQAAAAIAAYagAAAAEE8WS9658JhFs/6KSRhpWWQRXSLSmYt3iofAjpgEd7EtWdJUXqJ5IbYMeqrNLg2Gbw==",
+                            PasswordHash = "AQAAAAIAAYagAAAAEBeYKj4EKIvtRKern3HV4ntJqyLoDyGMtjcHJuS6Knz/ABSZxxIlI29t3vbbz+FG+A==",
                             PhoneNumberConfirmed = false,
                             SecurityStamp = "9FABB58491024B7BB140E4D6658B5BDA",
                             TwoFactorEnabled = false,
@@ -186,7 +189,7 @@ namespace Domain.Migrations
                             IsDisable = false,
                             LockoutEnabled = false,
                             NormalizedUserName = "MASTER",
-                            PasswordHash = "AQAAAAIAAYagAAAAEGAbJ/0YTI4LELpJa71STkGmtDPvHT8aTpweOFHVxZqdtcBoJ6RuUXype3M9FSXdUw==",
+                            PasswordHash = "AQAAAAIAAYagAAAAEFGlMcNbvzYrq/jOhUpXRIMsCVehHH4E8H14gVNOLZwn2ewO1AH3iHSiQWkqJsQ51w==",
                             PhoneNumberConfirmed = false,
                             SecurityStamp = "9FABB58491024B7BB140E4D6658B5BDA",
                             TwoFactorEnabled = false,
@@ -406,7 +409,7 @@ namespace Domain.Migrations
                     b.Property<DateOnly>("IqamaEndM")
                         .HasColumnType("date");
 
-                    b.Property<bool>("IsEmployee")
+                    b.Property<bool?>("IsEmployee")
                         .HasColumnType("bit");
 
                     b.Property<string>("JobTitle")

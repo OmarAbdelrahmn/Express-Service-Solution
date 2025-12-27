@@ -14,6 +14,17 @@ public class EmployeeController(IEmployeeService service) : ControllerBase
 {
     private readonly IEmployeeService service = service;
 
+
+    [HttpPost("bsefew")]
+    public async Task<IActionResult> ld(long iqama)
+    {
+        var response = await service.Togle(iqama);
+        return response ?
+            Ok(new Re("Done Successfully")) :
+            BadRequest(new Re("Failed to toggle employee status."));
+
+    }
+
     [HttpGet("")]
     [Authorize(Roles = "Master,Admin,Member")]
     public async Task<IActionResult> GetAllEmployee()

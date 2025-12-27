@@ -2889,6 +2889,540 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
         public string? TshirtSize { get; set; }
         public string? LicenseNumber { get; set; }
     }
+
+    public async Task<Result<VehicleAssignmentImportResponse>> ImportVehicleAssignmentsAsync(
+    IFormFile file,
+    string uploadedBy)
+    {
+        if (file == null || file.Length == 0)
+            return Result.Failure<VehicleAssignmentImportResponse>(
+                new Error("InvalidFile", "File is empty or null", 400));
+
+        if (!file.FileName.EndsWith(".xlsx") && !file.FileName.EndsWith(".xls"))
+            return Result.Failure<VehicleAssignmentImportResponse>(
+                new Error("InvalidFormat", "File must be Excel format (.xlsx or .xls)", 400));
+
+        var results = new List<VehicleAssignmentRowResult>();
+        var errors = new List<string>();
+        int successfulAssignments = 0;
+        int employeesConvertedToRiders = 0;
+        int failedRecords = 0;
+        int employeeNotFound = 0;
+        int vehicleNotFound = 0;
+        int vehicleUnavailable = 0;
+
+        try
+        {
+            using var stream = file.OpenReadStream();
+            using var workbook = new XLWorkbook(stream);
+            var worksheet = workbook.Worksheet(1);
+
+            if (worksheet == null)
+            {
+                return Result.Failure<VehicleAssignmentImportResponse>(
+                    new Error("InvalidWorksheet", "Could not read worksheet", 400));
+            }
+
+            var headerRow = FindVehicleAssignmentHeaderRow(worksheet);
+            if (headerRow == null)
+            {
+                return Result.Failure<VehicleAssignmentImportResponse>(
+                    new Error("EmptyFile", "Excel file has no header row", 400));
+            }
+
+            var columnMap = BuildVehicleAssignmentColumnMapping(headerRow);
+            if (!columnMap.IsValid)
+            {
+                return Result.Failure<VehicleAssignmentImportResponse>(
+                    new Error("InvalidColumns", columnMap.ErrorMessage!, 400));
+            }
+
+            var dataRows = worksheet.RowsUsed()
+                .Where(r => r.RowNumber() > headerRow.RowNumber())
+                .ToList();
+
+            var rowNumber = headerRow.RowNumber();
+
+            foreach (var row in dataRows)
+            {
+                rowNumber++;
+
+                using var transaction = await _dbcontext.Database.BeginTransactionAsync();
+                try
+                {
+                    var rowData = ParseVehicleAssignmentRowData(row, columnMap, rowNumber);
+
+                    if (!rowData.IsValid)
+                    {
+                        failedRecords++;
+                        results.Add(new VehicleAssignmentRowResult(
+                            rowNumber,
+                            false,
+                            rowData.IqamaNo?.ToString() ?? "N/A",
+                            "N/A", "N/A",
+                            rowData.PlateNumberA ?? "N/A",
+                            "N/A",
+                            false, false,
+                            null, null,
+                            rowData.Permission,
+                            rowData.PermissionStartDate,
+                            rowData.PermissionEndDate,
+                            new List<string>(),
+                            rowData.ErrorMessage
+                        ));
+                        continue;
+                    }
+
+                    var warnings = new List<string>();
+
+                    // Trim spaces from identifiers
+                    var cleanIqamaNo = rowData.IqamaNo!.Value;
+                    var cleanPlateNumber = rowData.PlateNumberA!.Replace(" ", "").Trim();
+
+                    // Find employee
+                    var employee = await _dbcontext.Employees
+                        .Include(e => e.RiderDetails)
+                            .ThenInclude(rd => rd.Company)
+                        .Include(e => e.Housing)
+                        .FirstOrDefaultAsync(e => e.IqamaNo == cleanIqamaNo);
+
+                    if (employee == null)
+                    {
+                        employeeNotFound++;
+                        failedRecords++;
+                        results.Add(new VehicleAssignmentRowResult(
+                            rowNumber,
+                            false,
+                            cleanIqamaNo.ToString(),
+                            "N/A", "N/A",
+                            cleanPlateNumber,
+                            "N/A",
+                            false, false,
+                            null, null,
+                            rowData.Permission,
+                            rowData.PermissionStartDate,
+                            rowData.PermissionEndDate,
+                            warnings,
+                            "Employee with this Iqama number not found"
+                        ));
+                        await transaction.RollbackAsync();
+                        continue;
+                    }
+
+                    bool wasConvertedToRider = false;
+
+                    // Convert employee to rider if needed
+                    if (employee.RiderDetails == null)
+                    {
+                        // Get a default company (or use the first one, or make nullable)
+                        var defaultCompany = await _dbcontext.Companies
+                            .OrderBy(c => c.Id)
+                            .FirstOrDefaultAsync();
+
+                        if (defaultCompany == null)
+                        {
+                            failedRecords++;
+                            results.Add(new VehicleAssignmentRowResult(
+                                rowNumber,
+                                false,
+                                cleanIqamaNo.ToString(),
+                                employee.NameEN,
+                                employee.NameAR,
+                                cleanPlateNumber,
+                                "N/A",
+                                false, false,
+                                null, null,
+                                rowData.Permission,
+                                rowData.PermissionStartDate,
+                                rowData.PermissionEndDate,
+                                warnings,
+                                "No company found in database - cannot create rider"
+                            ));
+                            await transaction.RollbackAsync();
+                            continue;
+                        }
+
+                        var newRider = new RiderDetails
+                        {
+                            EmployeeIqamaNo = employee.IqamaNo,
+                            WorkingId = $"AUTO_{employee.IqamaNo}",
+                            TshirtSize = "M",
+                            LicenseNumber = "N/A",
+                            CompanyId = defaultCompany.Id,
+                            CreatedAt = DateTime.UtcNow.AddHours(3)
+                        };
+
+                        await _dbcontext.RiderDetails.AddAsync(newRider);
+                        await _dbcontext.SaveChangesAsync();
+
+                        employee.RiderDetails = newRider;
+                        wasConvertedToRider = true;
+                        employeesConvertedToRiders++;
+                        warnings.Add($"Employee auto-converted to rider with WorkingId: {newRider.WorkingId}");
+                    }
+
+                    // Find vehicle
+                    var vehicle = await _dbcontext.Vehicles
+                        .FirstOrDefaultAsync(v => v.PlateNumberA.Replace(" ", "") == cleanPlateNumber);
+
+                    if (vehicle == null)
+                    {
+                        vehicleNotFound++;
+                        failedRecords++;
+                        results.Add(new VehicleAssignmentRowResult(
+                            rowNumber,
+                            false,
+                            cleanIqamaNo.ToString(),
+                            employee.NameEN,
+                            employee.NameAR,
+                            cleanPlateNumber,
+                            "N/A",
+                            wasConvertedToRider, false,
+                            null, null,
+                            rowData.Permission,
+                            rowData.PermissionStartDate,
+                            rowData.PermissionEndDate,
+                            warnings,
+                            $"Vehicle with plate number '{cleanPlateNumber}' not found"
+                        ));
+                        await transaction.RollbackAsync();
+                        continue;
+                    }
+
+                    var isUnavailable = await _dbcontext.RiderVehicleStatus
+                        .AnyAsync(s => s.VehicleNumber == vehicle.VehicleNumber &&
+                                      s.IsActive &&
+                                      (s.StatusType == VehicleStatusType.Taken ||
+                                       s.StatusType == VehicleStatusType.Problem ||
+                                       s.StatusType == VehicleStatusType.Stolen ||
+                                       s.StatusType == VehicleStatusType.BreakUp));
+
+                    if (isUnavailable)
+                    {
+                        vehicleUnavailable++;
+                        failedRecords++;
+
+                        var currentStatus = await _dbcontext.RiderVehicleStatus
+                            .Where(s => s.VehicleNumber == vehicle.VehicleNumber && s.IsActive)
+                            .Select(s => s.StatusType.ToString())
+                            .FirstOrDefaultAsync();
+
+                        results.Add(new VehicleAssignmentRowResult(
+                            rowNumber,
+                            false,
+                            cleanIqamaNo.ToString(),
+                            employee.NameEN,
+                            employee.NameAR,
+                            cleanPlateNumber,
+                            vehicle.VehicleNumber,
+                            wasConvertedToRider, false,
+                            null, null,
+                            rowData.Permission,
+                            rowData.PermissionStartDate,
+                            rowData.PermissionEndDate,
+                            warnings,
+                            $"Vehicle is not available (Status: {currentStatus})"
+                        ));
+                        await transaction.RollbackAsync();
+                        continue;
+                    }
+
+                    if (!string.IsNullOrEmpty(employee.RiderDetails.VehicleNumber))
+                    {
+                        warnings.Add($"Rider already has vehicle {employee.RiderDetails.VehicleNumber}, will be replaced");
+
+                        // Return old vehicle
+                        var oldVehicleStatus = await _dbcontext.RiderVehicleStatus
+                            .FirstOrDefaultAsync(s => s.VehicleNumber == employee.RiderDetails.VehicleNumber &&
+                                                     s.EmployeeIqamaNo == employee.IqamaNo &&
+                                                     s.IsActive &&
+                                                     s.StatusType == VehicleStatusType.Taken);
+
+                        if (oldVehicleStatus != null)
+                        {
+                            oldVehicleStatus.IsActive = false;
+                            oldVehicleStatus.PermissionEndDate = DateTime.UtcNow.AddHours(3);
+
+                            _dbcontext.RiderVehicleStatus.Add(new RiderVehicleStatus
+                            {
+                                VehicleNumber = employee.RiderDetails.VehicleNumber,
+                                EmployeeIqamaNo = employee.IqamaNo,
+                                StatusType = VehicleStatusType.Returned,
+                                Reason = "Replaced by bulk import",
+                                IsActive = false,
+                                Permission = oldVehicleStatus.Permission,
+                                PermissionStartDate = oldVehicleStatus.PermissionStartDate,
+                                PermissionEndDate = DateTime.UtcNow.AddHours(3),
+                                Timestamp = DateTime.UtcNow.AddHours(3)
+                            });
+                        }
+                    }
+
+                    // Handle permission defaults
+                    string finalPermission = rowData.Permission ?? "تصريح عام";
+
+                    // Check if permission contains "مرور" (traffic)
+                    if (!string.IsNullOrWhiteSpace(rowData.Permission) &&
+                        rowData.Permission.Contains("مرور"))
+                    {
+                        finalPermission = "تصريح مرور";
+
+                        // Set default dates if missing
+                        rowData.PermissionStartDate ??= DateTime.UtcNow.AddHours(3);
+                        rowData.PermissionEndDate ??= DateTime.UtcNow.AddHours(3).AddDays(30);
+
+                        warnings.Add("Traffic permission detected - using default 30-day period");
+                    }
+
+                    // Update vehicle location to housing name
+                    string previousLocation = vehicle.Location;
+                    string newLocation = employee.Housing?.Name ?? "غير محدد";
+                    vehicle.Location = newLocation;
+
+                    // Assign vehicle to rider
+                    employee.RiderDetails.VehicleNumber = vehicle.VehicleNumber;
+
+                    // Create vehicle status history
+                    _dbcontext.RiderVehicleStatus.Add(new RiderVehicleStatus
+                    {
+                        VehicleNumber = vehicle.VehicleNumber,
+                        EmployeeIqamaNo = employee.IqamaNo,
+                        StatusType = VehicleStatusType.Taken,
+                        Reason = $"Bulk import by {uploadedBy}",
+                        IsActive = true,
+                        Permission = finalPermission,
+                        PermissionStartDate = rowData.PermissionStartDate ?? DateTime.UtcNow.AddHours(3),
+                        PermissionEndDate = rowData.PermissionEndDate,
+                        Timestamp = DateTime.UtcNow.AddHours(3)
+                    });
+
+                    await _dbcontext.SaveChangesAsync();
+                    await transaction.CommitAsync();
+
+                    successfulAssignments++;
+                    results.Add(new VehicleAssignmentRowResult(
+                        rowNumber,
+                        true,
+                        cleanIqamaNo.ToString(),
+                        employee.NameEN,
+                        employee.NameAR,
+                        cleanPlateNumber,
+                        vehicle.VehicleNumber,
+                        wasConvertedToRider,
+                        true,
+                        previousLocation,
+                        newLocation,
+                        finalPermission,
+                        rowData.PermissionStartDate,
+                        rowData.PermissionEndDate,
+                        warnings,
+                        null
+                    ));
+                }
+                catch (Exception ex)
+                {
+                    await transaction.RollbackAsync();
+                    failedRecords++;
+                    errors.Add($"Row {rowNumber}: {ex.Message}");
+
+                    results.Add(new VehicleAssignmentRowResult(
+                        rowNumber,
+                        false,
+                        "N/A",
+                        "N/A", "N/A",
+                        "N/A",
+                        "N/A",
+                        false, false,
+                        null, null,
+                        null, null, null,
+                        new List<string>(),
+                        $"Exception: {ex.Message}"
+                    ));
+                }
+            }
+
+            var response = new VehicleAssignmentImportResponse(
+                TotalRecords: dataRows.Count,
+                SuccessfulAssignments: successfulAssignments,
+                EmployeesConvertedToRiders: employeesConvertedToRiders,
+                FailedRecords: failedRecords,
+                EmployeeNotFound: employeeNotFound,
+                VehicleNotFound: vehicleNotFound,
+                VehicleUnavailable: vehicleUnavailable,
+                Results: results,
+                Errors: errors,
+                ProcessedAt: DateTime.UtcNow.AddHours(3)
+            );
+
+            return Result.Success(response);
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<VehicleAssignmentImportResponse>(
+                new Error("ProcessingError", $"Failed to process Excel file: {ex.Message}", 500));
+        }
+    }
+
+    private IXLRow FindVehicleAssignmentHeaderRow(IXLWorksheet worksheet)
+    {
+        var knownColumns = new[]
+        {
+        "IqamaNumber", "Iqama Number", "رقم الاقامة", "رقم الإقامة",
+        "PlateNumberA", "Plate Number A", "رقم اللوحة", "اللوحة العربية",
+        "Permission", "التصريح", "الصلاحية",
+        "PermissionStartDate", "تاريخ بداية التصريح",
+        "PermissionEndDate", "تاريخ نهاية التصريح"
+    };
+
+        for (int i = 1; i <= Math.Min(10, worksheet.RowsUsed().Count()); i++)
+        {
+            var row = worksheet.Row(i);
+            var cellValues = row.CellsUsed()
+                .Select(c => c.IsMerged()
+                    ? c.MergedRange().FirstCell().GetString().Trim()
+                    : c.GetString().Trim())
+                .Where(v => !string.IsNullOrWhiteSpace(v))
+                .ToList();
+
+            int matchCount = cellValues.Count(cv =>
+                knownColumns.Any(kc =>
+                    cv.Equals(kc, StringComparison.OrdinalIgnoreCase) ||
+                    cv.Replace(" ", "").Equals(kc.Replace(" ", ""), StringComparison.OrdinalIgnoreCase)));
+
+            if (matchCount >= 2)
+                return row;
+        }
+
+        return worksheet.Row(1);
+    }
+
+    private VehicleAssignmentColumnMapping BuildVehicleAssignmentColumnMapping(IXLRow headerRow)
+    {
+        var mapping = new VehicleAssignmentColumnMapping();
+        var cells = headerRow.CellsUsed().ToList();
+
+        mapping.IqamaNoCol = FindColumn(cells,
+            "IqamaNumber", "Iqama Number", "IqamaNo", "رقم الاقامة", "رقم الإقامة");
+
+        mapping.PlateNumberACol = FindColumn(cells,
+            "PlateNumberA", "Plate Number A", "PlateA", "رقم اللوحة", "اللوحة العربية", "اللوحة");
+
+        mapping.PermissionCol = FindColumn(cells,
+            "Permission", "التصريح", "الصلاحية", "نوع التصريح");
+
+        mapping.PermissionStartDateCol = FindColumn(cells,
+            "PermissionStartDate", "Permission Start Date", "تاريخ بداية التصريح", "تاريخ البداية", "بداية التصريح");
+
+        mapping.PermissionEndDateCol = FindColumn(cells,
+            "PermissionEndDate", "Permission End Date", "تاريخ نهاية التصريح", "تاريخ النهاية", "نهاية التصريح");
+
+        var missing = new List<string>();
+        if (mapping.IqamaNoCol == 0) missing.Add("Iqama Number");
+        if (mapping.PlateNumberACol == 0) missing.Add("Plate Number A");
+
+        if (missing.Any())
+        {
+            mapping.IsValid = false;
+            mapping.ErrorMessage = $"Required columns missing: {string.Join(", ", missing)}";
+        }
+        else
+        {
+            mapping.IsValid = true;
+        }
+
+        return mapping;
+    }
+
+    private VehicleAssignmentRowData ParseVehicleAssignmentRowData(
+        IXLRow row,
+        VehicleAssignmentColumnMapping map,
+        int rowNumber)
+    {
+        var data = new VehicleAssignmentRowData { RowNumber = rowNumber };
+
+        try
+        {
+            // Parse and trim IqamaNo
+            var iqamaStr = GetCellValue(row, map.IqamaNoCol)?.Replace(" ", "").Trim();
+            if (string.IsNullOrWhiteSpace(iqamaStr))
+            {
+                data.IsValid = false;
+                data.ErrorMessage = "Iqama Number is required";
+                return data;
+            }
+
+            if (!long.TryParse(iqamaStr, out long iqamaNo) || iqamaNo <= 0)
+            {
+                data.IsValid = false;
+                data.ErrorMessage = $"Invalid Iqama Number: {iqamaStr}";
+                return data;
+            }
+            data.IqamaNo = iqamaNo;
+
+            // Parse and trim PlateNumberA
+            data.PlateNumberA = GetCellValue(row, map.PlateNumberACol)?.Replace(" ", "").Trim();
+            if (string.IsNullOrWhiteSpace(data.PlateNumberA))
+            {
+                data.IsValid = false;
+                data.ErrorMessage = "Plate Number A is required";
+                return data;
+            }
+
+            // Parse optional fields
+            data.Permission = GetCellValue(row, map.PermissionCol)?.Trim();
+
+            // Parse dates
+            var startDateStr = GetCellValue(row, map.PermissionStartDateCol);
+            if (!string.IsNullOrWhiteSpace(startDateStr))
+            {
+                if (DateTime.TryParse(startDateStr, out DateTime startDate))
+                {
+                    data.PermissionStartDate = startDate;
+                }
+            }
+
+            var endDateStr = GetCellValue(row, map.PermissionEndDateCol);
+            if (!string.IsNullOrWhiteSpace(endDateStr))
+            {
+                if (DateTime.TryParse(endDateStr, out DateTime endDate))
+                {
+                    data.PermissionEndDate = endDate;
+                }
+            }
+
+            data.IsValid = true;
+        }
+        catch (Exception ex)
+        {
+            data.IsValid = false;
+            data.ErrorMessage = $"Error parsing row: {ex.Message}";
+        }
+
+        return data;
+    }
+
+    internal class VehicleAssignmentColumnMapping
+    {
+        public bool IsValid { get; set; }
+        public string? ErrorMessage { get; set; }
+        public int IqamaNoCol { get; set; }
+        public int PlateNumberACol { get; set; }
+        public int PermissionCol { get; set; }
+        public int PermissionStartDateCol { get; set; }
+        public int PermissionEndDateCol { get; set; }
+    }
+
+    internal class VehicleAssignmentRowData
+    {
+        public int RowNumber { get; set; }
+        public bool IsValid { get; set; }
+        public string? ErrorMessage { get; set; }
+        public long? IqamaNo { get; set; }
+        public string? PlateNumberA { get; set; }
+        public string? Permission { get; set; }
+        public DateTime? PermissionStartDate { get; set; }
+        public DateTime? PermissionEndDate { get; set; }
+    }
 }
 internal class HousingColumnMapping
 {

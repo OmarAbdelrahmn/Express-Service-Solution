@@ -27,6 +27,10 @@ public interface IImportService
     Task<Result<DeletedEmployeeImportResponse>> ImportDeletedEmployeesAsync(
     IFormFile file,
     string uploadedBy);
+
+    Task<Result<VehicleAssignmentImportResponse>> ImportVehicleAssignmentsAsync(
+    IFormFile file,
+    string uploadedBy);
 }
 public record HousingAssignmentResponse(
     int TotalRecords,
@@ -148,6 +152,38 @@ public record DeletedEmployeeImportRowResult(
     string? NameAR,
     string? WorkingId,
     string? CompanyName,
+    List<string> Warnings,
+    string? ErrorMessage
+);
+
+public record VehicleAssignmentImportResponse(
+    int TotalRecords,
+    int SuccessfulAssignments,
+    int EmployeesConvertedToRiders,
+    int FailedRecords,
+    int EmployeeNotFound,
+    int VehicleNotFound,
+    int VehicleUnavailable,
+    List<VehicleAssignmentRowResult> Results,
+    List<string> Errors,
+    DateTime ProcessedAt
+);
+
+public record VehicleAssignmentRowResult(
+    int RowNumber,
+    bool Success,
+    string IqamaNo,
+    string EmployeeNameEN,
+    string EmployeeNameAR,
+    string PlateNumberA,
+    string VehicleNumber,
+    bool WasConvertedToRider,
+    bool VehicleAssigned,
+    string? PreviousLocation,
+    string? NewLocation,
+    string? Permission,
+    DateTime? PermissionStartDate,
+    DateTime? PermissionEndDate,
     List<string> Warnings,
     string? ErrorMessage
 );
