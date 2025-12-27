@@ -562,4 +562,22 @@ public class ImportController(IImportService service) : ControllerBase
             }
         });
     }
-}
+
+    [HttpPost("vehicle-checker")]
+    public async Task<IActionResult> ImportVeicleAssignmentsAsync(IFormFile file)
+    {
+        if (file == null || file.Length == 0)
+            return BadRequest(new { error = "No file uploaded or file is empty" });
+
+        if (!file.FileName.EndsWith(".xlsx") && !file.FileName.EndsWith(".xls"))
+            return BadRequest(new { error = "File must be Excel format (.xlsx or .xls)" });
+
+
+
+        var result = await service.CheckVehicleUsageFromExcelAsync(file, "omar");
+
+        return result.IsFailure ?
+        result.ToProblem() : Ok(result.Value);
+
+    }
+    }

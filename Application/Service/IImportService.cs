@@ -31,6 +31,56 @@ public interface IImportService
     Task<Result<VehicleAssignmentImportResponse>> ImportVehicleAssignmentsAsync(
     IFormFile file,
     string uploadedBy);
+
+    Task<Result<VehicleUsageCheckResponse>> CheckVehicleUsageFromExcelAsync(
+    IFormFile file,
+    string uploadedBy);
+}
+// Application/DTOs/VehicleUsageCheckDtos.cs
+// Application/DTOs/VehicleUsageCheckDtos.cs
+
+public record VehicleUsageCheckResponse(
+    int TotalVehicles,
+    int VehiclesInUse,
+    int VehiclesAvailable,
+    int VehiclesNotFound,
+    int FailedRecords,
+    List<VehicleUsageRowResult> Results,
+    List<VehicleUsageError> Errors,
+    DateTime ProcessedAt
+);
+
+public record VehicleUsageRowResult(
+    int RowNumber,
+    bool Success,
+    string PlateNumberArabic,
+    string VehicleNumber,
+    string VehicleType,
+    VehicleUsageStatus Status,
+    RiderUsageInfo? RiderInfo,
+    List<string> Warnings
+);
+
+public record VehicleUsageError(
+    int RowNumber,
+    string PlateNumber,
+    string ErrorType,
+    string ErrorMessage
+);
+
+public record RiderUsageInfo(
+    long IqamaNumber,
+    string RiderNameArabic,
+    string RiderNameEnglish,
+    string? WorkingId,
+    string CompanyName
+);
+
+public enum VehicleUsageStatus
+{
+    InUse = 1,
+    Available = 2,
+    NotFound = 3
 }
 public record HousingAssignmentResponse(
     int TotalRecords,

@@ -3423,6 +3423,319 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
         public DateTime? PermissionStartDate { get; set; }
         public DateTime? PermissionEndDate { get; set; }
     }
+
+
+public async Task<Result<VehicleUsageCheckResponse>> CheckVehicleUsageFromExcelAsync(
+    IFormFile file,
+    string uploadedBy)
+    {
+        if (file == null || file.Length == 0)
+            return Result.Failure<VehicleUsageCheckResponse>(
+                new Error("InvalidFile", "File is empty or null", 400));
+
+        if (!file.FileName.EndsWith(".xlsx") && !file.FileName.EndsWith(".xls"))
+            return Result.Failure<VehicleUsageCheckResponse>(
+                new Error("InvalidFormat", "File must be Excel format (.xlsx or .xls)", 400));
+
+        var results = new List<VehicleUsageRowResult>();
+        var errors = new List<VehicleUsageError>();
+        int vehiclesInUse = 0;
+        int vehiclesAvailable = 0;
+        int vehiclesNotFound = 0;
+        int failedRecords = 0;
+
+        try
+        {
+            using var stream = file.OpenReadStream();
+            using var workbook = new XLWorkbook(stream);
+            var worksheet = workbook.Worksheet(1);
+
+            if (worksheet == null)
+            {
+                return Result.Failure<VehicleUsageCheckResponse>(
+                    new Error("InvalidWorksheet", "Could not read worksheet", 400));
+            }
+
+            var headerRow = FindVehicleUsageHeaderRow(worksheet);
+
+            if (headerRow == null)
+            {
+                return Result.Failure<VehicleUsageCheckResponse>(
+                    new Error("EmptyFile", "Excel file has no header row", 400));
+            }
+
+            var columnMap = BuildVehicleUsageColumnMapping(headerRow);
+            if (!columnMap.IsValid)
+            {
+                return Result.Failure<VehicleUsageCheckResponse>(
+                    new Error("InvalidColumns", columnMap.ErrorMessage!, 400));
+            }
+
+            var dataRows = worksheet.RowsUsed()
+                .Where(r => r.RowNumber() > headerRow.RowNumber())
+                .ToList();
+
+            var rowNumber = headerRow.RowNumber();
+
+            foreach (var row in dataRows)
+            {
+                rowNumber++;
+
+                try
+                {
+                    var rowData = ParseVehicleUsageRowData(row, columnMap, rowNumber);
+
+                    if (!rowData.IsValid)
+                    {
+                        failedRecords++;
+                        errors.Add(new VehicleUsageError(
+                            rowNumber,
+                            rowData.PlateNumberA ?? "N/A",
+                            "ValidationError",
+                            rowData.ErrorMessage!
+                        ));
+                        continue;
+                    }
+
+                    var warnings = new List<string>();
+
+                    // Normalize plate number - remove all spaces
+                    var normalizedPlateNumber = rowData.PlateNumberA!.Replace(" ", "").Trim();
+
+                    // Find vehicle with rider details
+                    var vehicle = await _dbcontext.Vehicles
+                        .Include(v => v.RiderDetails)
+                            .ThenInclude(rd => rd.Employee)
+                        .Include(v => v.RiderDetails)
+                            .ThenInclude(rd => rd.Company)
+                        .FirstOrDefaultAsync(v => v.PlateNumberA.Replace(" ", "") == normalizedPlateNumber);
+
+                    if (vehicle == null)
+                    {
+                        vehiclesNotFound++;
+                        results.Add(new VehicleUsageRowResult(
+                            rowNumber,
+                            true,
+                            rowData.PlateNumberA!,
+                            "N/A",
+                            "N/A",
+                            VehicleUsageStatus.NotFound,
+                            null,
+                            warnings
+                        ));
+                        continue;
+                    }
+
+                    // Check if vehicle is assigned to a rider
+                    if (vehicle.RiderDetails != null)
+                    {
+                        var employee = vehicle.RiderDetails.Employee;
+
+                        // Validation warnings
+                        if (employee.Status != "enable")
+                        {
+                            warnings.Add($"Rider status is '{employee.Status}' (not enabled)");
+                        }
+
+                        if (string.IsNullOrWhiteSpace(vehicle.RiderDetails.WorkingId))
+                        {
+                            warnings.Add("Rider has no Working ID assigned");
+                        }
+
+                        vehiclesInUse++;
+                        results.Add(new VehicleUsageRowResult(
+                            rowNumber,
+                            true,
+                            vehicle.PlateNumberA,
+                            vehicle.VehicleNumber,
+                            vehicle.VehicleType,
+                            VehicleUsageStatus.InUse,
+                            new RiderUsageInfo(
+                                employee.IqamaNo,
+                                employee.NameAR,
+                                employee.NameEN,
+                                vehicle.RiderDetails.WorkingId,
+                                vehicle.RiderDetails.Company?.Name ?? "N/A"
+                            ),
+                            warnings
+                        ));
+                    }
+                    else
+                    {
+                        vehiclesAvailable++;
+                        results.Add(new VehicleUsageRowResult(
+                            rowNumber,
+                            true,
+                            vehicle.PlateNumberA,
+                            vehicle.VehicleNumber,
+                            vehicle.VehicleType,
+                            VehicleUsageStatus.Available,
+                            null,
+                            warnings
+                        ));
+                    }
+                }
+                catch (Exception ex)
+                {
+                    failedRecords++;
+                    errors.Add(new VehicleUsageError(
+                        rowNumber,
+                        "N/A",
+                        "ProcessingError",
+                        $"Unexpected error: {ex.Message}"
+                    ));
+                }
+            }
+
+            var response = new VehicleUsageCheckResponse(
+                TotalVehicles: dataRows.Count,
+                VehiclesInUse: vehiclesInUse,
+                VehiclesAvailable: vehiclesAvailable,
+                VehiclesNotFound: vehiclesNotFound,
+                FailedRecords: failedRecords,
+                Results: results,
+                Errors: errors,
+                ProcessedAt: DateTime.UtcNow.AddHours(3)
+            );
+
+            return Result.Success(response);
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<VehicleUsageCheckResponse>(
+                new Error("ProcessingError", $"Failed to process Excel file: {ex.Message}", 500));
+        }
+    }
+
+    private IXLRow FindVehicleUsageHeaderRow(IXLWorksheet worksheet)
+    {
+        var knownColumns = new[]
+        {
+        "PlateNumber", "Plate Number", "PlateNumberA", "رقم اللوحة",
+        "اللوحة", "اللوحة العربية", "Plate A", "Arabic Plate"
+    };
+
+        for (int i = 1; i <= Math.Min(10, worksheet.RowsUsed().Count()); i++)
+        {
+            var row = worksheet.Row(i);
+            var cellValues = new List<string>();
+
+            foreach (var cell in row.CellsUsed())
+            {
+                try
+                {
+                    string value = cell.IsMerged()
+                        ? cell.MergedRange().FirstCell().GetString().Trim()
+                        : cell.GetString().Trim();
+
+                    if (!string.IsNullOrWhiteSpace(value))
+                        cellValues.Add(value);
+                }
+                catch { }
+            }
+
+            int matchCount = 0;
+            foreach (var cellValue in cellValues)
+            {
+                foreach (var knownCol in knownColumns)
+                {
+                    if (cellValue.Equals(knownCol, StringComparison.OrdinalIgnoreCase) ||
+                        cellValue.Replace(" ", "").Equals(knownCol.Replace(" ", ""), StringComparison.OrdinalIgnoreCase))
+                    {
+                        matchCount++;
+                        break;
+                    }
+                }
+            }
+
+            if (matchCount >= 1)
+                return row;
+        }
+
+        // Fallback to row 1
+        return worksheet.Row(1);
+    }
+
+    private VehicleUsageColumnMapping BuildVehicleUsageColumnMapping(IXLRow headerRow)
+    {
+        var mapping = new VehicleUsageColumnMapping();
+        var cells = headerRow.CellsUsed().ToList();
+
+        var actualHeaders = new List<string>();
+        foreach (var cell in cells)
+        {
+            try
+            {
+                string val = cell.IsMerged()
+                    ? cell.MergedRange().FirstCell().GetString()
+                    : cell.GetString();
+                actualHeaders.Add($"Col{cell.Address.ColumnNumber}({cell.Address.ColumnLetter})='{val}'");
+            }
+            catch { }
+        }
+
+        mapping.PlateNumberACol = FindColumn(cells,
+            "PlateNumber", "Plate Number", "PlateNumberA", "Plate Number A",
+            "رقم اللوحة", "اللوحة", "اللوحة العربية", "Plate A", "Arabic Plate");
+
+        if (mapping.PlateNumberACol == 0)
+        {
+            mapping.IsValid = false;
+            mapping.ErrorMessage = "Required column 'Plate Number' not found\n" +
+                                  $"Columns found:\n{string.Join("\n", actualHeaders)}";
+        }
+        else
+        {
+            mapping.IsValid = true;
+        }
+
+        return mapping;
+    }
+
+    private VehicleUsageRowData ParseVehicleUsageRowData(
+        IXLRow row,
+        VehicleUsageColumnMapping map,
+        int rowNumber)
+    {
+        var data = new VehicleUsageRowData { RowNumber = rowNumber };
+
+        try
+        {
+            data.PlateNumberA = GetCellValue(row, map.PlateNumberACol)?.Trim();
+
+            if (string.IsNullOrWhiteSpace(data.PlateNumberA))
+            {
+                data.IsValid = false;
+                data.ErrorMessage = "Plate Number is required";
+                return data;
+            }
+
+            data.IsValid = true;
+        }
+        catch (Exception ex)
+        {
+            data.IsValid = false;
+            data.ErrorMessage = $"Error parsing row: {ex.Message}";
+        }
+
+        return data;
+    }
+
+// Internal classes for Vehicle Usage Check
+internal class VehicleUsageColumnMapping
+{
+    public bool IsValid { get; set; }
+    public string? ErrorMessage { get; set; }
+    public int PlateNumberACol { get; set; }
+}
+
+internal class VehicleUsageRowData
+{
+    public int RowNumber { get; set; }
+    public bool IsValid { get; set; }
+    public string? ErrorMessage { get; set; }
+    public string? PlateNumberA { get; set; }
+}
 }
 internal class HousingColumnMapping
 {
