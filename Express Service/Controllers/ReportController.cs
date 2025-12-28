@@ -15,6 +15,20 @@ public class ReportController(IReportService service) : ControllerBase
     private readonly IReportService service = service;
 
 
+
+    [HttpGet("summary")]
+    //[Authorize(Roles = "Master,Admin")]
+    public async Task<IActionResult> GetPreviousDayCompanySummaryAsync(
+    CancellationToken cancellationToken = default)
+    {
+        var result = await service.GetPreviousDayCompanySummaryAsync(cancellationToken);
+
+        return result.IsSuccess
+            ? Ok(result.Value)
+            : result.ToProblem();
+    }
+
+
     [HttpGet("special3")]
     public async Task<IActionResult> ComparePeriodOrdersAsync(
         [FromQuery] DateOnly period2Start,

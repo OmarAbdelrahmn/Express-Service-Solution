@@ -103,7 +103,7 @@ public class RiderController(IRiderService service) : ControllerBase
     }
 
     [HttpPost("{IqamaNo:long}/add-employee")]
-    [Authorize(Roles = "Master,Admin")]
+    //[Authorize(Roles = "Master,Admin")]
     public async Task<IActionResult> AddETOR(long IqamaNo, [FromBody] EMTOR request)
     {
         var result = await service.AddETOR(IqamaNo, request);

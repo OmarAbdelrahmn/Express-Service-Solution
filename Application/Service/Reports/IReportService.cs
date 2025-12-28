@@ -189,6 +189,8 @@ public interface IReportService
     Task<Result<HousingDailyDetailedReport>> GetHousingDailyDetailedReportAsync(
         DateOnly reportDate,
         CancellationToken cancellationToken = default);
+    Task<Result<PreviousDayCompanySummary>> GetPreviousDayCompanySummaryAsync(
+    CancellationToken cancellationToken = default);
 }
 
 public record PeriodOrdersComparison(
@@ -281,7 +283,41 @@ public record PeriodSummary(
     decimal PerformanceScore,
     List<CompanyPeriodBreakdown> CompanyBreakdowns
 );
+public record PreviousDayCompanySummary(
+    DateOnly ReportDate,
+    CompanyDaySummary Hunger,
+    CompanyDaySummary Keta,
+    int TotalDayOrders,
+    int TotalDayShifts,
+    CompanyMonthToDateSummary HungerMonthToDate,
+    CompanyMonthToDateSummary KetaMonthToDate,
+    int TotalMonthOrders,
+    int TotalMonthShifts,
+    DateOnly MonthStartDate
+);
 
+public record CompanyDaySummary(
+    string CompanyName,
+    int TotalOrders,
+    int TotalShifts,
+    int AcceptedOrders,
+    int RejectedOrders,
+    int CompletedShifts,
+    int IncompleteShifts,
+    int FailedShifts
+);
+
+public record CompanyMonthToDateSummary(
+    string CompanyName,
+    int TotalOrders,
+    int TotalShifts,
+    int AcceptedOrders,
+    int RejectedOrders,
+    int CompletedShifts,
+    int IncompleteShifts,
+    int FailedShifts,
+    int TotalDays
+);
 public record ComparisonMetrics(
     int WorkingDaysDifference,
     decimal WorkingDaysChangePercent,
