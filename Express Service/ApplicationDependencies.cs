@@ -4,6 +4,7 @@ using Application.Authentication;
 using Application.Roles;
 using Application.Service;
 using Application.Service.Empolyee;
+using Application.Service.Member;
 using Application.Service.Reports;
 using Application.Service.Riders;
 using Application.Services.Auth;
@@ -49,6 +50,7 @@ public static class ApplicationDependencies
         Services.AddScoped<IHungerDisabilityService, HungerDisabilityService>();
         Services.AddScoped<IImportService, ImportService>();
         Services.AddScoped<IRiderWorkingIdHistoryService, RiderWorkingIdHistoryService>();
+        Services.AddScoped<IMemberService, MemberService>();
 
 
         Services.AddAuth(configuration)

@@ -940,7 +940,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
 
             // ===== CALCULATE TOTALS =====
 
-            var totalDayOrders = hungerDaySummary.TotalOrders + ketaDaySummary.TotalOrders;
+            var totalDayOrders = hungerDaySummary.AcceptedOrders + ketaDaySummary.AcceptedOrders;
             var totalDayShifts = hungerDaySummary.TotalShifts + ketaDaySummary.TotalShifts;
 
             var totalMonthOrders = hungerMonthSummary.TotalOrders + ketaMonthSummary.TotalOrders;

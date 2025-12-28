@@ -17,7 +17,7 @@ public class ReportController(IReportService service) : ControllerBase
 
 
     [HttpGet("summary")]
-    //[Authorize(Roles = "Master,Admin")]
+    [Authorize(Roles = "Master,Admin")]
     public async Task<IActionResult> GetPreviousDayCompanySummaryAsync(
     CancellationToken cancellationToken = default)
     {
