@@ -179,4 +179,46 @@ public class MemberController(IMemberService housingService) : ControllerBase
             Ok(response.Value) :
             response.ToProblem();
     }
+
+    [HttpPost("employees/request-status-change")]
+    public async Task<IActionResult> RequestStatusChange([FromBody] MemberStatusChangeRequest request)
+    {
+        var managerIqamaNo = User.GetUserIqamaNo();
+        var result = await housingService.RequestEmployeeStatusChangeForHousingAsync(managerIqamaNo, request);
+        return result.IsSuccess
+            ? Ok(new { message = "Status change request submitted successfully" })
+            : result.ToProblem();
+    }
+
+
+
+    [HttpPost("vehicles/request-take")]
+    public async Task<IActionResult> RequestTakeVehicle([FromBody] MemberVehicleOperationRequest request)
+    {
+        var managerIqamaNo = User.GetUserIqamaNo();
+        var result = await housingService.RequestTakeVehicleForHousingAsync(managerIqamaNo, request);
+        return result.IsSuccess
+            ? Ok(new { message = "Vehicle take request submitted successfully" })
+            : result.ToProblem();
+    }
+
+    [HttpPost("vehicles/request-return")]
+    public async Task<IActionResult> RequestReturnVehicle([FromBody] MemberVehicleOperationRequest request)
+    {
+        var managerIqamaNo = User.GetUserIqamaNo();
+        var result = await housingService.RequestReturnVehicleForHousingAsync(managerIqamaNo, request);
+        return result.IsSuccess
+            ? Ok(new { message = "Vehicle return request submitted successfully" })
+            : result.ToProblem();
+    }
+
+    [HttpPost("vehicles/request-report-problem")]
+    public async Task<IActionResult> RequestReportProblem([FromBody] MemberVehicleOperationRequest request)
+    {
+        var managerIqamaNo = User.GetUserIqamaNo();
+        var result = await housingService.RequestReportProblemForHousingAsync(managerIqamaNo, request);
+        return result.IsSuccess
+            ? Ok(new { message = "Vehicle problem report submitted successfully" })
+            : result.ToProblem();
+    }
 }

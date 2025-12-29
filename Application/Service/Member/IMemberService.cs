@@ -39,10 +39,28 @@ public interface IMemberService
     // Reports
     Task<Result<HousingMonthlyReportResponse>> GetMonthlyReport(long managerIqamaNo, int year, int month);
     Task<Result<byte[]>> ExportHousingReport(long managerIqamaNo, DateOnly startDate, DateOnly endDate);
+    Task<Result> RequestTakeVehicleForHousingAsync(long managerIqamaNo, MemberVehicleOperationRequest request);
+    Task<Result> RequestReturnVehicleForHousingAsync(long managerIqamaNo, MemberVehicleOperationRequest request);
+    Task<Result> RequestReportProblemForHousingAsync(long managerIqamaNo, MemberVehicleOperationRequest request);
+
+    // Member Employee Status Change
+    Task<Result> RequestEmployeeStatusChangeForHousingAsync(long managerIqamaNo, MemberStatusChangeRequest request);
 }
 public record MemberAuthRequest(
     long IqamaNo,
     string Password
+);
+
+public record MemberVehicleOperationRequest(
+    long RiderIqamaNo,
+    string VehiclePlate,
+    string? Reason = null
+);
+
+public record MemberStatusChangeRequest(
+    long EmployeeIqamaNo,
+    string NewStatus,
+    string Reason
 );
 
 public record MemberAuthResponse(

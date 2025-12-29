@@ -1,6 +1,7 @@
 ﻿using Application.Abstraction;
 using Application.Abstraction.Errors;
 using Application.Authentication;
+using Application.Service.Empolyee;
 using Domain;
 using Domain.Entities;
 using Microsoft.AspNetCore.Identity;
@@ -1056,4 +1057,310 @@ public class MemberService(UserManager<ApplicationUser> userManager , SignInMana
             new Error("NotImplemented", "Excel export to be implemented", 501)
         );
     }
-}
+    // Add to MemberService class
+    public async Task<Result> RequestTakeVehicleForHousingAsync(
+        long managerIqamaNo,
+        MemberVehicleOperationRequest request)
+    {
+        var housingResult = await GetManagedHousing(managerIqamaNo);
+        if (housingResult.IsFailure)
+            return housingResult;
+
+        var housing = housingResult.Value;
+        var employeeIqamas = housing.Employees.Select(e => e.IqamaNo).ToList();
+
+        // Verify rider belongs to this housing
+        var rider = await context.RiderDetails
+            .Include(r => r.Employee)
+            .FirstOrDefaultAsync(r => r.EmployeeIqamaNo == request.RiderIqamaNo
+                && employeeIqamas.Contains(r.EmployeeIqamaNo));
+
+        if (rider is null)
+        {
+            return Result.Failure(HousingMemberErrors.RiderNotInHousing);
+        }
+
+        // Verify vehicle exists and get its assignment
+        var vehicle = await context.Vehicles
+            .FirstOrDefaultAsync(v => v.PlateNumberA == request.VehiclePlate);
+
+        if (vehicle is null)
+        {
+            return Result.Failure(new Error(
+                "VehicleNotFound",
+                "Vehicle not found",
+                404
+            ));
+        }
+
+        // Check if vehicle is currently assigned to any rider in this housing
+        var vehicleInHousing = await context.RiderDetails
+            .AnyAsync(r => employeeIqamas.Contains(r.EmployeeIqamaNo)
+                && r.VehicleNumber == vehicle.VehicleNumber);
+
+        // If vehicle is assigned elsewhere, check if it's available
+        if (!vehicleInHousing)
+        {
+            var isVehicleAvailable = !await context.RiderVehicleStatus
+                .AnyAsync(s => s.VehicleNumber == vehicle.VehicleNumber
+                    && s.IsActive
+                    && (s.StatusType == VehicleStatusType.Taken
+                        || s.StatusType == VehicleStatusType.Problem
+                        || s.StatusType == VehicleStatusType.Stolen
+                        || s.StatusType == VehicleStatusType.BreakUp));
+
+            if (!isVehicleAvailable)
+            {
+                return Result.Failure(new Error(
+                    "VehicleUnavailable",
+                    "This vehicle is not available and not assigned to your housing",
+                    403
+                ));
+            }
+        }
+
+        // Get the username of the manager for the request
+        var manager = await userManager.FindByNameAsync(managerIqamaNo.ToString());
+        if (manager is null)
+        {
+            return Result.Failure(UserErrors.UserNotFound);
+        }
+
+        // Create the vehicle operation request
+        var operation = new TempVehicleOperation
+        {
+            RiderIqamaNo = request.RiderIqamaNo,
+            VehiclePlateNumber = request.VehiclePlate,
+            VehicleNumber = vehicle.VehicleNumber,
+            VehicleStatusType = VehicleStatusType.Taken,
+            Reason = request.Reason ?? "Housing manager request - take vehicle",
+            RequestedAt = DateTime.UtcNow.AddHours(3),
+            RequestedBy = manager.UserName ?? $"Housing Manager ({managerIqamaNo})",
+            IsResolved = false
+        };
+
+        await context.TempVehicleOperations.AddAsync(operation);
+        await context.SaveChangesAsync();
+
+        return Result.Success();
+    }
+
+    public async Task<Result> RequestReturnVehicleForHousingAsync(
+        long managerIqamaNo,
+        MemberVehicleOperationRequest request)
+    {
+        var housingResult = await GetManagedHousing(managerIqamaNo);
+        if (housingResult.IsFailure)
+            return housingResult;
+
+        var housing = housingResult.Value;
+        var employeeIqamas = housing.Employees.Select(e => e.IqamaNo).ToList();
+
+        // Verify rider belongs to this housing
+        var rider = await context.RiderDetails
+            .Include(r => r.Employee)
+            .FirstOrDefaultAsync(r => r.EmployeeIqamaNo == request.RiderIqamaNo
+                && employeeIqamas.Contains(r.EmployeeIqamaNo));
+
+        if (rider is null)
+        {
+            return Result.Failure(HousingMemberErrors.RiderNotInHousing);
+        }
+
+        // Verify vehicle exists
+        var vehicle = await context.Vehicles
+            .FirstOrDefaultAsync(v => v.PlateNumberA == request.VehiclePlate);
+
+        if (vehicle is null)
+        {
+            return Result.Failure(new Error(
+                "VehicleNotFound",
+                "Vehicle not found",
+                404
+            ));
+        }
+
+        // Verify rider has this vehicle
+        if (rider.VehicleNumber != vehicle.VehicleNumber)
+        {
+            return Result.Failure(new Error(
+                "VehicleNotAssigned",
+                "This vehicle is not assigned to the specified rider",
+                400
+            ));
+        }
+
+        // Get the username of the manager
+        var manager = await userManager.FindByNameAsync(managerIqamaNo.ToString());
+        if (manager is null)
+        {
+            return Result.Failure(UserErrors.UserNotFound);
+        }
+
+        // Create the vehicle operation request
+        var operation = new TempVehicleOperation
+        {
+            RiderIqamaNo = request.RiderIqamaNo,
+            VehiclePlateNumber = request.VehiclePlate,
+            VehicleNumber = vehicle.VehicleNumber,
+            VehicleStatusType = VehicleStatusType.Returned,
+            Reason = request.Reason ?? "Housing manager request - return vehicle",
+            RequestedAt = DateTime.UtcNow.AddHours(3),
+            RequestedBy = manager.UserName ?? $"Housing Manager ({managerIqamaNo})",
+            IsResolved = false
+        };
+
+        await context.TempVehicleOperations.AddAsync(operation);
+        await context.SaveChangesAsync();
+
+        return Result.Success();
+    }
+
+    public async Task<Result> RequestReportProblemForHousingAsync(
+        long managerIqamaNo,
+        MemberVehicleOperationRequest request)
+    {
+        var housingResult = await GetManagedHousing(managerIqamaNo);
+        if (housingResult.IsFailure)
+            return housingResult;
+
+        var housing = housingResult.Value;
+        var employeeIqamas = housing.Employees.Select(e => e.IqamaNo).ToList();
+
+        // Verify rider belongs to this housing
+        var rider = await context.RiderDetails
+            .Include(r => r.Employee)
+            .FirstOrDefaultAsync(r => r.EmployeeIqamaNo == request.RiderIqamaNo
+                && employeeIqamas.Contains(r.EmployeeIqamaNo));
+
+        if (rider is null)
+        {
+            return Result.Failure(HousingMemberErrors.RiderNotInHousing);
+        }
+
+        // Verify vehicle exists
+        var vehicle = await context.Vehicles
+            .FirstOrDefaultAsync(v => v.PlateNumberA == request.VehiclePlate);
+
+        if (vehicle is null)
+        {
+            return Result.Failure(new Error(
+                "VehicleNotFound",
+                "Vehicle not found",
+                404
+            ));
+        }
+
+        // Verify rider has this vehicle
+        if (rider.VehicleNumber != vehicle.VehicleNumber)
+        {
+            return Result.Failure(new Error(
+                "VehicleNotAssigned",
+                "This rider doesn't have this vehicle. Cannot report problem.",
+                400
+            ));
+        }
+
+        // Get the username of the manager
+        var manager = await userManager.FindByNameAsync(managerIqamaNo.ToString());
+        if (manager is null)
+        {
+            return Result.Failure(UserErrors.UserNotFound);
+        }
+
+        // Create the vehicle operation request
+        var operation = new TempVehicleOperation
+        {
+            RiderIqamaNo = request.RiderIqamaNo,
+            VehiclePlateNumber = request.VehiclePlate,
+            VehicleNumber = vehicle.VehicleNumber,
+            VehicleStatusType = VehicleStatusType.Problem,
+            Reason = request.Reason ?? "Housing manager report - vehicle problem",
+            RequestedAt = DateTime.UtcNow.AddHours(3),
+            RequestedBy = manager.UserName ?? $"Housing Manager ({managerIqamaNo})",
+            IsResolved = false
+        };
+
+        await context.TempVehicleOperations.AddAsync(operation);
+        await context.SaveChangesAsync();
+
+        return Result.Success();
+    }
+
+    public async Task<Result> RequestEmployeeStatusChangeForHousingAsync(
+        long managerIqamaNo,
+        MemberStatusChangeRequest request)
+    {
+        var housingResult = await GetManagedHousing(managerIqamaNo);
+        if (housingResult.IsFailure)
+            return housingResult;
+
+        var housing = housingResult.Value;
+        var employeeIqamas = housing.Employees.Select(e => e.IqamaNo).ToList();
+
+        // Verify the employee/rider belongs to this housing
+        if (!employeeIqamas.Contains(request.EmployeeIqamaNo))
+        {
+            return Result.Failure(HousingMemberErrors.EmployeeNotInHousing);
+        }
+
+        // Validate status
+        if (!EmployeeStatus.IsValid(request.NewStatus))
+        {
+            return Result.Failure(
+                new Error("InvalidStatus",
+                    $"Invalid status. Valid statuses are: {string.Join(", ", EmployeeStatus.ValidStatuses)}",
+                    400));
+        }
+
+        var employee = await context.Employees
+            .Include(e => e.RiderDetails)
+            .FirstOrDefaultAsync(e => e.IqamaNo == request.EmployeeIqamaNo);
+
+        if (employee is null)
+        {
+            return Result.Failure(
+                new Error("NotFound", "Employee not found", 404));
+        }
+
+        // Check if there's already a pending request for this employee
+        var existingRequest = await context.TempEmployeeStatusChanges
+            .AnyAsync(t => t.EmployeeIqamaNo == request.EmployeeIqamaNo && !t.IsResolved);
+
+        if (existingRequest)
+        {
+            return Result.Failure(
+                new Error("PendingRequest",
+                    "There is already a pending status change request for this employee", 400));
+        }
+
+        // Check if the status is already set to the requested status
+        if (employee.Status.ToLower() == request.NewStatus.ToLower())
+        {
+            return Result.Failure(
+                new Error("SameStatus",
+                    $"Employee status is already set to '{request.NewStatus}'", 400));
+        }
+
+        // Get the manager's username
+        var manager = await userManager.FindByNameAsync(managerIqamaNo.ToString());
+        if (manager is null)
+        {
+            return Result.Failure(UserErrors.UserNotFound);
+        }
+
+        var statusChange = new TempEmployeeStatusChange
+        {
+            EmployeeIqamaNo = request.EmployeeIqamaNo,
+            Action = request.NewStatus.ToLower(),
+            Reason = request.Reason,
+            RequestedBy = manager.UserName ?? $"Housing Manager ({managerIqamaNo})",
+            RequestedAt = DateTime.UtcNow.AddHours(3),
+            IsResolved = false
+        };
+
+        await context.TempEmployeeStatusChanges.AddAsync(statusChange);
+        await context.SaveChangesAsync();
+
+        return Result.Success();
+    }
