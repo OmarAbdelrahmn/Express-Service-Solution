@@ -967,7 +967,171 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                 new Error($"Error generating previous day summary: {ex.Message}", "server_error", 500));
         }
     }
+    public async Task<Result<PreviousDayCompanySummary>> GetHousingPreviousDayCompanySummaryAsync(
+       long managerIqamaNo,
+       CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            // Find the housing by manager iqama number
+            var housing = await _dbcontext.Set<Housing>()
+                .FirstOrDefaultAsync(h => h.ManagerIqamaNo == managerIqamaNo, cancellationToken);
 
+            if (housing == null)
+            {
+                return Result.Failure<PreviousDayCompanySummary>(
+                    new Error($"No housing found for manager iqama number {managerIqamaNo}", "housing_not_found", 404));
+            }
+
+            // Get yesterday's date and current month range
+            var today = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3));
+            var yesterday = today.AddDays(-1);
+            var monthStart = new DateOnly(today.Year, today.Month, 1);
+
+            // Get rider IDs for employees in this housing
+            var housingRiderIds = await _dbcontext.Set<Employees>()
+                .Where(e => e.HousingId == housing.Id)
+                .Join(_dbcontext.Set<RiderDetails>(),
+                      emp => emp.IqamaNo,
+                      rider => rider.EmployeeIqamaNo,
+                      (emp, rider) => rider.Id)
+                .ToListAsync(cancellationToken);
+
+            if (!housingRiderIds.Any())
+            {
+                return Result.Failure<PreviousDayCompanySummary>(
+                    new Error($"No riders found in housing managed by {managerIqamaNo}", "no_riders", 404));
+            }
+
+            // Get all shifts for yesterday for riders in this housing
+            var yesterdayShifts = await _dbcontext.RiderShifts
+                .Include(s => s.Company)
+                .Where(s => s.ShiftDate == yesterday && housingRiderIds.Contains(s.RiderId))
+                .AsNoTracking()
+                .ToListAsync(cancellationToken);
+
+            // Get all shifts for the current month up to today for riders in this housing
+            var monthShifts = await _dbcontext.RiderShifts
+                .Include(s => s.Company)
+                .Where(s => s.ShiftDate >= monthStart && s.ShiftDate < today && housingRiderIds.Contains(s.RiderId))
+                .AsNoTracking()
+                .ToListAsync(cancellationToken);
+
+            if (!yesterdayShifts.Any() && !monthShifts.Any())
+            {
+                return Result.Failure<PreviousDayCompanySummary>(
+                    new Error($"No shifts found for housing managed by {managerIqamaNo} on {yesterday:yyyy-MM-dd} or current month", "no_data", 404));
+            }
+
+            // ===== YESTERDAY'S DATA =====
+
+            // Filter shifts for Hunger company (yesterday)
+            var hungerYesterdayShifts = yesterdayShifts
+                .Where(s => s.Company?.Name?.Equals("Hunger", StringComparison.OrdinalIgnoreCase) == true)
+                .ToList();
+
+            // Filter shifts for Keta company (yesterday)
+            var ketaYesterdayShifts = yesterdayShifts
+                .Where(s => s.Company?.Name?.Equals("Keta", StringComparison.OrdinalIgnoreCase) == true)
+                .ToList();
+
+            // Calculate Hunger summary (yesterday)
+            var hungerDaySummary = new CompanyDaySummary(
+                CompanyName: "Hunger",
+                TotalOrders: hungerYesterdayShifts.Sum(s => s.AcceptedDailyOrders + s.RejectedDailyOrders),
+                TotalShifts: hungerYesterdayShifts.Count,
+                AcceptedOrders: hungerYesterdayShifts.Sum(s => s.AcceptedDailyOrders),
+                RejectedOrders: hungerYesterdayShifts.Sum(s => s.RejectedDailyOrders),
+                CompletedShifts: hungerYesterdayShifts.Count(s => s.ShiftStatus == ShiftStatus.Completed.ToString()),
+                IncompleteShifts: hungerYesterdayShifts.Count(s => s.ShiftStatus == ShiftStatus.Incomplete.ToString()),
+                FailedShifts: hungerYesterdayShifts.Count(s => s.ShiftStatus == ShiftStatus.Failed.ToString())
+            );
+
+            // Calculate Keta summary (yesterday)
+            var ketaDaySummary = new CompanyDaySummary(
+                CompanyName: "Keta",
+                TotalOrders: ketaYesterdayShifts.Sum(s => s.AcceptedDailyOrders + s.RejectedDailyOrders),
+                TotalShifts: ketaYesterdayShifts.Count,
+                AcceptedOrders: ketaYesterdayShifts.Sum(s => s.AcceptedDailyOrders),
+                RejectedOrders: ketaYesterdayShifts.Sum(s => s.RejectedDailyOrders),
+                CompletedShifts: ketaYesterdayShifts.Count(s => s.ShiftStatus == ShiftStatus.Completed.ToString()),
+                IncompleteShifts: ketaYesterdayShifts.Count(s => s.ShiftStatus == ShiftStatus.Incomplete.ToString()),
+                FailedShifts: ketaYesterdayShifts.Count(s => s.ShiftStatus == ShiftStatus.Failed.ToString())
+            );
+
+            // ===== MONTH-TO-DATE DATA =====
+
+            // Filter shifts for Hunger company (month-to-date)
+            var hungerMonthShifts = monthShifts
+                .Where(s => s.Company?.Name?.Equals("Hunger", StringComparison.OrdinalIgnoreCase) == true)
+                .ToList();
+
+            // Filter shifts for Keta company (month-to-date)
+            var ketaMonthShifts = monthShifts
+                .Where(s => s.Company?.Name?.Equals("Keta", StringComparison.OrdinalIgnoreCase) == true)
+                .ToList();
+
+            // Calculate number of days with data in the month
+            var daysInMonth = monthShifts
+                .Select(s => s.ShiftDate)
+                .Distinct()
+                .Count();
+
+            // Calculate Hunger month-to-date summary
+            var hungerMonthSummary = new CompanyMonthToDateSummary(
+                CompanyName: "Hunger",
+                TotalOrders: hungerMonthShifts.Sum(s => s.AcceptedDailyOrders + s.RejectedDailyOrders),
+                TotalShifts: hungerMonthShifts.Count,
+                AcceptedOrders: hungerMonthShifts.Sum(s => s.AcceptedDailyOrders),
+                RejectedOrders: hungerMonthShifts.Sum(s => s.RejectedDailyOrders),
+                CompletedShifts: hungerMonthShifts.Count(s => s.ShiftStatus == ShiftStatus.Completed.ToString()),
+                IncompleteShifts: hungerMonthShifts.Count(s => s.ShiftStatus == ShiftStatus.Incomplete.ToString()),
+                FailedShifts: hungerMonthShifts.Count(s => s.ShiftStatus == ShiftStatus.Failed.ToString()),
+                TotalDays: daysInMonth
+            );
+
+            // Calculate Keta month-to-date summary
+            var ketaMonthSummary = new CompanyMonthToDateSummary(
+                CompanyName: "Keta",
+                TotalOrders: ketaMonthShifts.Sum(s => s.AcceptedDailyOrders + s.RejectedDailyOrders),
+                TotalShifts: ketaMonthShifts.Count,
+                AcceptedOrders: ketaMonthShifts.Sum(s => s.AcceptedDailyOrders),
+                RejectedOrders: ketaMonthShifts.Sum(s => s.RejectedDailyOrders),
+                CompletedShifts: ketaMonthShifts.Count(s => s.ShiftStatus == ShiftStatus.Completed.ToString()),
+                IncompleteShifts: ketaMonthShifts.Count(s => s.ShiftStatus == ShiftStatus.Incomplete.ToString()),
+                FailedShifts: ketaMonthShifts.Count(s => s.ShiftStatus == ShiftStatus.Failed.ToString()),
+                TotalDays: daysInMonth
+            );
+
+            // ===== CALCULATE TOTALS =====
+
+            var totalDayOrders = hungerDaySummary.AcceptedOrders + ketaDaySummary.AcceptedOrders;
+            var totalDayShifts = hungerDaySummary.TotalShifts + ketaDaySummary.TotalShifts;
+
+            var totalMonthOrders = hungerMonthSummary.TotalOrders + ketaMonthSummary.TotalOrders;
+            var totalMonthShifts = hungerMonthSummary.TotalShifts + ketaMonthSummary.TotalShifts;
+
+            var summary = new PreviousDayCompanySummary(
+                ReportDate: yesterday,
+                Hunger: hungerDaySummary,
+                Keta: ketaDaySummary,
+                TotalDayOrders: totalDayOrders,
+                TotalDayShifts: totalDayShifts,
+                HungerMonthToDate: hungerMonthSummary,
+                KetaMonthToDate: ketaMonthSummary,
+                TotalMonthOrders: totalMonthOrders,
+                TotalMonthShifts: totalMonthShifts,
+                MonthStartDate: monthStart
+            );
+
+            return Result.Success(summary);
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<PreviousDayCompanySummary>(
+                new Error($"Error generating previous day summary for housing: {ex.Message}", "server_error", 500));
+        }
+    }
 
     public async Task<Result<MonthlyRiderReport>> GetMonthlyReportByWorkingIdAsync(
         string WorkingId,

@@ -2,6 +2,7 @@
 using Application.Abstraction.Errors;
 using Application.Authentication;
 using Application.Service.Empolyee;
+using Application.Service.Reports;
 using Domain;
 using Domain.Entities;
 using Microsoft.AspNetCore.Identity;
@@ -12,12 +13,13 @@ using System.Text;
 
 namespace Application.Service.Member;
 
-public class MemberService(UserManager<ApplicationUser> userManager, SignInManager<ApplicationUser> signInManager, IJwtProvider jwtProvider, ApplicationDbcontext context) : IMemberService
+public class MemberService(UserManager<ApplicationUser> userManager, SignInManager<ApplicationUser> signInManager, IJwtProvider jwtProvider, ApplicationDbcontext context , IReportService reportService) : IMemberService
 {
     private readonly UserManager<ApplicationUser> userManager = userManager;
     private readonly SignInManager<ApplicationUser> signInManager = signInManager;
     private readonly IJwtProvider jwtProvider = jwtProvider;
     private readonly ApplicationDbcontext context = context;
+    private readonly IReportService reportService = reportService;
 
     public async Task<Result<MemberAuthResponse>> MemberSignInAsync(MemberAuthRequest request)
     {
@@ -186,10 +188,13 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
 
         recentActivities.AddRange(recentVehicleOps);
 
+        var total = housing.Employees.Where(e => e.Status.ToLower() != "vacation").ToList().Count;
+
+        var inca = total - activeRiders;
         var stats = new Statistics(
-            housing.Employees.Count,
+            total,
             activeRiders,
-            inactiveRiders,
+            inca,
             vehicles.Count,
             vehiclesInUse,
             vehicles.Count - vehiclesInUse,
@@ -207,11 +212,16 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
             housing.Capacity - housing.Employees.Count
         );
 
+        var summaryReport = await reportService.GetHousingPreviousDayCompanySummaryAsync(managerIqamaNo);
+
+
         var response = new HousingDashboardResponse(
             housingInfo,
             stats,
-            recentActivities.OrderByDescending(a => a.Timestamp).Take(10).ToList()
+            recentActivities.OrderByDescending(a => a.Timestamp).Take(10).ToList(),
+            summaryReport.Value
         );
+
 
         return Result.Success(response);
     }

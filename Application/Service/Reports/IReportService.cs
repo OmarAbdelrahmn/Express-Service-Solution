@@ -191,6 +191,10 @@ public interface IReportService
         CancellationToken cancellationToken = default);
     Task<Result<PreviousDayCompanySummary>> GetPreviousDayCompanySummaryAsync(
     CancellationToken cancellationToken = default);
+
+    Task<Result<PreviousDayCompanySummary>> GetHousingPreviousDayCompanySummaryAsync(
+        long managerIqamaNo,
+    CancellationToken cancellationToken = default);
 }
 
 public record PeriodOrdersComparison(

@@ -1,4 +1,5 @@
 ﻿using Application.Abstraction;
+using Application.Service.Reports;
 using Application.Service.Riders;
 using System;
 using System.Collections.Generic;
@@ -86,7 +87,8 @@ public record HousingBasicInfo(
 public record HousingDashboardResponse(
     HousingInfo Housing,
     Statistics Stats,
-    List<RecentActivityItem> RecentActivities
+    List<RecentActivityItem> RecentActivities ,
+    PreviousDayCompanySummary Summary
 );
 
 public record HousingInfo(
