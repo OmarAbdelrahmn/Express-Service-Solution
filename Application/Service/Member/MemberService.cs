@@ -131,7 +131,7 @@ public class MemberService(UserManager<ApplicationUser> userManager , SignInMana
         var riders = await context.RiderDetails
             .Include(r => r.Employee)
             .Include(r => r.Company)
-            .Where(r => employeeIqamas.Contains(r.EmployeeIqamaNo))
+            .Where(r => employeeIqamas.Contains(r.EmployeeIqamaNo) && !r.Employee.IsEmployee )
             .ToListAsync();
 
         var activeRiders = riders.Count(r => r.Employee.Status.ToLower() == "enable");
@@ -229,10 +229,10 @@ public class MemberService(UserManager<ApplicationUser> userManager , SignInMana
         var employeeIqamas = housing.Employees.Select(e => e.IqamaNo).ToList();
 
         var riders = await context.RiderDetails
-            .Where(r => employeeIqamas.Contains(r.EmployeeIqamaNo))
+            .Where(r => employeeIqamas.Contains(r.EmployeeIqamaNo) && !r.Employee.IsEmployee )
             .ToDictionaryAsync(r => r.EmployeeIqamaNo, r => r);
 
-        var employees = housing.Employees.Select(e => new EmployeeSummary(
+        var employees = housing.Employees.Where(c=>c.IsEmployee).Select(e => new EmployeeSummary(
             e.IqamaNo,
             e.NameEN,
             e.NameAR,
@@ -249,7 +249,7 @@ public class MemberService(UserManager<ApplicationUser> userManager , SignInMana
             housing.Capacity,
             housing.Employees.Count,
             housing.ManagerIqamaNo,
-            manager?.NameEN,
+            manager?.NameAR,
             employees
         );
 
@@ -307,7 +307,7 @@ public class MemberService(UserManager<ApplicationUser> userManager , SignInMana
             .Include(r => r.Employee)
             .Include(r => r.Company)
             .Include(r => r.Vehicle)
-            .Where(r => employeeIqamas.Contains(r.EmployeeIqamaNo))
+            .Where(r => employeeIqamas.Contains(r.EmployeeIqamaNo) && !r.Employee.IsEmployee)
             .ToListAsync();
 
         var response = riders.Select(r => new HousingRiderResponse(
@@ -587,61 +587,107 @@ public class MemberService(UserManager<ApplicationUser> userManager , SignInMana
 
     public async Task<Result<List<HousingVehicleResponse>>> GetHousingVehicles(long managerIqamaNo)
     {
-        var housingResult = await GetManagedHousing(managerIqamaNo);
-        if (housingResult.IsFailure)
-            return Result.Failure<List<HousingVehicleResponse>>(housingResult.Error);
-
-        var housing = housingResult.Value;
-        var employeeIqamas = housing.Employees.Select(e => e.IqamaNo).ToList();
-
-        var riders = await context.RiderDetails
-            .Include(r => r.Employee)
-            .Where(r => employeeIqamas.Contains(r.EmployeeIqamaNo))
-            .ToListAsync();
-
-        var vehicleNumbers = riders
-            .Where(r => !string.IsNullOrEmpty(r.VehicleNumber))
-            .Select(r => r.VehicleNumber!)
-            .ToList();
-
-        var vehicles = await context.Vehicles
-            .Where(v => vehicleNumbers.Contains(v.VehicleNumber))
-            .ToListAsync();
-
-        var latestStatuses = await context.RiderVehicleStatus
-            .Where(rvs => vehicleNumbers.Contains(rvs.VehicleNumber) && rvs.IsActive)
-            .GroupBy(rvs => rvs.VehicleNumber)
-            .Select(g => g.OrderByDescending(rvs => rvs.Timestamp).FirstOrDefault())
-            .ToListAsync();
-
-        var statusDict = latestStatuses
-            .Where(s => s != null)
-            .ToDictionary(s => s!.VehicleNumber, s => s);
-
-        var riderDict = riders.ToDictionary(r => r.VehicleNumber ?? string.Empty, r => r);
-
-        var response = vehicles.Select(v =>
+        try
         {
-            var status = statusDict.ContainsKey(v.VehicleNumber) ? statusDict[v.VehicleNumber] : null;
-            var rider = riderDict.ContainsKey(v.VehicleNumber) ? riderDict[v.VehicleNumber] : null;
+            // Step 1: Get housing with employees
+            var housingResult = await GetManagedHousing(managerIqamaNo);
+            if (housingResult.IsFailure)
+                return Result.Failure<List<HousingVehicleResponse>>(housingResult.Error);
 
-            return new HousingVehicleResponse(
-                v.VehicleNumber,
-                v.VehicleType,
-                v.PlateNumberA,
-                v.PlateNumberE,
-                v.ManufactureYear,
-                v.Manufacturer,
-                v.LicenseExpiryDate,
-                v.Location,
-                status?.StatusType.ToString(),
-                rider?.EmployeeIqamaNo,
-                rider?.Employee.NameEN,
-                status?.Timestamp
-            );
-        }).ToList();
+            var housing = housingResult.Value;
+            var employeeIqamas = housing.Employees.Select(e => e.IqamaNo).ToList();
 
-        return Result.Success(response);
+            if (!employeeIqamas.Any())
+                return Result.Success(new List<HousingVehicleResponse>());
+
+            // Step 2: Get riders for these employees
+            var riders = await context.RiderDetails
+                .Include(r => r.Employee)
+                .Where(r => employeeIqamas.Contains(r.EmployeeIqamaNo))
+                .ToListAsync();
+
+            // Step 3: Get vehicle numbers (excluding null/empty)
+            var vehicleNumbers = riders
+                .Where(r => !string.IsNullOrWhiteSpace(r.VehicleNumber))
+                .Select(r => r.VehicleNumber!)
+                .Distinct() // Prevent duplicate vehicle lookups
+                .ToList();
+
+            if (!vehicleNumbers.Any())
+                return Result.Success(new List<HousingVehicleResponse>());
+
+            // Step 4: Get vehicles
+            var vehicles = await context.Vehicles
+                .Where(v => vehicleNumbers.Contains(v.VehicleNumber))
+                .ToListAsync();
+
+            // Step 5: Get latest statuses - OPTIMIZED QUERY
+            // Use a raw SQL query or improve the LINQ to avoid bringing all data to memory
+            var latestStatuses = await context.RiderVehicleStatus
+                .FromSqlRaw(@"
+                SELECT rvs.*
+                FROM RiderVehicleStatus rvs
+                INNER JOIN (
+                    SELECT VehicleNumber, MAX(Timestamp) AS MaxTimestamp
+                    FROM RiderVehicleStatus
+                    WHERE IsActive = 1 AND VehicleNumber IN ({0})
+                    GROUP BY VehicleNumber
+                ) latest ON rvs.VehicleNumber = latest.VehicleNumber 
+                        AND rvs.Timestamp = latest.MaxTimestamp
+                        AND rvs.IsActive = 1",
+                    string.Join(",", vehicleNumbers.Select(v => $"'{v}'")))
+                .ToListAsync();
+
+            // Alternative using LINQ (if raw SQL is not preferred)
+            // var latestStatuses = await (
+            //     from rvs in context.RiderVehicleStatus
+            //     where vehicleNumbers.Contains(rvs.VehicleNumber) && rvs.IsActive
+            //     group rvs by rvs.VehicleNumber into g
+            //     let maxTimestamp = g.Max(x => x.Timestamp)
+            //     from status in g
+            //     where status.Timestamp == maxTimestamp
+            //     select status
+            // ).ToListAsync();
+
+            // Step 6: Create dictionaries safely
+            var statusDict = latestStatuses
+                .GroupBy(s => s.VehicleNumber)
+                .ToDictionary(g => g.Key, g => g.First()); // Handle potential duplicates
+
+            // FIX: Handle duplicate vehicle numbers in riders
+            var riderDict = riders
+                .Where(r => !string.IsNullOrWhiteSpace(r.VehicleNumber))
+                .GroupBy(r => r.VehicleNumber!)
+                .ToDictionary(g => g.Key, g => g.First()); // Take first rider if multiple exist
+
+            // Step 7: Build response
+            var response = vehicles.Select(v =>
+            {
+                statusDict.TryGetValue(v.VehicleNumber, out var status);
+                riderDict.TryGetValue(v.VehicleNumber, out var rider);
+
+                return new HousingVehicleResponse(
+                    v.VehicleNumber,
+                    v.VehicleType,
+                    v.PlateNumberA,
+                    v.PlateNumberE,
+                    v.ManufactureYear,
+                    v.Manufacturer,
+                    v.LicenseExpiryDate,
+                    v.Location,
+                    status?.StatusType.ToString(),
+                    rider?.EmployeeIqamaNo,
+                    rider?.Employee?.NameEN, // Add null check
+                    status?.Timestamp
+                );
+            }).ToList();
+
+            return Result.Success(response);
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<List<HousingVehicleResponse>>(new Error($"Error retrieving housing vehicles: {ex.Message}","error",400));
+        }
     }
 
     // Continuation of HousingMemberService class - Final Methods
@@ -762,6 +808,7 @@ public class MemberService(UserManager<ApplicationUser> userManager , SignInMana
             query = query.Where(h => h.ShiftDate <= endDate.Value);
 
         var disabilities = await query
+            .Where(h => h.AcceptedDailyOrders < 14)
             .OrderByDescending(h => h.ShiftDate)
             .ToListAsync();
 
