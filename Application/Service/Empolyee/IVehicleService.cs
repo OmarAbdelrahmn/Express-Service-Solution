@@ -21,7 +21,7 @@ public interface IVehicleService
 
     Task<Result> TakeVehicleAsync(long IqamaNo, string vehicleId, string reason, string permission, DateTime permissionEndDate);
     Task<Result> ReturnVehicleAsync(long IqamaNo, string vehicleId, string reason);
-    Task<Result> ReportProblemAsync(long IqamaNo, string vehicleId, string reason);
+    Task<Result> ReportProblemAsync(long? IqamaNo, string vehicleId, string reason);
     Task<Result> ReportVehicleStolenAsync(string vehicleNumber, long? reportedByIqamaNo, string? reason);
     Task<Result> MarkVehicleAsBreakUpAsync(string vehicleNumber, string reason);
     Task<Result> RecoverStolenVehicleAsync(string vehicleNumber, string recoveryDetails);

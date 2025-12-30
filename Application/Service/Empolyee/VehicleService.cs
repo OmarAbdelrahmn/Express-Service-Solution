@@ -255,43 +255,96 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
         }
     }
 
-    public async Task<Result> ReportProblemAsync(long IqamaNo, string PlateNumberA, string reason)
+    public async Task<Result> ReportProblemAsync(long? IqamaNo, string PlateNumberA, string reason)
     {
         using var transaction = await dbcontext.Database.BeginTransactionAsync();
         try
         {
-            var rider = await dbcontext.RiderDetails
-                .FirstOrDefaultAsync(x => x.EmployeeIqamaNo == IqamaNo);
-
-            if (rider == null)
-                return Result.Failure(new Error("NoRider", "No rider found with this Iqama", 404));
-
-            var VehicleNumber = await dbcontext.Vehicles
-                .Where(v => v.PlateNumberA == PlateNumberA)
-                .Select(v => v.VehicleNumber)
-                .FirstOrDefaultAsync();
-
-            if (rider.VehicleNumber != VehicleNumber)
-                return Result.Failure(new Error("NotAssigned",
-                    "Cannot report problem for a vehicle not assigned to you", 403));
-
             var vehicle = await dbcontext.Vehicles
-                .FirstOrDefaultAsync(v => v.VehicleNumber == VehicleNumber);
+                .FirstOrDefaultAsync(v => v.PlateNumberA == PlateNumberA);
 
             if (vehicle == null)
                 return Result.Failure(new Error("NoVehicle", "Vehicle not found", 404));
 
-            var activeTakenStatus = await dbcontext.RiderVehicleStatus
-                .FirstOrDefaultAsync(s => s.VehicleNumber == VehicleNumber &&
-                                         s.EmployeeIqamaNo == IqamaNo &&
-                                         s.IsActive &&
-                                         s.StatusType == VehicleStatusType.Taken);
+            var VehicleNumber = vehicle.VehicleNumber;
 
-            if (activeTakenStatus == null)
-                return Result.Failure(new Error("NoActiveAssignment",
-                    "No active vehicle assignment found", 400));
+            // Check if vehicle is already reported with an active problem
+            var existingProblem = await dbcontext.RiderVehicleStatus
+                .AnyAsync(s => s.VehicleNumber == VehicleNumber &&
+                              s.IsActive &&
+                              s.StatusType == VehicleStatusType.Problem);
 
-            await EndPermission(activeTakenStatus);
+            if (existingProblem)
+                return Result.Failure(new Error("AlreadyReported",
+                    "This vehicle already has an active problem reported", 400));
+
+            // Check if vehicle is stolen or broken up
+            var isStolen = await dbcontext.RiderVehicleStatus
+                .AnyAsync(s => s.VehicleNumber == VehicleNumber &&
+                              s.IsActive &&
+                              s.StatusType == VehicleStatusType.Stolen);
+
+            if (isStolen)
+                return Result.Failure(new Error("VehicleStolen",
+                    "Cannot report problem for a stolen vehicle", 400));
+
+            var isBreakUp = await dbcontext.RiderVehicleStatus
+                .AnyAsync(s => s.VehicleNumber == VehicleNumber &&
+                              s.IsActive &&
+                              s.StatusType == VehicleStatusType.BreakUp);
+
+            if (isBreakUp)
+                return Result.Failure(new Error("VehicleBreakUp",
+                    "Cannot report problem for a broken up vehicle", 400));
+
+            RiderDetails? rider = null;
+            RiderVehicleStatus? activeTakenStatus = null;
+
+            // If IqamaNo is provided, check if rider exists and has the vehicle
+            if (IqamaNo.HasValue)
+            {
+                rider = await dbcontext.RiderDetails
+                    .FirstOrDefaultAsync(x => x.EmployeeIqamaNo == IqamaNo.Value);
+
+                if (rider == null)
+                    return Result.Failure(new Error("NoRider", "No rider found with this Iqama", 404));
+
+                // Check if rider has this vehicle
+                activeTakenStatus = await dbcontext.RiderVehicleStatus
+                    .FirstOrDefaultAsync(s => s.VehicleNumber == VehicleNumber &&
+                                             s.EmployeeIqamaNo == IqamaNo.Value &&
+                                             s.IsActive &&
+                                             s.StatusType == VehicleStatusType.Taken);
+
+                // If rider has the vehicle, end their permission
+                if (activeTakenStatus != null)
+                {
+                    await EndPermission(activeTakenStatus);
+                    rider.VehicleNumber = null;
+                }
+            }
+            else
+            {
+                // Check if anyone has this vehicle
+                activeTakenStatus = await dbcontext.RiderVehicleStatus
+                    .FirstOrDefaultAsync(s => s.VehicleNumber == VehicleNumber &&
+                                             s.IsActive &&
+                                             s.StatusType == VehicleStatusType.Taken);
+
+                if (activeTakenStatus != null)
+                {
+                    // End the active assignment
+                    await EndPermission(activeTakenStatus);
+
+                    // Clear rider assignment
+                    var assignedRider = await dbcontext.RiderDetails
+                        .FirstOrDefaultAsync(r => r.VehicleNumber == VehicleNumber);
+                    if (assignedRider != null)
+                    {
+                        assignedRider.VehicleNumber = null;
+                    }
+                }
+            }
 
             dbcontext.RiderVehicleStatus.Add(new RiderVehicleStatus
             {
@@ -300,12 +353,10 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
                 StatusType = VehicleStatusType.Problem,
                 Reason = reason,
                 IsActive = true,
-                Permission = activeTakenStatus.Permission,
-                PermissionStartDate = activeTakenStatus.PermissionStartDate,
+                Permission = activeTakenStatus?.Permission,
+                PermissionStartDate = activeTakenStatus?.PermissionStartDate,
                 PermissionEndDate = DateTime.UtcNow.AddHours(3)
             });
-
-            rider.VehicleNumber = null;
 
             await dbcontext.SaveChangesAsync();
             await transaction.CommitAsync();
@@ -1098,20 +1149,56 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
         var errors = new List<string>();
         var warnings = new List<string>();
 
-        var rider = await dbcontext.RiderDetails
-            .FirstOrDefaultAsync(r => r.EmployeeIqamaNo == riderIqamaNo);
+        // Rider is optional for problem reports
+        RiderDetails? rider = null;
+        if (riderIqamaNo != 0)
+        {
+            rider = await dbcontext.RiderDetails
+                .FirstOrDefaultAsync(r => r.EmployeeIqamaNo == riderIqamaNo);
 
-        if (rider?.VehicleNumber != vehicleNumber)
-            errors.Add("Cannot report problem for a vehicle not assigned to you");
+            if (rider == null)
+                warnings.Add("Rider not found, but problem report can proceed");
+        }
 
-        var activeTakenStatus = await dbcontext.RiderVehicleStatus
+        // Check if vehicle already has an active problem
+        var existingProblem = await dbcontext.RiderVehicleStatus
             .AnyAsync(s => s.VehicleNumber == vehicleNumber &&
-                          s.EmployeeIqamaNo == riderIqamaNo &&
                           s.IsActive &&
-                          s.StatusType == VehicleStatusType.Taken);
+                          s.StatusType == VehicleStatusType.Problem);
 
-        if (!activeTakenStatus)
-            errors.Add("No active vehicle assignment found");
+        if (existingProblem)
+            errors.Add("Vehicle already has an active problem reported");
+
+        // Check if vehicle is stolen or broken up
+        var isStolen = await dbcontext.RiderVehicleStatus
+            .AnyAsync(s => s.VehicleNumber == vehicleNumber &&
+                          s.IsActive &&
+                          s.StatusType == VehicleStatusType.Stolen);
+
+        if (isStolen)
+            errors.Add("Cannot report problem for a stolen vehicle");
+
+        var isBreakUp = await dbcontext.RiderVehicleStatus
+            .AnyAsync(s => s.VehicleNumber == vehicleNumber &&
+                          s.IsActive &&
+                          s.StatusType == VehicleStatusType.BreakUp);
+
+        if (isBreakUp)
+            errors.Add("Cannot report problem for a broken up vehicle");
+
+        // Add warning if rider doesn't have the vehicle (this is now allowed)
+        if (rider != null && rider.VehicleNumber != vehicleNumber)
+        {
+            var activeTakenStatus = await dbcontext.RiderVehicleStatus
+                .AnyAsync(s => s.VehicleNumber == vehicleNumber &&
+                              s.IsActive &&
+                              s.StatusType == VehicleStatusType.Taken);
+
+            if (activeTakenStatus)
+                warnings.Add("Vehicle is currently assigned to another rider");
+            else
+                warnings.Add("Vehicle is not currently assigned to any rider");
+        }
 
         return new VehicleOperationValidation(
             IsValid: errors.Count == 0,
@@ -1223,24 +1310,37 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
 
     private async Task<Result> ExecuteReportProblemOperation(TempVehicleOperation operation)
     {
-        var rider = await dbcontext.RiderDetails
-            .FirstOrDefaultAsync(r => r.EmployeeIqamaNo == operation.RiderIqamaNo);
+        RiderDetails? rider = null;
 
-        if (rider == null)
-            return Result.Failure(new Error("NoRider", "Rider not found", 404));
+        // Rider is optional
+        if (operation.RiderIqamaNo != 0)
+        {
+            rider = await dbcontext.RiderDetails
+                .FirstOrDefaultAsync(r => r.EmployeeIqamaNo == operation.RiderIqamaNo);
 
+            if (rider == null)
+                return Result.Failure(new Error("NoRider", "Rider not found", 404));
+        }
+
+        // Check if there's an active taken status
         var activeStatus = await dbcontext.RiderVehicleStatus
             .FirstOrDefaultAsync(s => s.VehicleNumber == operation.VehicleNumber &&
-                                     s.EmployeeIqamaNo == operation.RiderIqamaNo &&
                                      s.IsActive &&
                                      s.StatusType == VehicleStatusType.Taken);
 
-        if (activeStatus == null)
-            return Result.Failure(new Error("NoActiveStatus", "No active assignment found", 400));
+        // If vehicle is taken, end permission and clear assignment
+        if (activeStatus != null)
+        {
+            await EndPermission(activeStatus);
 
-        // End permission
-        await EndPermission(activeStatus);
-        rider.VehicleNumber = null;
+            var assignedRider = await dbcontext.RiderDetails
+                .FirstOrDefaultAsync(r => r.VehicleNumber == operation.VehicleNumber);
+
+            if (assignedRider != null)
+            {
+                assignedRider.VehicleNumber = null;
+            }
+        }
 
         dbcontext.RiderVehicleStatus.Add(new RiderVehicleStatus
         {
@@ -1249,15 +1349,14 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
             StatusType = VehicleStatusType.Problem,
             Reason = operation.Reason,
             IsActive = true,
-            Permission = activeStatus.Permission, // Use existing permission from Taken status
-            PermissionStartDate = activeStatus.PermissionStartDate, // Keep original start date
-            PermissionEndDate = DateTime.UtcNow.AddHours(3) // End permission NOW (problem reported)
+            Permission = activeStatus?.Permission,
+            PermissionStartDate = activeStatus?.PermissionStartDate,
+            PermissionEndDate = DateTime.UtcNow.AddHours(3)
         });
 
         await dbcontext.SaveChangesAsync();
         return Result.Success();
     }
-
     #endregion
 
 

@@ -456,7 +456,7 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
         var response = shifts.Select(rs => new RiderShiftResponse(
             rs.RiderId,
             rs.WorkingId,
-            rs.Rider.Employee.NameEN,
+            rs.Rider.Employee.NameAR,
             rs.ShiftDate,
             rs.AcceptedDailyOrders,
             rs.RejectedDailyOrders,
@@ -535,7 +535,7 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
         var response = new RiderPerformanceResponse(
             riderId,
             rider.WorkingId ?? string.Empty,
-            rider.Employee.NameEN,
+            rider.Employee.NameAR,
             startDate,
             endDate,
             metrics,
@@ -576,7 +576,7 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
         var riderShifts = shifts.Select(s => new RiderShiftSummary(
             s.RiderId,
             s.WorkingId,
-            s.Rider.Employee.NameEN,
+            s.Rider.Employee.NameAR,
             s.AcceptedDailyOrders,
             s.RejectedDailyOrders,
             s.WorkingHours,
@@ -669,6 +669,7 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
                     v.Location,
                     status?.StatusType.ToString(), // This should now work correctly
                     rider?.EmployeeIqamaNo,
+                    rider?.Employee?.NameAR,
                     rider?.Employee?.NameEN,
                     status?.Timestamp // This should now have the correct timestamp
                 );
@@ -1117,6 +1118,12 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
             return Result.Failure(UserErrors.UserNotFound);
         }
 
+        var t = long.Parse(manager.UserName!);
+        var name = await context.Employees
+            .Where(e => e.IqamaNo == t)
+            .Select(e => e.NameAR)
+            .FirstOrDefaultAsync();
+
         // Create the vehicle operation request
         var operation = new TempVehicleOperation
         {
@@ -1126,7 +1133,7 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
             VehicleStatusType = VehicleStatusType.Taken,
             Reason = request.Reason ?? "Housing manager request - take vehicle",
             RequestedAt = DateTime.UtcNow.AddHours(3),
-            RequestedBy = manager.UserName ?? $"Housing Manager ({managerIqamaNo})",
+            RequestedBy = name!,
             IsResolved = false
         };
 
@@ -1188,6 +1195,12 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
             return Result.Failure(UserErrors.UserNotFound);
         }
 
+        var t = long.Parse(manager.UserName!);
+        var name = await context.Employees
+            .Where(e => e.IqamaNo == t)
+            .Select(e => e.NameAR)
+            .FirstOrDefaultAsync();
+
         // Create the vehicle operation request
         var operation = new TempVehicleOperation
         {
@@ -1197,7 +1210,7 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
             VehicleStatusType = VehicleStatusType.Returned,
             Reason = request.Reason ?? "Housing manager request - return vehicle",
             RequestedAt = DateTime.UtcNow.AddHours(3),
-            RequestedBy = manager.UserName ?? $"Housing Manager ({managerIqamaNo})",
+            RequestedBy = name!,
             IsResolved = false
         };
 
@@ -1207,6 +1220,7 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
         return Result.Success();
     }
 
+    // Update RequestReportProblemForHousingAsync method - make rider optional
     public async Task<Result> RequestReportProblemForHousingAsync(
         long managerIqamaNo,
         MemberVehicleOperationRequest request)
@@ -1218,15 +1232,20 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
         var housing = housingResult.Value;
         var employeeIqamas = housing.Employees.Select(e => e.IqamaNo).ToList();
 
-        // Verify rider belongs to this housing
-        var rider = await context.RiderDetails
-            .Include(r => r.Employee)
-            .FirstOrDefaultAsync(r => r.EmployeeIqamaNo == request.RiderIqamaNo
-                && employeeIqamas.Contains(r.EmployeeIqamaNo));
+        RiderDetails? rider = null;
 
-        if (rider is null)
+        // Rider is optional - only verify if provided (not 0)
+        if (request.RiderIqamaNo != 0)
         {
-            return Result.Failure(HousingMemberErrors.RiderNotInHousing);
+            rider = await context.RiderDetails
+                .Include(r => r.Employee)
+                .FirstOrDefaultAsync(r => r.EmployeeIqamaNo == request.RiderIqamaNo
+                    && employeeIqamas.Contains(r.EmployeeIqamaNo));
+
+            if (rider is null)
+            {
+                return Result.Failure(HousingMemberErrors.RiderNotInHousing);
+            }
         }
 
         // Verify vehicle exists
@@ -1242,12 +1261,65 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
             ));
         }
 
-        // Verify rider has this vehicle
-        if (rider.VehicleNumber != vehicle.VehicleNumber)
+        // Verify vehicle belongs to housing
+        var vehicleInHousing = await context.RiderDetails
+            .Where(r => employeeIqamas.Contains(r.EmployeeIqamaNo))
+            .AnyAsync(r => r.VehicleNumber == vehicle.VehicleNumber);
+
+        if (!vehicleInHousing && !string.IsNullOrEmpty(vehicle.Location))
+        {
+            var housingLocation = housing.Address;
+
+            if (!vehicle.Location.Contains(housing.Name, StringComparison.OrdinalIgnoreCase))
+            {
+                return Result.Failure(new Error(
+                    "VehicleNotInHousing",
+                    "This vehicle does not belong to your housing",
+                    403
+                ));
+            }
+        }
+
+        // Check if vehicle already has an active problem
+        var existingProblem = await context.RiderVehicleStatus
+            .AnyAsync(s => s.VehicleNumber == vehicle.VehicleNumber
+                && s.IsActive
+                && s.StatusType == VehicleStatusType.Problem);
+
+        if (existingProblem)
         {
             return Result.Failure(new Error(
-                "VehicleNotAssigned",
-                "This rider doesn't have this vehicle. Cannot report problem.",
+                "AlreadyReported",
+                "This vehicle already has an active problem reported",
+                400
+            ));
+        }
+
+        // Check if vehicle is stolen or broken up
+        var isStolen = await context.RiderVehicleStatus
+            .AnyAsync(s => s.VehicleNumber == vehicle.VehicleNumber
+                && s.IsActive
+                && s.StatusType == VehicleStatusType.Stolen);
+
+        if (isStolen)
+        {
+            return Result.Failure(new Error(
+                "VehicleStolen",
+                "Cannot report problem for a stolen vehicle",
+                400
+            ));
+        }
+
+        var isBreakUp = await context.RiderVehicleStatus
+            .AnyAsync(s => s.VehicleNumber == vehicle.VehicleNumber
+                && s.IsActive
+                && s.StatusType == VehicleStatusType.BreakUp);
+
+        if (isBreakUp)
+        {
+            return Result.Failure(new Error(
+                "VehicleBreakUp",
+                "Cannot report problem for a broken up vehicle",
                 400
             ));
         }
@@ -1262,7 +1334,7 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
         // Create the vehicle operation request
         var operation = new TempVehicleOperation
         {
-            RiderIqamaNo = request.RiderIqamaNo,
+            RiderIqamaNo = request.RiderIqamaNo, // Store as is, even if 0
             VehiclePlateNumber = request.VehiclePlate,
             VehicleNumber = vehicle.VehicleNumber,
             VehicleStatusType = VehicleStatusType.Problem,
@@ -1277,7 +1349,6 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
 
         return Result.Success();
     }
-
     public async Task<Result> RequestEmployeeStatusChangeForHousingAsync(
         long managerIqamaNo,
         MemberStatusChangeRequest request)
@@ -1340,12 +1411,18 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
             return Result.Failure(UserErrors.UserNotFound);
         }
 
+        var t = long.Parse(manager.UserName!);
+        var name = await context.Employees
+            .Where(e => e.IqamaNo == t)
+            .Select(e => e.NameAR)
+            .FirstOrDefaultAsync();
+
         var statusChange = new TempEmployeeStatusChange
         {
             EmployeeIqamaNo = request.EmployeeIqamaNo,
             Action = request.NewStatus.ToLower(),
             Reason = request.Reason,
-            RequestedBy = manager.UserName ?? $"Housing Manager ({managerIqamaNo})",
+            RequestedBy = name!,
             RequestedAt = DateTime.UtcNow.AddHours(3),
             IsResolved = false
         };

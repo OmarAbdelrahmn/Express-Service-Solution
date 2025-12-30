@@ -828,6 +828,8 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
     }
 
 
+
+
     public async Task<Result<PreviousDayCompanySummary>> GetPreviousDayCompanySummaryAsync(
         CancellationToken cancellationToken = default)
     {
@@ -848,7 +850,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
             // Get all shifts for the current month up to today
             var monthShifts = await _dbcontext.RiderShifts
                 .Include(s => s.Company)
-                .Where(s => s.ShiftDate >= monthStart && s.ShiftDate < today)
+                .Where(s => s.ShiftDate >= monthStart && s.ShiftDate <= yesterday)
                 .AsNoTracking()
                 .ToListAsync(cancellationToken);
 
@@ -943,7 +945,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
             var totalDayOrders = hungerDaySummary.AcceptedOrders + ketaDaySummary.AcceptedOrders;
             var totalDayShifts = hungerDaySummary.TotalShifts + ketaDaySummary.TotalShifts;
 
-            var totalMonthOrders = hungerMonthSummary.TotalOrders + ketaMonthSummary.TotalOrders;
+            var totalMonthOrders = hungerMonthSummary.AcceptedOrders + ketaMonthSummary.AcceptedOrders;
             var totalMonthShifts = hungerMonthSummary.TotalShifts + ketaMonthSummary.TotalShifts;
 
             var summary = new PreviousDayCompanySummary(
@@ -967,6 +969,10 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                 new Error($"Error generating previous day summary: {ex.Message}", "server_error", 500));
         }
     }
+
+
+
+
     public async Task<Result<PreviousDayCompanySummary>> GetHousingPreviousDayCompanySummaryAsync(
        long managerIqamaNo,
        CancellationToken cancellationToken = default)
@@ -1108,7 +1114,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
             var totalDayOrders = hungerDaySummary.AcceptedOrders + ketaDaySummary.AcceptedOrders;
             var totalDayShifts = hungerDaySummary.TotalShifts + ketaDaySummary.TotalShifts;
 
-            var totalMonthOrders = hungerMonthSummary.TotalOrders + ketaMonthSummary.TotalOrders;
+            var totalMonthOrders = hungerMonthSummary.AcceptedOrders + ketaMonthSummary.AcceptedOrders;
             var totalMonthShifts = hungerMonthSummary.TotalShifts + ketaMonthSummary.TotalShifts;
 
             var summary = new PreviousDayCompanySummary(

@@ -295,6 +295,7 @@ public record HousingVehicleResponse(
     string? CurrentStatus,
     long? AssignedRiderIqamaNo,
     string? AssignedRiderName,
+    string? AssignedRiderNameE,
     DateTime? StatusTimestamp
 );
 
