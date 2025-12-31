@@ -9,8 +9,66 @@ namespace Application.Service.Member;
 
 public interface IMemberService
 {
-    Task<Result<MemberAuthResponse>> MemberSignInAsync(MemberAuthRequest request);
+    Task<Result<HousingRiderDailyDetailReport>> GetHousingRiderDailyDetailReportAsync(
+    long managerIqamaNo,
+    string workingId,
+    DateOnly startDate,
+    DateOnly endDate,
+    CancellationToken cancellationToken = default);
 
+    Task<Result<HousingAllRidersSummaryReport>> GetHousingAllRidersSummaryReportAsync(
+        long managerIqamaNo,
+        DateOnly startDate,
+        DateOnly endDate,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<HousingRejectionReport>> GetHousingRejectionReportAsync(
+        long managerIqamaNo,
+        DateOnly startDate,
+        DateOnly endDate,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<RiderDailyDetailReport>> GetRiderDailyDetailReportAsync(
+    long managerIqamaNo,
+    string workingId,
+    DateOnly startDate,
+    DateOnly endDate);
+
+    /// <summary>
+    /// Get summary report for all riders in housing
+    /// </summary>
+    Task<Result<AllRidersSummaryReport>> GetAllRidersSummaryReportAsync(
+        long managerIqamaNo,
+        DateOnly startDate,
+        DateOnly endDate);
+
+    /// <summary>
+    /// Get rejection report for all riders in housing
+    /// </summary>
+    Task<Result<RejectionReport>> GetRejectionReportAsync(
+        long managerIqamaNo,
+        DateOnly startDate,
+        DateOnly endDate);
+
+    Task<Result<PeriodOrdersComparison>> ComparePeriodOrdersAsync(
+    long managerIqamaNo,
+    DateOnly period2Start,
+    DateOnly period2End);
+
+    /// <summary>
+    /// Get daily summary report grouped by housing (housing-specific)
+    /// </summary>
+    Task<Result<HousingDailySummary>> GetHousingDailySummaryAsync(
+        long managerIqamaNo,
+        DateOnly reportDate);
+
+    /// <summary>
+    /// Get detailed daily report with individual riders in housing
+    /// </summary>
+    Task<Result<HousingDailyDetailedReport>> GetHousingDailyDetailedReportAsync(
+        long managerIqamaNo,
+        DateOnly reportDate);
+    Task<Result<MemberAuthResponse>> MemberSignInAsync(MemberAuthRequest request);
     Task<Result<HousingDashboardResponse>> GetHousingDashboard(long managerIqamaNo);
     Task<Result<HousingDetailResponse>> GetHousingDetails(long managerIqamaNo);
 
@@ -46,7 +104,136 @@ public interface IMemberService
 
     // Member Employee Status Change
     Task<Result> RequestEmployeeStatusChangeForHousingAsync(long managerIqamaNo, MemberStatusChangeRequest request);
+
+    //special reports
+
 }
+
+public record RiderDailyDetailReport(
+    int RiderId,
+    long IqamaNo,
+    string RiderNameAR,
+    string RiderNameEN,
+    string WorkingId,
+    DateOnly StartDate,
+    DateOnly EndDate,
+    List<DailyShiftDetail> DailyDetails,
+    int TotalWorkingDays,
+    int MissingDays,
+    float TotalWorkingHours,
+    float TargetWorkingHours,
+    float HoursDifference,
+    bool IsAboveTarget,
+    int TotalOrders,
+    int TotalRejections,
+    int TotalRealRejections
+);
+
+public record DailyShiftDetail(
+    DateOnly Date,
+    bool HasShift,
+    int AcceptedOrders,
+    int RejectedOrders,
+    int RealRejectedOrders,
+    float WorkingHours,
+    float TargetHours,
+    float HoursDifference,
+    string ShiftStatus
+);
+
+// ============================================
+// ALL RIDERS SUMMARY REPORT
+// ============================================
+public record AllRidersSummaryReport(
+    DateOnly StartDate,
+    DateOnly EndDate,
+    int TotalExpectedDays,
+    List<RiderSummaryDetail> RiderSummaries,
+    SummaryTotals Totals
+);
+
+public record RiderSummaryDetail(
+    int RiderId,
+    long IqamaNo,
+    string RiderNameAR,
+    string RiderNameEN,
+    string WorkingId,
+    int ActualWorkingDays,
+    int MissingDays,
+    float TotalWorkingHours,
+    float TargetWorkingHours,
+    float HoursDifference,
+    int TotalOrders,
+    int TargetOrders,
+    int OrdersDifference
+);
+
+public record SummaryTotals(
+    int TotalRiders,
+    int TotalWorkingDays,
+    int TotalMissingDays,
+    float TotalWorkingHours,
+    float TotalTargetHours,
+    float HoursDifference,
+    int TotalOrders,
+    int TotalTargetOrders,
+    int OrdersDifference
+);
+
+// ============================================
+// REJECTION REPORT
+// ============================================
+public record RejectionReport(
+    DateOnly StartDate,
+    DateOnly EndDate,
+    int TotalDays,
+    List<RiderRejectionDetail> RiderDetails,
+    RejectionTotals Totals
+);
+
+public record RiderRejectionDetail(
+    int RiderId,
+    long IqamaNo,
+    string RiderNameAR,
+    string RiderNameEN,
+    string WorkingId,
+    int TotalShifts,
+    int TotalOrders,
+    int TargetOrders,
+    int TotalRejections,
+    int TotalRealRejections,
+    decimal RejectionRate,
+    decimal RealRejectionRate
+);
+
+public record RejectionTotals(
+    int TotalRiders,
+    int TotalShifts,
+    int TotalOrders,
+    int TotalTargetOrders,
+    int TotalRejections,
+    int TotalRealRejections,
+    decimal OverallRejectionRate,
+    decimal OverallRealRejectionRate
+);
+
+// ============================================
+// HOUSING-SPECIFIC REPORT TYPES
+// ============================================
+public record HousingRiderDailyDetailReport(
+    string HousingName,
+    RiderDailyDetailReport RiderReport
+);
+
+public record HousingAllRidersSummaryReport(
+    string HousingName,
+    AllRidersSummaryReport SummaryReport
+);
+
+public record HousingRejectionReport(
+    string HousingName,
+    RejectionReport RejectionReport
+);
 public record MemberAuthRequest(
     long IqamaNo,
     string Password

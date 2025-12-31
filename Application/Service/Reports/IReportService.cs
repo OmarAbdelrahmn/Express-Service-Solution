@@ -1,4 +1,5 @@
 ﻿using Application.Abstraction;
+using Application.Service.Member;
 using Application.Service.Riders;
 using static Application.Service.Reports.ReportService;
 
@@ -7,6 +8,42 @@ namespace Application.Service.Reports;
 
 public interface IReportService
 {
+    Task<Result<List<HousingRiderDailyDetailReport>>> GetAllHousingsRiderDailyDetailReportAsync(
+    DateOnly startDate,
+    DateOnly endDate,
+    CancellationToken cancellationToken = default);
+
+    Task<Result<List<HousingAllRidersSummaryReport>>> GetAllHousingsSummaryReportAsync(
+        DateOnly startDate,
+        DateOnly endDate,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<List<HousingRejectionReport>>> GetAllHousingsRejectionReportAsync(
+        DateOnly startDate,
+        DateOnly endDate,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<RiderDailyDetailReport>> GetRiderDailyDetailReportAsync(
+    string workingId,
+    DateOnly startDate,
+    DateOnly endDate,
+    CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Get summary report for all riders in a period
+    /// </summary>
+    Task<Result<AllRidersSummaryReport>> GetAllRidersSummaryReportAsync(
+        DateOnly startDate,
+        DateOnly endDate,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Get rejection report for all riders in a period
+    /// </summary>
+    Task<Result<RejectionReport>> GetRejectionReportAsync(
+        DateOnly startDate,
+        DateOnly endDate,
+        CancellationToken cancellationToken = default);
     Task<Result<ComprehensiveDashboard>> GetComprehensiveDashboardAsync(
        DateOnly? startDate = null,
        DateOnly? endDate = null,

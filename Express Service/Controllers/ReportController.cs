@@ -15,7 +15,179 @@ public class ReportController(IReportService service) : ControllerBase
 {
     private readonly IReportService service = service;
 
+    [HttpGet("rider-daily-detail")]
+    public async Task<IActionResult> GetRiderDailyDetail(
+        [FromQuery] string workingId,
+        [FromQuery] DateOnly startDate,
+        [FromQuery] DateOnly endDate)
+    {
+        var result = await service.GetRiderDailyDetailReportAsync(
+            workingId, startDate, endDate);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
 
+    /// <summary>
+    /// Get summary report for ALL riders across all housings
+    /// </summary>
+    [HttpGet("all-riders-summary")]
+    public async Task<IActionResult> GetAllRidersSummary(
+        [FromQuery] DateOnly startDate,
+        [FromQuery] DateOnly endDate)
+    {
+        var result = await service.GetAllRidersSummaryReportAsync(
+            startDate, endDate);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    /// <summary>
+    /// Get rejection report for ALL riders
+    /// </summary>
+    [HttpGet("rejection")]
+    public async Task<IActionResult> GetRejectionReport(
+        [FromQuery] DateOnly startDate,
+        [FromQuery] DateOnly endDate)
+    {
+        var result = await service.GetRejectionReportAsync(
+            startDate, endDate);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    // ============================================
+    // HOUSING-SPECIFIC REPORTS (Single Housing by Manager Iqama)
+    // ============================================
+
+    /// <summary>
+    /// Get detailed daily report for a rider in specific housing
+    /// </summary>
+    //[HttpGet("housing/rider-daily-detail")]
+    //public async Task<IActionResult> GetHousingRiderDailyDetail(
+    //    [FromQuery] long managerIqamaNo,
+    //    [FromQuery] string workingId,
+    //    [FromQuery] DateOnly startDate,
+    //    [FromQuery] DateOnly endDate)
+    //{
+    //    var result = await service.GetHousingRiderDailyDetailReportAsync(
+    //        managerIqamaNo, workingId, startDate, endDate);
+    //    return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    //}
+
+    ///// <summary>
+    ///// Get summary report for specific housing
+    ///// </summary>
+    //[HttpGet("housing/riders-summary")]
+    //public async Task<IActionResult> GetHousingSummary(
+    //    [FromQuery] long managerIqamaNo,
+    //    [FromQuery] DateOnly startDate,
+    //    [FromQuery] DateOnly endDate)
+    //{
+    //    var result = await service.GetHousingAllRidersSummaryReportAsync(
+    //        managerIqamaNo, startDate, endDate);
+    //    return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    //}
+
+    ///// <summary>
+    ///// Get rejection report for specific housing
+    ///// </summary>
+    //[HttpGet("housing/rejection")]
+    //public async Task<IActionResult> GetHousingRejection(
+    //    [FromQuery] long managerIqamaNo,
+    //    [FromQuery] DateOnly startDate,
+    //    [FromQuery] DateOnly endDate)
+    //{
+    //    var result = await service.GetHousingRejectionReportAsync(
+    //        managerIqamaNo, startDate, endDate);
+    //    return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    //}
+
+    // ============================================
+    // ALL HOUSINGS REPORTS (For Admin Overview)
+    // ============================================
+
+    /// <summary>
+    /// Get daily detail reports for ALL housings
+    /// </summary>
+    [HttpGet("all-housings/rider-daily-detail")]
+    public async Task<IActionResult> GetAllHousingsRiderDailyDetail(
+        [FromQuery] DateOnly startDate,
+        [FromQuery] DateOnly endDate)
+    {
+        var result = await service.GetAllHousingsRiderDailyDetailReportAsync(
+            startDate, endDate);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    /// <summary>
+    /// Get summary reports for ALL housings
+    /// </summary>
+    [HttpGet("all-housings/summary")]
+    public async Task<IActionResult> GetAllHousingsSummary(
+        [FromQuery] DateOnly startDate,
+        [FromQuery] DateOnly endDate)
+    {
+        var result = await service.GetAllHousingsSummaryReportAsync(
+            startDate, endDate);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    /// <summary>
+    /// Get rejection reports for ALL housings
+    /// </summary>
+    [HttpGet("all-housings/rejection")]
+    public async Task<IActionResult> GetAllHousingsRejection(
+        [FromQuery] DateOnly startDate,
+        [FromQuery] DateOnly endDate)
+    {
+        var result = await service.GetAllHousingsRejectionReportAsync(
+            startDate, endDate);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    // ============================================
+    // EXISTING GLOBAL REPORTS
+    // ============================================
+
+    /// <summary>
+    /// Compare orders between two periods (global)
+    /// </summary>
+    [HttpGet("compare-periods")]
+    public async Task<IActionResult> ComparePeriodOrders(
+        [FromQuery] DateOnly period2Start,
+        [FromQuery] DateOnly period2End)
+    {
+        var result = await service.ComparePeriodOrdersAsync(
+            period2Start, period2End);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    /// <summary>
+    /// Get daily summary grouped by housing (global)
+    /// </summary>
+    [HttpGet("daily-summary")]
+    public async Task<IActionResult> GetDailySummary([FromQuery] DateOnly date)
+    {
+        var result = await service.GetHousingDailySummaryAsync(date);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    /// <summary>
+    /// Get detailed daily report with all housings and riders
+    /// </summary>
+    [HttpGet("daily-detailed")]
+    public async Task<IActionResult> GetDailyDetailed([FromQuery] DateOnly date)
+    {
+        var result = await service.GetHousingDailyDetailedReportAsync(date);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    /// <summary>
+    /// Get previous day company summary (global)
+    /// </summary>
+    [HttpGet("previous-day-summary")]
+    public async Task<IActionResult> GetPreviousDaySummary()
+    {
+        var result = await service.GetPreviousDayCompanySummaryAsync();
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
 
     [HttpGet("summary")]
     [Authorize(Roles = "Master,Admin")]

@@ -1,6 +1,7 @@
 ﻿using Application.Extensions;
 using Application.Service.Empolyee;
 using Application.Service.Member;
+using k8s.Models;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
@@ -12,6 +13,119 @@ namespace Express_Service.Controllers;
 public class MemberController(IMemberService housingService) : ControllerBase
 {
     private readonly IMemberService housingService = housingService;
+
+    [HttpGet("reports/rider-daily-detail")]
+    public async Task<IActionResult> GetRiderDailyDetail(
+    [FromQuery] string workingId,
+    [FromQuery] DateOnly startDate,
+    [FromQuery] DateOnly endDate)
+    {
+        var iqamaNo = User.GetUserIqamaNo()!;
+        var result = await housingService.GetRiderDailyDetailReportAsync(
+            iqamaNo, workingId, startDate, endDate);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    /// <summary>
+    /// Get summary report for all riders in housing showing hours and orders performance
+    /// </summary>
+    [HttpGet("reports/riders-summary")]
+    public async Task<IActionResult> GetAllRidersSummary(
+        [FromQuery] DateOnly startDate,
+        [FromQuery] DateOnly endDate)
+    {
+        var iqamaNo = User.GetUserIqamaNo()!;
+        var result = await housingService.GetAllRidersSummaryReportAsync(
+            iqamaNo, startDate, endDate);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    /// <summary>
+    /// Get rejection report for all riders showing rejection rates
+    /// </summary>
+    [HttpGet("reports/rejection")]
+    public async Task<IActionResult> GetRejectionReport(
+        [FromQuery] DateOnly startDate,
+        [FromQuery] DateOnly endDate)
+    {
+        var iqamaNo = User.GetUserIqamaNo()!;
+        var result = await housingService.GetRejectionReportAsync(
+            iqamaNo, startDate, endDate);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    [HttpGet("reports/compare-periods")]
+    public async Task<IActionResult> ComparePeriodOrders(
+    [FromQuery] DateOnly period2Start,
+    [FromQuery] DateOnly period2End)
+    {
+        var iqamaNo = User.GetUserIqamaNo()!;
+        var result = await housingService.ComparePeriodOrdersAsync(
+            iqamaNo, period2Start, period2End);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    /// <summary>
+    /// Get daily summary for housing on specific date
+    /// </summary>
+    [HttpGet("reports/daily-summary")]
+    public async Task<IActionResult> GetDailySummary([FromQuery] DateOnly date)
+    {
+        var iqamaNo = User.GetUserIqamaNo()!;
+        var result = await housingService.GetHousingDailySummaryAsync(iqamaNo, date);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    /// <summary>
+    /// Get detailed daily report with individual rider performances
+    /// </summary>
+    [HttpGet("reports/daily-detailed")]
+    public async Task<IActionResult> GetDailyDetailed([FromQuery] DateOnly date)
+    {
+        var iqamaNo = User.GetUserIqamaNo()!;
+        var result = await housingService.GetHousingDailyDetailedReportAsync(iqamaNo, date);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    //[HttpGet("housing/rider-daily-detail")]
+    //public async Task<IActionResult> GetHousingRiderDailyDetail(
+    //[FromQuery] long managerIqamaNo,
+    //[FromQuery] string workingId,
+    //[FromQuery] DateOnly startDate,
+    //[FromQuery] DateOnly endDate)
+    //{
+    //    var result = await housingService.GetHousingRiderDailyDetailReportAsync(
+    //        managerIqamaNo, workingId, startDate, endDate);
+    //    return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    //}
+
+    ///// <summary>
+    ///// Get summary report for specific housing
+    ///// </summary>
+    //[HttpGet("housing/riders-summary")]
+    //public async Task<IActionResult> GetHousingSummary(
+    //    [FromQuery] long managerIqamaNo,
+    //    [FromQuery] DateOnly startDate,
+    //    [FromQuery] DateOnly endDate)
+    //{
+    //    var result = await housingService.GetHousingAllRidersSummaryReportAsync(
+    //        managerIqamaNo, startDate, endDate);
+    //    return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    //}
+
+    ///// <summary>
+    ///// Get rejection report for specific housing
+    ///// </summary>
+    //[HttpGet("housing/rejection")]
+    //public async Task<IActionResult> GetHousingRejection(
+    //    [FromQuery] long managerIqamaNo,
+    //    [FromQuery] DateOnly startDate,
+    //    [FromQuery] DateOnly endDate)
+    //{
+    //    var result = await housingService.GetHousingRejectionReportAsync(
+    //        managerIqamaNo, startDate, endDate);
+    //    return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    //}
 
     [HttpGet("dashboard")]
     public async Task<IActionResult> GetDashboard()
