@@ -21,6 +21,7 @@ public class ShiftController(IRiderShiftService service) : ControllerBase
     }
 
     [HttpGet("{WorkingId}")]
+    [ResponseCache(Duration = 300)]
     public async Task<IActionResult> GetShiftAsync(string WorkingId,[FromQuery] DateOnly shiftDate, CancellationToken cancellationToken)
     {
         var result = await service.GetShiftAsync(WorkingId , shiftDate , cancellationToken);
@@ -28,6 +29,7 @@ public class ShiftController(IRiderShiftService service) : ControllerBase
     }
 
     [HttpGet("rider/{WorkingId}")]
+    [ResponseCache(Duration = 300)]
     public async Task<IActionResult> GetShiftsByRiderAsync(string WorkingId, CancellationToken cancellationToken)
     {
         var result = await service.GetShiftsByRiderAsync(WorkingId, cancellationToken);
@@ -56,6 +58,7 @@ public class ShiftController(IRiderShiftService service) : ControllerBase
     }
 
     [HttpGet("range")]
+    [ResponseCache(Duration = 300)]
     public async Task<IActionResult> GetShiftsByDateRangeAsync([FromQuery] DateOnly startDate, [FromQuery] DateOnly endDate, CancellationToken cancellationToken)
     {
         var result = await service.GetShiftsByDateRangeAsync(startDate, endDate, cancellationToken);
@@ -75,6 +78,7 @@ public class ShiftController(IRiderShiftService service) : ControllerBase
     }
 
     [HttpDelete("date")]
+    [ResponseCache(Duration = 300)]
     public async Task<IActionResult> DeleteShiftsByDateAsync([FromQuery] DateOnly shiftDate, CancellationToken cancellationToken)
     {
         var result = await service.DeleteShiftsByDateAsync(shiftDate, cancellationToken);
@@ -82,6 +86,7 @@ public class ShiftController(IRiderShiftService service) : ControllerBase
     }
 
     [HttpDelete("range")]
+    [ResponseCache(Duration = 300)]
     public async Task<IActionResult> DeleteShiftsByDateRangeAsync([FromQuery] DateOnly startDate, [FromQuery] DateOnly endDate, CancellationToken cancellationToken)
     {
         var result = await service.DeleteShiftsByDateRangeAsync(startDate, endDate, cancellationToken);
@@ -91,6 +96,7 @@ public class ShiftController(IRiderShiftService service) : ControllerBase
     // Add these endpoints to ShiftController class
 
     [HttpGet("accepted/date")]
+    [ResponseCache(Duration = 300)]
     public async Task<IActionResult> GetAcceptedOrdersByDateAsync(
         [FromQuery] DateOnly shiftDate,
         CancellationToken cancellationToken)
@@ -100,6 +106,7 @@ public class ShiftController(IRiderShiftService service) : ControllerBase
     }
 
     [HttpGet("accepted/previous-day")]
+    [ResponseCache(Duration = 300)]
     public async Task<IActionResult> GetPreviousDayAcceptedOrdersAsync(
         CancellationToken cancellationToken)
     {
@@ -136,6 +143,7 @@ public class ShiftController(IRiderShiftService service) : ControllerBase
     }
 
     [HttpGet("comparisons")]
+    [ResponseCache(Duration = 300)]
     public async Task<IActionResult> GetPendingComparisonsAsync([FromQuery] DateOnly shiftDate, CancellationToken cancellationToken)
     {
         var result = await service.GetPendingComparisonsAsync(shiftDate, cancellationToken);

@@ -8,6 +8,7 @@ namespace Express_Service.Controllers;
 
 [Route("api/[controller]")]
 [ApiController]
+[ResponseCache(Duration = 300)]
 public class MemberController(IMemberService housingService) : ControllerBase
 {
     private readonly IMemberService housingService = housingService;
@@ -157,6 +158,7 @@ public class MemberController(IMemberService housingService) : ControllerBase
     }
 
     [HttpGet("reports/export")]
+    [ResponseCache(Duration = 0, Location = ResponseCacheLocation.None, NoStore = true)]
     public async Task<IActionResult> ExportReport(
         [FromQuery] DateOnly startDate,
         [FromQuery] DateOnly endDate)

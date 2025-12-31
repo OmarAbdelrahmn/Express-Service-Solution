@@ -40,9 +40,18 @@ public class VehicleController(IVehicleService service) : ControllerBase
 
     [HttpGet]
     [Authorize(Roles = "Master,Admin,Member")]
+    [ResponseCache(Duration = 300)]
     public async Task<IActionResult> GetAll()
     {
         var result = await _service.GetAllEmployee();
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+    [HttpGet("special")]
+    [Authorize(Roles = "Master,Admin,Member")]
+    [ResponseCache(Duration = 300)]
+    public async Task<IActionResult> GetwAll()
+    {
+        var result = await _service.GetAllVehiclesRidersAsync();
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
 
@@ -72,6 +81,7 @@ public class VehicleController(IVehicleService service) : ControllerBase
 
     [HttpGet("available")]
     [Authorize(Roles = "Master,Admin,Member")]
+    [ResponseCache(Duration = 300)]
     public async Task<IActionResult> GetAvailableVehicles()
     {
         var result = await _service.GetAvailableVehiclesAsync();
@@ -79,6 +89,7 @@ public class VehicleController(IVehicleService service) : ControllerBase
     }
     [HttpGet("stolen")]
     [Authorize(Roles = "Master,Admin,Member")]
+    [ResponseCache(Duration = 300)]
     public async Task<IActionResult> GetAvaieVehicles()
     {
         var result = await _service.GetStolenVehiclesAsync();
@@ -86,6 +97,7 @@ public class VehicleController(IVehicleService service) : ControllerBase
     }
     [HttpGet("problem")]
     [Authorize(Roles = "Master,Admin,Member")]
+    [ResponseCache(Duration = 300)]
     public async Task<IActionResult> GetAVehicles()
     {
         var result = await _service.GetProblemVehiclesAsync();
@@ -93,6 +105,7 @@ public class VehicleController(IVehicleService service) : ControllerBase
     }
     [HttpGet("breakup")]
     [Authorize(Roles = "Master,Admin,Member")]
+    [ResponseCache(Duration = 300)]
     public async Task<IActionResult> GetAvableVehicles()
     {
         var result = await _service.GetBreackupVehiclesAsync();
@@ -100,7 +113,8 @@ public class VehicleController(IVehicleService service) : ControllerBase
     }
 
     [HttpGet("taken")]
-    //[Authorize(Roles = "Master,Admin,Member")]
+    [Authorize(Roles = "Master,Admin,Member")]
+    [ResponseCache(Duration = 300)]
     public async Task<IActionResult> GetTakenVehicles([FromQuery] string statusFilter)
     {
         var result = await _service.GetUnavailableVehiclesAsync(statusFilter);
@@ -212,6 +226,7 @@ public class VehicleController(IVehicleService service) : ControllerBase
 
     [HttpGet("with-riders")]
     [Authorize(Roles = "Master,Admin,Member")]
+    [ResponseCache(Duration = 300)]
     public async Task<IActionResult> GetAllVehiclesWithRiders()
     {
         var result = await _service.GetAllVehiclesWithRidersAsync();
@@ -228,6 +243,7 @@ public class VehicleController(IVehicleService service) : ControllerBase
 
     [HttpGet("group-by-status")]
     [Authorize(Roles = "Master,Admin,Member")]
+    [ResponseCache(Duration = 300)]
     public async Task<IActionResult> GetVehiclesGroupedByStatus()
     {
         var result = await _service.GetVehiclesGroupedByStatusAsync();

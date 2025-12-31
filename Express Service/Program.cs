@@ -37,6 +37,8 @@ var app = builder.Build();
     app.UseSwaggerUI();
 //}
 
+app.UseResponseCaching();
+
 app.UseHttpsRedirection();
 
 app.UseCors("AllowFrontend");

@@ -59,6 +59,7 @@ public static class ApplicationDependencies
                 .AddSwagger()
                 .AddDatabase(configuration)
                 .AddCORS()
+                .AddCaching()
                 ;
 
         return Services;
@@ -163,6 +164,12 @@ public static class ApplicationDependencies
                         .AllowAnyHeader()
                         .AllowCredentials());
         });
+        return Services;
+    }
+    public static IServiceCollection AddCaching(this IServiceCollection Services)
+    {
+        Services.AddResponseCaching();
+        Services.AddMemoryCache();
         return Services;
     }
 

@@ -8,12 +8,14 @@ namespace Express_Service.Controllers;
 
 [Route("api/[controller]")]
 [ApiController]
+
 public class CompanyController(ICompanyService service) : ControllerBase
 {
     private readonly ICompanyService service = service;
 
     [HttpGet("{CompanyName}")]
     [Authorize(Roles = "Master,Admin")]
+    [ResponseCache(Duration = 300)]
     public async Task<IActionResult> Get(string CompanyName)
     {
         var response = await service.Get(CompanyName);
@@ -24,7 +26,6 @@ public class CompanyController(ICompanyService service) : ControllerBase
 
     [HttpPost("")]
     [Authorize(Roles = "Master")]
-
     public async Task<IActionResult> Create([FromBody] CompanyRequest Request)
     {
         var response = await service.CreateAsync(Request);
@@ -45,6 +46,7 @@ public class CompanyController(ICompanyService service) : ControllerBase
 
     [HttpGet("")]
     [Authorize(Roles = "Master,Admin")]
+    [ResponseCache(Duration = 300)]
     public async Task<IActionResult> GetAllEmployee()
     {
         var response = await service.GetAllEmployee();

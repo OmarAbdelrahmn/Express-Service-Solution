@@ -1360,7 +1360,189 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
     #endregion
 
 
+    public async Task<Result<IEnumerable<VehicleWithRiderDto>>> GetAllVehiclesRidersAsync()
+    {
+        try
+        {
+            // Get all vehicles
+            var allVehicles = await dbcontext.Vehicles.ToListAsync();
 
+            // Get vehicles with active Taken status
+            var takenVehicles = await dbcontext.Vehicles
+                .Select(v => new
+                {
+                    Vehicle = v,
+                    TakenStatus = dbcontext.RiderVehicleStatus
+                        .Where(s => s.VehicleNumber == v.VehicleNumber
+                            && s.IsActive
+                            && s.StatusType == VehicleStatusType.Taken)
+                        .FirstOrDefault()
+                })
+                .Where(v => v.TakenStatus != null)
+                .ToListAsync();
+
+            var pVehicles = await dbcontext.Vehicles
+                .Select(v => new
+                {
+                    Vehicle = v,
+                    TakenStatus = dbcontext.RiderVehicleStatus
+                        .Where(s => s.VehicleNumber == v.VehicleNumber
+                            && s.IsActive
+                            && s.StatusType == VehicleStatusType.Problem)
+                        .FirstOrDefault()
+                })
+                .Where(v => v.TakenStatus != null)
+                .ToListAsync();
+
+            var sVehicles = await dbcontext.Vehicles
+                .Select(v => new
+                {
+                    Vehicle = v,
+                    TakenStatus = dbcontext.RiderVehicleStatus
+                        .Where(s => s.VehicleNumber == v.VehicleNumber
+                            && s.IsActive
+                            && s.StatusType == VehicleStatusType.Stolen)
+                        .FirstOrDefault()
+                })
+                .Where(v => v.TakenStatus != null)
+                .ToListAsync();
+
+            var bVehicles = await dbcontext.Vehicles
+                .Select(v => new
+                {
+                    Vehicle = v,
+                    TakenStatus = dbcontext.RiderVehicleStatus
+                        .Where(s => s.VehicleNumber == v.VehicleNumber
+                            && s.IsActive
+                            && s.StatusType == VehicleStatusType.BreakUp)
+                        .FirstOrDefault()
+                })
+                .Where(v => v.TakenStatus != null)
+                .ToListAsync();
+
+            var takenVehicleNumbers = takenVehicles.Select(v => v.Vehicle.VehicleNumber).ToList();
+            var bVedshicles = bVehicles.Select(v => v.Vehicle.VehicleNumber).ToList();
+            var bVdehicles = pVehicles.Select(v => v.Vehicle.VehicleNumber).ToList();
+            var bdVehicles = sVehicles.Select(v => v.Vehicle.VehicleNumber).ToList();
+
+            // Get all remaining vehicles (not in Taken status)
+            var remainingVehicles = allVehicles
+                .Where(v => !takenVehicleNumbers.Contains(v.VehicleNumber) && !bVedshicles.Contains(v.VehicleNumber) && !bVdehicles.Contains(v.VehicleNumber) && !bdVehicles.Contains(v.VehicleNumber))
+                .Select(v => new
+                {
+                    Vehicle = v,
+                    LatestStatus = dbcontext.RiderVehicleStatus
+                        .Where(s => s.VehicleNumber == v.VehicleNumber && s.IsActive)
+                        .OrderByDescending(s => s.Timestamp)
+                        .FirstOrDefault()
+                })
+                .ToList();
+
+            var result = new List<VehicleWithRiderDto>();
+
+            // Process Taken vehicles
+            foreach (var v in takenVehicles)
+            {
+                var dto = new VehicleWithRiderDto
+                {
+                    VehicleNumber = v.Vehicle.VehicleNumber,
+                    VehicleType = v.Vehicle.VehicleType,
+                    PlateNumberA = v.Vehicle.PlateNumberA,
+                    PlateNumberE = v.Vehicle.PlateNumberE,
+                    SerialNumber = v.Vehicle.SerialNumber,
+                    Manufacturer = v.Vehicle.Manufacturer,
+                    ManufactureYear = v.Vehicle.ManufactureYear,
+                    OwnerName = v.Vehicle.OwnerName,
+                    OwnerId = v.Vehicle.OwnerId,
+                    Location = v.Vehicle.Location,
+                    LicenseExpiryDate = v.Vehicle.LicenseExpiryDate,
+                    CurrentStatus = "Taken",
+                    StatusSince = v.TakenStatus.Timestamp,
+                    IsAvailable = false,
+                    HasActiveProblem = false,
+                    IsStolen = false,
+                    IsBreakUp = false,
+                    ActiveProblemsCount = 0
+                };
+
+                // Populate rider info for Taken status
+                var rider = await dbcontext.RiderDetails
+                    .Include(r => r.Employee)
+                    .FirstOrDefaultAsync(r => r.EmployeeIqamaNo == v.TakenStatus.EmployeeIqamaNo);
+
+                if (rider != null)
+                {
+                    dto.CurrentRider = new RiderInfoDto
+                    {
+                        EmployeeIqamaNo = rider.EmployeeIqamaNo,
+                        RiderName = rider.Employee.NameAR,
+                        RiderNameE = rider.Employee.NameEN,
+                        TakenDate = v.TakenStatus.Timestamp,
+                        TakenReason = v.TakenStatus.Reason ?? "no reason"
+                    };
+                }
+
+                result.Add(dto);
+            }
+
+            // Process remaining vehicles (Returned, Available, etc.)
+            foreach (var v in remainingVehicles)
+            {
+                var currentStatus = v.LatestStatus?.StatusType.ToString() ?? "Returned";
+                var statusSince = v.LatestStatus?.Timestamp;
+
+                var dto = new VehicleWithRiderDto
+                {
+                    VehicleNumber = v.Vehicle.VehicleNumber,
+                    VehicleType = v.Vehicle.VehicleType,
+                    PlateNumberA = v.Vehicle.PlateNumberA,
+                    PlateNumberE = v.Vehicle.PlateNumberE,
+                    SerialNumber = v.Vehicle.SerialNumber,
+                    Manufacturer = v.Vehicle.Manufacturer,
+                    ManufactureYear = v.Vehicle.ManufactureYear,
+                    OwnerName = v.Vehicle.OwnerName,
+                    OwnerId = v.Vehicle.OwnerId,
+                    Location = v.Vehicle.Location,
+                    LicenseExpiryDate = v.Vehicle.LicenseExpiryDate,
+                    CurrentStatus = currentStatus,
+                    StatusSince = statusSince,
+                    IsAvailable = currentStatus == "Available",
+                    HasActiveProblem = currentStatus == "Problem",
+                    IsStolen = currentStatus == "Stolen",
+                    IsBreakUp = currentStatus == "BreakUp",
+                    ActiveProblemsCount = 0
+                };
+
+                // Populate rider info for Returned status
+                if (v.LatestStatus != null && v.LatestStatus.StatusType == VehicleStatusType.Returned)
+                {
+                    var rider = await dbcontext.RiderDetails
+                        .Include(r => r.Employee)
+                        .FirstOrDefaultAsync(r => r.EmployeeIqamaNo == v.LatestStatus.EmployeeIqamaNo);
+
+                    if (rider != null)
+                    {
+                        dto.CurrentRider = new RiderInfoDto
+                        {
+                            EmployeeIqamaNo = rider.EmployeeIqamaNo,
+                            RiderName = rider.Employee.NameAR,
+                            RiderNameE = rider.Employee.NameEN,
+                            TakenDate = v.LatestStatus.Timestamp,
+                            TakenReason = v.LatestStatus.Reason ?? "no reason"
+                        };
+                    }
+                }
+
+                result.Add(dto);
+            }
+
+            return Result.Success<IEnumerable<VehicleWithRiderDto>>(result.OrderBy(v => v.VehicleNumber));
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<IEnumerable<VehicleWithRiderDto>>(new Error($"{ex.Message}", "error", 404));
+        }
+    }
     public async Task<Result<IEnumerable<VehicleHistoryDto>>> GetVehicleHistoryAsync1(string PlateNumberA)
     {
         try

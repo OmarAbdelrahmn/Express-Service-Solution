@@ -16,6 +16,8 @@ public class AdminController(IAdminService service,IUserService service1) : Cont
 
     [HttpGet("users")]
     [Authorize(Roles = "Master")]
+    [ResponseCache(Duration = 300)]
+
     public async Task<IActionResult> GetUsers()
     {
         var users = await service.GetAllUsers();
@@ -27,6 +29,8 @@ public class AdminController(IAdminService service,IUserService service1) : Cont
 
     [HttpPost("users/role")]
     [Authorize(Roles = "Master")]
+    [ResponseCache(Duration = 300)]
+
     public async Task<IActionResult> ChangeRoles([FromBody] Rer request)
     {
         var result = await service1.ChangeRoleForUser(request.UserName, request.NewRole);
@@ -36,6 +40,8 @@ public class AdminController(IAdminService service,IUserService service1) : Cont
 
     [HttpGet("users/id/{Id}")]
     [Authorize(Roles = "Master")]
+    [ResponseCache(Duration = 300)]
+
     public async Task<IActionResult> GetUser(string Id)
     {
         var user = await service.GetUserAsync(Id);
@@ -47,6 +53,8 @@ public class AdminController(IAdminService service,IUserService service1) : Cont
     
     [HttpGet("users/name/{UserName}")]
     [Authorize(Roles = "Master")]
+    [ResponseCache(Duration = 300)]
+
     public async Task<IActionResult> GetUser2(string UserName)
     {
         var user = await service.GetUser2Async(UserName);
@@ -58,6 +66,8 @@ public class AdminController(IAdminService service,IUserService service1) : Cont
 
     [HttpPut("users/{UserName}/toggle-status")]
     [Authorize(Roles = "Master")]
+    [ResponseCache(Duration = 300)]
+
     public async Task<IActionResult> ToggleStatusAsync(string UserName)
     {
         var user = await service.ToggleStatusAsync(UserName);

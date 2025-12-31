@@ -10,6 +10,7 @@ namespace Express_Service.Controllers;
 
 [Route("api/[controller]")]
 [ApiController]
+[ResponseCache(Duration = 300)]
 public class ReportController(IReportService service) : ControllerBase
 {
     private readonly IReportService service = service;

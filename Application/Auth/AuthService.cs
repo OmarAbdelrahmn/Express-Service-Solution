@@ -40,6 +40,13 @@ public class AuthService(
         if (user.IsDisable)
             return Result.Failure<AuthResponse>(UserErrors.Disableuser);
 
+        var userRole = await manager.GetRolesAsync(user);
+
+
+        if(userRole.Contains("Member"))
+            return Result.Failure<AuthResponse>(UserErrors.InvalidCredentials);
+        
+
         var result = await signInMaganager.PasswordSignInAsync(user, request.Password, false, true);
 
         if (result.Succeeded)
