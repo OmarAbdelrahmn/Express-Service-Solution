@@ -9,7 +9,7 @@ namespace Express_Service.Controllers;
 
 [Route("api/[controller]")]
 [ApiController]
-[ResponseCache(Duration = 300)]
+//[ResponseCache(Duration = 300)]
 public class MemberController(IMemberService housingService) : ControllerBase
 {
     private readonly IMemberService housingService = housingService;
@@ -180,6 +180,34 @@ public class MemberController(IMemberService housingService) : ControllerBase
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
 
+    [HttpGet("vehicles/problems")]
+    public async Task<IActionResult> GetProblemVehicles()
+    {
+        var iqamaNo = User.GetUserIqamaNo()!;
+        var result = await housingService.GetHousingProblemVehicles(iqamaNo);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+
+    [HttpGet("rider/history")]
+    public async Task<IActionResult> GetRiderHistory(
+    [FromQuery] long riderIqamaNo)
+
+    {
+        var iqamaNo = User.GetUserIqamaNo();
+        var result = await housingService.GetRiderMonthlyHistoryForHousingAsync(iqamaNo,
+            riderIqamaNo);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+    [HttpPost("vehicles/request-fix-problem")]
+    public async Task<IActionResult> RequestFixProblem([FromBody] MemberFixVehicleRequest request)
+    {
+        var managerIqamaNo = User.GetUserIqamaNo();
+        var result = await housingService.RequestFixVehicleProblemForHousingAsync(managerIqamaNo, request);
+        return result.IsSuccess
+            ? Ok(new { message = "Vehicle fix request submitted successfully" })
+            : result.ToProblem();
+    }
     // Shifts
     [HttpGet("shifts")]
     public async Task<IActionResult> GetShifts(

@@ -232,6 +232,10 @@ public interface IReportService
     Task<Result<PreviousDayCompanySummary>> GetHousingPreviousDayCompanySummaryAsync(
         long managerIqamaNo,
     CancellationToken cancellationToken = default);
+
+    Task<Result<RiderMonthlyHistory>> GetRiderMonthlyHistoryAsync(
+    long riderIqamaNo,
+    CancellationToken cancellationToken = default);
 }
 
 public record PeriodOrdersComparison(
@@ -284,6 +288,7 @@ public record HousingDailyDetails(
 public record RiderDailyPerformance(
     int RiderId,
     string RiderName,
+    string PhoneNumber,
     string WorkingId,
     int AcceptedOrders,
     DateOnly ShiftDate

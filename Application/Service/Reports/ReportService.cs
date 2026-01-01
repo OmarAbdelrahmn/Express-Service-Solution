@@ -25,6 +25,140 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
     private const float TARGET_HOURS_PER_DAY = 9f;
     private const int TARGET_ORDERS_PER_DAY = 14;
 
+
+    // Add this method to the ReportService class
+
+    public async Task<Result<RiderMonthlyHistory>> GetRiderMonthlyHistoryAsync(
+        long riderIqamaNo,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            // Get rider details
+            var rider = await _dbcontext.RiderDetails
+                .Include(r => r.Employee)
+                .FirstOrDefaultAsync(r => r.EmployeeIqamaNo == riderIqamaNo, cancellationToken);
+
+            if (rider == null)
+            {
+                return Result.Failure<RiderMonthlyHistory>(
+                    new Error($"Rider with Iqama number {riderIqamaNo} not found", "not_found", 404));
+            }
+
+            // Get all shifts for this rider
+            var shifts = await _dbcontext.RiderShifts
+                .Where(s => s.RiderId == rider.Id)
+                .OrderBy(s => s.ShiftDate)
+                .AsNoTracking()
+                .ToListAsync(cancellationToken);
+
+            if (!shifts.Any())
+            {
+                return Result.Failure<RiderMonthlyHistory>(
+                    new Error("No shift history found for this rider", "no_data", 404));
+            }
+
+            // Calculate monthly summaries
+            var firstShiftDate = shifts.First().ShiftDate;
+            var lastShiftDate = shifts.Last().ShiftDate;
+            var today = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3));
+
+            // Use the later of last shift date or today
+            var endDate = lastShiftDate > today ? lastShiftDate : today;
+
+            var monthlyData = GenerateMonthlyShiftSummaries(shifts, firstShiftDate, endDate);
+
+            var history = new RiderMonthlyHistory(
+                IqamaNo: riderIqamaNo,
+                RiderName: rider.Employee.NameAR,
+                WorkingId: rider.WorkingId ?? "0",
+                FirstShiftDate: firstShiftDate,
+                LastShiftDate: lastShiftDate,
+                TotalMonths: monthlyData.Count,
+                MonthlyData: monthlyData
+            );
+
+            return Result.Success(history);
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<RiderMonthlyHistory>(
+                new Error($"Error generating rider monthly history: {ex.Message}", "server_error", 500));
+        }
+    }
+
+    // Helper method for generating monthly summaries
+    private List<MonthlyShiftSummary> GenerateMonthlyShiftSummaries(
+        List<RiderShift> shifts,
+        DateOnly startDate,
+        DateOnly endDate)
+    {
+        var monthlyData = new List<MonthlyShiftSummary>();
+        var currentDate = new DateOnly(startDate.Year, startDate.Month, 1);
+        var finalDate = new DateOnly(endDate.Year, endDate.Month, 1);
+
+        // Group shifts by year and month
+        var shiftsByMonth = shifts
+            .GroupBy(s => new { s.ShiftDate.Year, s.ShiftDate.Month })
+            .ToDictionary(g => (g.Key.Year, g.Key.Month), g => g.ToList());
+
+        // Iterate through each month from start to end
+        while (currentDate <= finalDate)
+        {
+            var year = currentDate.Year;
+            var month = currentDate.Month;
+
+            if (shiftsByMonth.TryGetValue((year, month), out var monthShifts))
+            {
+                var totalShifts = monthShifts.Count;
+                var completedShifts = monthShifts.Count(s => s.ShiftStatus == "Completed");
+                var incompleteShifts = monthShifts.Count(s => s.ShiftStatus == "Incomplete");
+                var failedShifts = monthShifts.Count(s => s.ShiftStatus == "Failed");
+
+                var completionRate = totalShifts > 0
+                    ? (decimal)completedShifts / totalShifts * 100
+                    : 0;
+
+                monthlyData.Add(new MonthlyShiftSummary(
+                    Year: year,
+                    Month: month,
+                    MonthName: new DateTime(year, month, 1).ToString("MMMM"),
+                    TotalShifts: totalShifts,
+                    TotalAcceptedOrders: monthShifts.Sum(s => s.AcceptedDailyOrders),
+                    TotalRejectedOrders: monthShifts.Sum(s => s.RejectedDailyOrders),
+                    TotalRealRejectedOrders: monthShifts.Sum(s => s.RealRejectedDailyOrders),
+                    TotalWorkingHours: monthShifts.Sum(s => s.WorkingHours),
+                    CompletedShifts: completedShifts,
+                    IncompleteShifts: incompleteShifts,
+                    FailedShifts: failedShifts,
+                    CompletionRate: completionRate
+                ));
+            }
+            else
+            {
+                // Month with no shifts
+                monthlyData.Add(new MonthlyShiftSummary(
+                    Year: year,
+                    Month: month,
+                    MonthName: new DateTime(year, month, 1).ToString("MMMM"),
+                    TotalShifts: 0,
+                    TotalAcceptedOrders: 0,
+                    TotalRejectedOrders: 0,
+                    TotalRealRejectedOrders: 0,
+                    TotalWorkingHours: 0,
+                    CompletedShifts: 0,
+                    IncompleteShifts: 0,
+                    FailedShifts: 0,
+                    CompletionRate: 0
+                ));
+            }
+
+            currentDate = currentDate.AddMonths(1);
+        }
+
+        return monthlyData;
+    }
+
     public async Task<Result<List<HousingRiderDailyDetailReport>>> GetAllHousingsRiderDailyDetailReportAsync(
     DateOnly startDate,
     DateOnly endDate,
@@ -826,6 +960,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                     .Select(s => new RiderDailyPerformance(
                         RiderId: s.RiderId,
                         RiderName: s.Rider?.Employee.NameAR ?? "Unknown",
+                        s.Rider?.Employee.Phone ?? "050",
                         WorkingId: s.WorkingId ?? "0",
                         AcceptedOrders: s.AcceptedDailyOrders,
                         ShiftDate: s.ShiftDate

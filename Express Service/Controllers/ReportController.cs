@@ -10,9 +10,10 @@ namespace Express_Service.Controllers;
 
 [Route("api/[controller]")]
 [ApiController]
-[ResponseCache(Duration = 300)]
+//[ResponseCache(Duration = 300)]
 public class ReportController(IReportService service) : ControllerBase
 {
+
     private readonly IReportService service = service;
 
     [HttpGet("rider-daily-detail")]
@@ -23,6 +24,17 @@ public class ReportController(IReportService service) : ControllerBase
     {
         var result = await service.GetRiderDailyDetailReportAsync(
             workingId, startDate, endDate);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+   
+    
+    [HttpGet("rider-history")]
+    public async Task<IActionResult> GetRiderHistory(
+        [FromQuery] long riderIqamaNo)
+
+    {
+        var result = await service.GetRiderMonthlyHistoryAsync(
+            riderIqamaNo);
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
 

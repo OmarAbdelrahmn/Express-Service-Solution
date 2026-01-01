@@ -24,6 +24,382 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
     private const float TARGET_HOURS_PER_DAY = 9f;
     private const int TARGET_ORDERS_PER_DAY = 14;
 
+
+    // Add this method to the MemberService class
+
+    // Add this method to the MemberService class
+    public async Task<Result<List<HousingProblemVehicleResponse>>> GetHousingProblemVehicles(long managerIqamaNo)
+    {
+        try
+        {
+            var housingResult = await GetManagedHousing(managerIqamaNo);
+            if (housingResult.IsFailure)
+                return Result.Failure<List<HousingProblemVehicleResponse>>(housingResult.Error);
+
+            var housing = housingResult.Value;
+            var employeeIqamas = housing.Employees.Select(e => e.IqamaNo).ToList();
+
+            if (!employeeIqamas.Any())
+                return Result.Success(new List<HousingProblemVehicleResponse>());
+
+            var riders = await context.RiderDetails
+                .Include(r => r.Employee)
+                .Where(r => employeeIqamas.Contains(r.EmployeeIqamaNo))
+                .ToListAsync();
+
+            var vehicleNumbers = riders
+                .Where(r => !string.IsNullOrWhiteSpace(r.VehicleNumber))
+                .Select(r => r.VehicleNumber!)
+                .Distinct()
+                .ToList();
+
+            if (!vehicleNumbers.Any())
+                return Result.Success(new List<HousingProblemVehicleResponse>());
+
+            var vehicles = await context.Vehicles
+                .Where(v => vehicleNumbers.Contains(v.VehicleNumber))
+                .ToListAsync();
+
+            var problemStatuses = await context.RiderVehicleStatus
+                .Where(rvs => vehicleNumbers.Contains(rvs.VehicleNumber)
+                    && rvs.IsActive
+                    && rvs.StatusType == VehicleStatusType.Problem)
+                .OrderByDescending(rvs => rvs.Timestamp)
+                .ToListAsync();
+
+            if (!problemStatuses.Any())
+                return Result.Success(new List<HousingProblemVehicleResponse>());
+
+            // Get employee names for those who reported problems
+            var reporterIqamas = problemStatuses
+                .Where(s => s.EmployeeIqamaNo.HasValue)
+                .Select(s => s.EmployeeIqamaNo!.Value)
+                .Distinct()
+                .ToList();
+
+            var reporters = await context.Employees
+                .Where(e => reporterIqamas.Contains(e.IqamaNo))
+                .ToDictionaryAsync(e => e.IqamaNo, e => e.NameAR);
+
+            var problemVehicleNumbers = problemStatuses
+                .Select(s => s.VehicleNumber)
+                .Distinct()
+                .ToHashSet();
+
+            var problemVehicles = vehicles
+                .Where(v => problemVehicleNumbers.Contains(v.VehicleNumber))
+                .ToList();
+
+            var statusDict = problemStatuses
+                .GroupBy(s => s.VehicleNumber)
+                .ToDictionary(
+                    g => g.Key,
+                    g => g.OrderByDescending(s => s.Timestamp).First()
+                );
+
+            var response = problemVehicles.Select(v =>
+            {
+                var status = statusDict[v.VehicleNumber];
+
+                return new HousingProblemVehicleResponse(
+                    v.VehicleNumber,
+                    v.VehicleType,
+                    v.PlateNumberA,
+                    v.PlateNumberE,
+                    v.ManufactureYear,
+                    v.Manufacturer,
+                    v.LicenseExpiryDate,
+                    v.Location,
+                    status.Reason ?? "No reason provided",
+                    status.Timestamp,
+                    status.EmployeeIqamaNo.HasValue && reporters.ContainsKey(status.EmployeeIqamaNo.Value)
+                        ? reporters[status.EmployeeIqamaNo.Value]
+                        : null,
+                    status.EmployeeIqamaNo,
+                    status.Permission,
+                    status.PermissionEndDate
+                );
+            }).ToList();
+
+            return Result.Success(response);
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<List<HousingProblemVehicleResponse>>(
+                new Error("Error", $"Error retrieving problem vehicles: {ex.Message}", 400)
+            );
+        }
+    }
+
+    public record HousingProblemVehicleResponse(
+    string VehicleNumber,
+    string VehicleType,
+    string PlateNumberA,
+    string PlateNumberE,
+    int ManufactureYear,
+    string Manufacturer,
+    DateOnly LicenseExpiryDate,
+    string Location,
+    string ProblemReason,
+    DateTime ProblemReportedAt,
+    string? ReportedByName,
+    long? ReportedByIqamaNo,
+    string? Permission,
+    DateTime? PermissionEndDate
+);
+    public async Task<Result> RequestFixVehicleProblemForHousingAsync(
+    long managerIqamaNo,
+    MemberFixVehicleRequest request)
+    {
+        var housingResult = await GetManagedHousing(managerIqamaNo);
+        if (housingResult.IsFailure)
+            return housingResult;
+
+        var housing = housingResult.Value;
+        var employeeIqamas = housing.Employees.Select(e => e.IqamaNo).ToList();
+
+        // Verify vehicle exists
+        var vehicle = await context.Vehicles
+            .FirstOrDefaultAsync(v => v.PlateNumberA == request.VehiclePlate);
+
+        if (vehicle is null)
+        {
+            return Result.Failure(new Error(
+                "VehicleNotFound",
+                "Vehicle not found",
+                404
+            ));
+        }
+
+        // Verify vehicle belongs to housing
+        var vehicleInHousing = await context.RiderDetails
+            .Where(r => employeeIqamas.Contains(r.EmployeeIqamaNo))
+            .AnyAsync(r => r.VehicleNumber == vehicle.VehicleNumber);
+
+        if (!vehicleInHousing && !string.IsNullOrEmpty(vehicle.Location))
+        {
+            if (!vehicle.Location.Contains(housing.Name, StringComparison.OrdinalIgnoreCase))
+            {
+                return Result.Failure(new Error(
+                    "VehicleNotInHousing",
+                    "This vehicle does not belong to your housing",
+                    403
+                ));
+            }
+        }
+
+        // Check if vehicle has an active problem
+        var activeProblem = await context.RiderVehicleStatus
+            .FirstOrDefaultAsync(s => s.VehicleNumber == vehicle.VehicleNumber
+                && s.IsActive
+                && s.StatusType == VehicleStatusType.Problem);
+
+        if (activeProblem is null)
+        {
+            return Result.Failure(new Error(
+                "NoProblemFound",
+                "This vehicle does not have an active problem to fix",
+                400
+            ));
+        }
+
+        // Verify vehicle is not currently assigned to any rider
+        var vehicleAssigned = await context.RiderDetails
+            .AnyAsync(r => r.VehicleNumber == vehicle.VehicleNumber
+                && employeeIqamas.Contains(r.EmployeeIqamaNo));
+
+        if (vehicleAssigned)
+        {
+            return Result.Failure(new Error(
+                "VehicleStillAssigned",
+                "Vehicle is still assigned to a rider. Please return the vehicle before fixing the problem.",
+                400
+            ));
+        }
+
+        // Check if there's already a pending fix request for this vehicle
+        var existingFixRequest = await context.TempVehicleOperations
+            .AnyAsync(t => t.VehicleNumber == vehicle.VehicleNumber
+                && !t.IsResolved
+                && t.VehicleStatusType == VehicleStatusType.Returned);
+
+        if (existingFixRequest)
+        {
+            return Result.Failure(new Error(
+                "FixRequestPending",
+                "There is already a pending fix request for this vehicle",
+                400
+            ));
+        }
+
+        // Get the username of the manager
+        var manager = await userManager.FindByNameAsync(managerIqamaNo.ToString());
+        if (manager is null)
+        {
+            return Result.Failure(UserErrors.UserNotFound);
+        }
+
+        var t = long.Parse(manager.UserName!);
+        var name = await context.Employees
+            .Where(e => e.IqamaNo == t)
+            .Select(e => e.NameAR)
+            .FirstOrDefaultAsync();
+
+        // Create the fix vehicle operation request (no rider needed)
+        var operation = new TempVehicleOperation
+        {
+            RiderIqamaNo = 0, // No rider - vehicle was returned when problem was reported
+            VehiclePlateNumber = request.VehiclePlate,
+            VehicleNumber = vehicle.VehicleNumber,
+            VehicleStatusType = VehicleStatusType.Returned, // Request to mark as available (fixed)
+            Reason =  $"Problem fixed - Original issue: {activeProblem.Reason}",
+            RequestedAt = DateTime.UtcNow.AddHours(3),
+            RequestedBy = name!,
+            IsResolved = false
+        };
+
+        await context.TempVehicleOperations.AddAsync(operation);
+        await context.SaveChangesAsync();
+
+        return Result.Success();
+    }
+    public async Task<Result<RiderMonthlyHistory>> GetRiderMonthlyHistoryForHousingAsync(
+        long managerIqamaNo,
+        long riderIqamaNo,
+        CancellationToken cancellationToken = default)
+    {
+        // Verify housing manager
+        var housingResult = await GetManagedHousing(managerIqamaNo);
+        if (housingResult.IsFailure)
+            return Result.Failure<RiderMonthlyHistory>(housingResult.Error);
+
+        var housing = housingResult.Value;
+        var employeeIqamas = housing.Employees.Select(e => e.IqamaNo).ToList();
+
+        // Verify rider belongs to this housing
+        if (!employeeIqamas.Contains(riderIqamaNo))
+        {
+            return Result.Failure<RiderMonthlyHistory>(
+                HousingMemberErrors.RiderNotInHousing);
+        }
+
+        // Get rider details
+        var rider = await context.RiderDetails
+            .Include(r => r.Employee)
+            .FirstOrDefaultAsync(r => r.EmployeeIqamaNo == riderIqamaNo, cancellationToken);
+
+        if (rider == null)
+        {
+            return Result.Failure<RiderMonthlyHistory>(
+                new Error("Rider not found", "not_found", 404));
+        }
+
+        // Get all shifts for this rider
+        var shifts = await context.RiderShifts
+            .Where(s => s.RiderId == rider.Id)
+            .OrderBy(s => s.ShiftDate)
+            .ToListAsync(cancellationToken);
+
+        if (!shifts.Any())
+        {
+            return Result.Failure<RiderMonthlyHistory>(
+                new Error("No shift history found for this rider", "no_data", 404));
+        }
+
+        // Calculate monthly summaries
+        var firstShiftDate = shifts.First().ShiftDate;
+        var lastShiftDate = shifts.Last().ShiftDate;
+        var today = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3));
+
+        // Use the later of last shift date or today
+        var endDate = lastShiftDate > today ? lastShiftDate : today;
+
+        var monthlyData = GenerateMonthlyShiftSummaries(shifts, firstShiftDate, endDate);
+
+        var history = new RiderMonthlyHistory(
+            IqamaNo: riderIqamaNo,
+            RiderName: rider.Employee.NameAR,
+            WorkingId: rider.WorkingId ?? "0",
+            FirstShiftDate: firstShiftDate,
+            LastShiftDate: lastShiftDate,
+            TotalMonths: monthlyData.Count,
+            MonthlyData: monthlyData
+        );
+
+        return Result.Success(history);
+    }
+
+    // Helper method for generating monthly summaries
+    private List<MonthlyShiftSummary> GenerateMonthlyShiftSummaries(
+        List<RiderShift> shifts,
+        DateOnly startDate,
+        DateOnly endDate)
+    {
+        var monthlyData = new List<MonthlyShiftSummary>();
+        var currentDate = new DateOnly(startDate.Year, startDate.Month, 1);
+        var finalDate = new DateOnly(endDate.Year, endDate.Month, 1);
+
+        // Group shifts by year and month
+        var shiftsByMonth = shifts
+            .GroupBy(s => new { s.ShiftDate.Year, s.ShiftDate.Month })
+            .ToDictionary(g => (g.Key.Year, g.Key.Month), g => g.ToList());
+
+        // Iterate through each month from start to end
+        while (currentDate <= finalDate)
+        {
+            var year = currentDate.Year;
+            var month = currentDate.Month;
+
+            if (shiftsByMonth.TryGetValue((year, month), out var monthShifts))
+            {
+                var totalShifts = monthShifts.Count;
+                var completedShifts = monthShifts.Count(s => s.ShiftStatus == "Completed");
+                var incompleteShifts = monthShifts.Count(s => s.ShiftStatus == "Incomplete");
+                var failedShifts = monthShifts.Count(s => s.ShiftStatus == "Failed");
+
+                var completionRate = totalShifts > 0
+                    ? (decimal)completedShifts / totalShifts * 100
+                    : 0;
+
+                monthlyData.Add(new MonthlyShiftSummary(
+                    Year: year,
+                    Month: month,
+                    MonthName: new DateTime(year, month, 1).ToString("MMMM"),
+                    TotalShifts: totalShifts,
+                    TotalAcceptedOrders: monthShifts.Sum(s => s.AcceptedDailyOrders),
+                    TotalRejectedOrders: monthShifts.Sum(s => s.RejectedDailyOrders),
+                    TotalRealRejectedOrders: monthShifts.Sum(s => s.RealRejectedDailyOrders),
+                    TotalWorkingHours: monthShifts.Sum(s => s.WorkingHours),
+                    CompletedShifts: completedShifts,
+                    IncompleteShifts: incompleteShifts,
+                    FailedShifts: failedShifts,
+                    CompletionRate: completionRate
+                ));
+            }
+            else
+            {
+                // Month with no shifts
+                monthlyData.Add(new MonthlyShiftSummary(
+                    Year: year,
+                    Month: month,
+                    MonthName: new DateTime(year, month, 1).ToString("MMMM"),
+                    TotalShifts: 0,
+                    TotalAcceptedOrders: 0,
+                    TotalRejectedOrders: 0,
+                    TotalRealRejectedOrders: 0,
+                    TotalWorkingHours: 0,
+                    CompletedShifts: 0,
+                    IncompleteShifts: 0,
+                    FailedShifts: 0,
+                    CompletionRate: 0
+                ));
+            }
+
+            currentDate = currentDate.AddMonths(1);
+        }
+
+        return monthlyData;
+    }
     public async Task<Result<RiderDailyDetailReport>> GetRiderDailyDetailReportAsync(
     long managerIqamaNo,
     string workingId,
@@ -501,11 +877,12 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
             .Select(s => new RiderDailyPerformance(
                 RiderId: s.RiderId,
                 RiderName: s.Rider?.Employee.NameAR ?? "Unknown",
+                s.Rider?.Employee.Phone ?? "050",
                 WorkingId: s.WorkingId ?? "0",
                 AcceptedOrders: s.AcceptedDailyOrders,
                 ShiftDate: s.ShiftDate
             ))
-            .OrderByDescending(r => r.AcceptedOrders)
+            .OrderBy(r => r.AcceptedOrders)
             .ToList();
 
         var details = new HousingDailyDetails(
@@ -909,6 +1286,7 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
         // Get statistics
         var employeeIqamas = housing.Employees.Select(e => e.IqamaNo).ToList();
 
+        // OPTIMIZATION: Load riders once with all related data
         var riders = await context.RiderDetails
             .Include(r => r.Employee)
             .Include(r => r.Company)
@@ -918,57 +1296,113 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
         var activeRiders = riders.Count(r => r.Employee.Status.ToLower() == "enable");
         var inactiveRiders = riders.Count - activeRiders;
 
-        var vehicles = await context.Vehicles
-            .Where(v => riders.Select(r => r.VehicleNumber).Contains(v.VehicleNumber))
-            .ToListAsync();
+        // FIX: Process in batches to avoid SQL parameter limit (2100 max)
+        const int batchSize = 500;
+        var riderIds = riders.Select(r => r.Id).ToList();
+        var vehicleNumbers = riders.Select(r => r.VehicleNumber).Distinct().ToList();
+        var riderIqamas = riders.Select(r => r.EmployeeIqamaNo).ToList();
 
-        var vehiclesInUse = await context.RiderVehicleStatus
-            .Where(rvs => vehicles.Select(v => v.VehicleNumber).Contains(rvs.VehicleNumber)
-                && rvs.IsActive
-                && rvs.StatusType == VehicleStatusType.Taken)
-            .CountAsync();
+        // Get vehicles
+        var vehicles = new List<Vehicle>();
+        for (int i = 0; i < vehicleNumbers.Count; i += batchSize)
+        {
+            var batch = vehicleNumbers.Skip(i).Take(batchSize).ToList();
+            var batchVehicles = await context.Vehicles
+                .Where(v => batch.Contains(v.VehicleNumber))
+                .ToListAsync();
+            vehicles.AddRange(batchVehicles);
+        }
 
-        var pendingVehicleOps = await context.TempVehicleOperations
-            .Where(t => !t.IsResolved && riders.Select(r => r.EmployeeIqamaNo).Contains(t.RiderIqamaNo))
-            .CountAsync();
+        // Get vehicles in use
+        var vehiclesInUse = 0;
+        var vehicleNumbersList = vehicles.Select(v => v.VehicleNumber).ToList();
+        for (int i = 0; i < vehicleNumbersList.Count; i += batchSize)
+        {
+            var batch = vehicleNumbersList.Skip(i).Take(batchSize).ToList();
+            var count = await context.RiderVehicleStatus
+                .Where(rvs => batch.Contains(rvs.VehicleNumber)
+                    && rvs.IsActive
+                    && rvs.StatusType == VehicleStatusType.Taken)
+                .CountAsync();
+            vehiclesInUse += count;
+        }
 
-        var pendingEmpUpdates = await context.TempEmployeeUpdates
-            .Where(t => !t.IsResolved && employeeIqamas.Contains(t.IqamaNo))
-            .CountAsync();
+        // Get pending vehicle operations
+        var pendingVehicleOps = 0;
+        for (int i = 0; i < riderIqamas.Count; i += batchSize)
+        {
+            var batch = riderIqamas.Skip(i).Take(batchSize).ToList();
+            var count = await context.TempVehicleOperations
+                .Where(t => !t.IsResolved && batch.Contains(t.RiderIqamaNo))
+                .CountAsync();
+            pendingVehicleOps += count;
+        }
 
-        var pendingStatusChanges = await context.TempEmployeeStatusChanges
-            .Where(t => !t.IsResolved && employeeIqamas.Contains(t.EmployeeIqamaNo))
-            .CountAsync();
+        // Get pending employee updates
+        var pendingEmpUpdates = 0;
+        for (int i = 0; i < employeeIqamas.Count; i += batchSize)
+        {
+            var batch = employeeIqamas.Skip(i).Take(batchSize).ToList();
+            var count = await context.TempEmployeeUpdates
+                .Where(t => !t.IsResolved && batch.Contains(t.IqamaNo))
+                .CountAsync();
+            pendingEmpUpdates += count;
+        }
 
-        var activeDisabilities = await context.Set<HungerDisability>()
-            .Where(h => riders.Select(r => r.Id).Contains(h.ActualRiderId)
-                && h.ShiftDate >= today)
-            .CountAsync();
+        // Get pending status changes
+        var pendingStatusChanges = 0;
+        for (int i = 0; i < employeeIqamas.Count; i += batchSize)
+        {
+            var batch = employeeIqamas.Skip(i).Take(batchSize).ToList();
+            var count = await context.TempEmployeeStatusChanges
+                .Where(t => !t.IsResolved && batch.Contains(t.EmployeeIqamaNo))
+                .CountAsync();
+            pendingStatusChanges += count;
+        }
 
-        var todayShifts = await context.RiderShifts
-            .Where(rs => riders.Select(r => r.Id).Contains(rs.RiderId)
-                && rs.ShiftDate == today)
-            .CountAsync();
+        // Get active disabilities
+        var activeDisabilities = 0;
+        for (int i = 0; i < riderIds.Count; i += batchSize)
+        {
+            var batch = riderIds.Skip(i).Take(batchSize).ToList();
+            var count = await context.Set<HungerDisability>()
+                .Where(h => batch.Contains(h.ActualRiderId) && h.ShiftDate >= today)
+                .CountAsync();
+            activeDisabilities += count;
+        }
 
-        // Recent activities
+        // Get today's shifts
+        var todayShifts = 0;
+        for (int i = 0; i < riderIds.Count; i += batchSize)
+        {
+            var batch = riderIds.Skip(i).Take(batchSize).ToList();
+            var count = await context.RiderShifts
+                .Where(rs => batch.Contains(rs.RiderId) && rs.ShiftDate == today)
+                .CountAsync();
+            todayShifts += count;
+        }
+
+        // Get recent activities
         var recentActivities = new List<RecentActivityItem>();
-
-        var recentVehicleOps = await context.TempVehicleOperations
-            .Where(t => riders.Select(r => r.EmployeeIqamaNo).Contains(t.RiderIqamaNo))
-            .OrderByDescending(t => t.RequestedAt)
-            .Take(5)
-            .Select(t => new RecentActivityItem(
-                "VehicleOperation",
-                $"Vehicle operation request: {t.VehicleStatusType}",
-                t.RequestedAt
-            ))
-            .ToListAsync();
-
-        recentActivities.AddRange(recentVehicleOps);
+        for (int i = 0; i < riderIqamas.Count; i += batchSize)
+        {
+            var batch = riderIqamas.Skip(i).Take(batchSize).ToList();
+            var batchActivities = await context.TempVehicleOperations
+                .Where(t => batch.Contains(t.RiderIqamaNo))
+                .OrderByDescending(t => t.RequestedAt)
+                .Take(5)
+                .Select(t => new RecentActivityItem(
+                    "VehicleOperation",
+                    $"Vehicle operation request: {t.VehicleStatusType}",
+                    t.RequestedAt
+                ))
+                .ToListAsync();
+            recentActivities.AddRange(batchActivities);
+        }
 
         var total = housing.Employees.Where(e => e.Status.ToLower() != "vacation").ToList().Count;
-
         var inca = total - activeRiders;
+
         var stats = new Statistics(
             total,
             activeRiders,
@@ -990,20 +1424,21 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
             housing.Capacity - housing.Employees.Count
         );
 
+        // FIX: Check if summary report succeeded before accessing Value
         var summaryReport = await reportService.GetHousingPreviousDayCompanySummaryAsync(managerIqamaNo);
 
+        // If summary fails, use null (frontend already handles this with ?. operators)
+        var summaryValue = summaryReport.IsSuccess ? summaryReport.Value : null;
 
         var response = new HousingDashboardResponse(
             housingInfo,
             stats,
             recentActivities.OrderByDescending(a => a.Timestamp).Take(10).ToList(),
-            summaryReport.Value
+            summaryValue
         );
-
 
         return Result.Success(response);
     }
-
     public async Task<Result<HousingDetailResponse>> GetHousingDetails(long managerIqamaNo)
     {
         var housingResult = await GetManagedHousing(managerIqamaNo);
@@ -2211,3 +2646,9 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
         return Result.Success();
     }
 }
+
+// Add to IMemberService.cs
+public record MemberFixVehicleRequest(
+    string VehiclePlate,
+    string? FixDescription = null
+);

@@ -4,11 +4,14 @@ using Application.Service.Riders;
 using System;
 using System.Collections.Generic;
 using System.Text;
+using static Application.Service.Member.MemberService;
 
 namespace Application.Service.Member;
 
 public interface IMemberService
 {
+    Task<Result> RequestFixVehicleProblemForHousingAsync(long managerIqamaNo, MemberFixVehicleRequest request);
+    Task<Result<List<HousingProblemVehicleResponse>>> GetHousingProblemVehicles(long managerIqamaNo);
     Task<Result<HousingRiderDailyDetailReport>> GetHousingRiderDailyDetailReportAsync(
     long managerIqamaNo,
     string workingId,
@@ -106,9 +109,38 @@ public interface IMemberService
     Task<Result> RequestEmployeeStatusChangeForHousingAsync(long managerIqamaNo, MemberStatusChangeRequest request);
 
     //special reports
+    Task<Result<RiderMonthlyHistory>> GetRiderMonthlyHistoryForHousingAsync(
+    long managerIqamaNo,
+    long riderIqamaNo,
+    CancellationToken cancellationToken = default);
 
 }
+// Add these records at the end of the IMemberService.cs file
 
+public record RiderMonthlyHistory(
+    long IqamaNo,
+    string RiderName,
+    string WorkingId,
+    DateOnly FirstShiftDate,
+    DateOnly LastShiftDate,
+    int TotalMonths,
+    List<MonthlyShiftSummary> MonthlyData
+);
+
+public record MonthlyShiftSummary(
+    int Year,
+    int Month,
+    string MonthName,
+    int TotalShifts,
+    int TotalAcceptedOrders,
+    int TotalRejectedOrders,
+    int TotalRealRejectedOrders,
+    float TotalWorkingHours,
+    int CompletedShifts,
+    int IncompleteShifts,
+    int FailedShifts,
+    decimal CompletionRate
+);
 public record RiderDailyDetailReport(
     int RiderId,
     long IqamaNo,
