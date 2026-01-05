@@ -10,4 +10,6 @@ public interface IAdminService
     Task<Result<UserResponses>> GetUserAsync(string Id);
     Task<Result<UserResponses>> GetUser2Async(string UserName);
     Task<Result> ToggleStatusAsync(string UserName);
+    Task<Result> DeletaUserAsync(string UserName);
+
 }

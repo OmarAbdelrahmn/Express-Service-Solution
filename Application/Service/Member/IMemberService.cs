@@ -77,7 +77,7 @@ public interface IMemberService
 
     // Employees & Riders
     Task<Result<List<HousingEmployeeResponse>>> GetHousingEmployees(long managerIqamaNo);
-    Task<Result<List<HousingRiderResponse>>> GetHousingRiders(long managerIqamaNo);
+    Task<Result<List<HousingRiderResponses>>> GetHousingRiders(long managerIqamaNo);
     Task<Result<EmployeeDetailResponse>> GetEmployeeDetails(long managerIqamaNo, long employeeIqamaNo);
 
     // Shifts & Performance
@@ -435,6 +435,21 @@ public record HousingRiderResponse(
     DateTime CreatedAt
 );
 
+public record HousingRiderResponses(
+    int RiderId,
+    long EmployeeIqamaNo,
+    string NameEN,
+    string NameAR,
+    string? WorkingId,
+    int CompanyId,
+    string CompanyName,
+    string? VehicleNumber,
+    string? VehiclePlate,
+    string Status,
+    string Phone,
+    DateTime CreatedAt,
+    string? StatusChangeReason  // NEW: Reason from TempEmployeeStatusChange if status is not "enable"
+);
 // Shifts
 public record RiderShiftResponse(
     int RiderId,

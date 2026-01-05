@@ -36,7 +36,7 @@ public class HousingController(IHousingService service , IEmployeeService servic
 
     [HttpGet("")]
     [Authorize(Roles = "Master,Admin,Member")]
-    [ResponseCache(Duration = 300)]
+ 
     public async Task<IActionResult> GetAll()
     {
         var response = await service.GetAllEmployee();
@@ -47,7 +47,7 @@ public class HousingController(IHousingService service , IEmployeeService servic
 
     [HttpGet("{Name}")]
     [Authorize(Roles = "Master,Admin,Member")]
-    [ResponseCache(Duration = 300)]
+ 
     public async Task<IActionResult> Get(string Name)
     {
         var response = await service.Get(Name);
@@ -58,7 +58,7 @@ public class HousingController(IHousingService service , IEmployeeService servic
 
     [HttpGet("manager/{ManagerIqamaNo}")]
     [Authorize(Roles = "Master,Admin,Member")]
-    [ResponseCache(Duration = 300)]
+ 
     public async Task<IActionResult> GetWithManagerIqama(int ManagerIqamaNo)
     {
         var response = await service.GetWithManagerIqama(ManagerIqamaNo);

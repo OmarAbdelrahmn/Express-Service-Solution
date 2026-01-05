@@ -35,7 +35,7 @@ public class HungerController(IHungerDisabilityService service) : ControllerBase
 
 
     [HttpGet("date-range")]
-    [ResponseCache(Duration = 300)]
+ 
     public async Task<IActionResult> GetReportsByDateRange(
         [FromQuery] DateOnly startDate,
         [FromQuery] DateOnly endDate,
@@ -46,7 +46,7 @@ public class HungerController(IHungerDisabilityService service) : ControllerBase
     }
 
     [HttpGet("month")]
-    [ResponseCache(Duration = 300)]
+ 
     public async Task<IActionResult> GetReportsByMonth(
         [FromQuery]int year,
         [FromQuery]int month,
@@ -61,7 +61,7 @@ public class HungerController(IHungerDisabilityService service) : ControllerBase
 
 
     [HttpGet("year")]
-    [ResponseCache(Duration = 300)]
+ 
     public async Task<IActionResult> GetReportsByYear(
         [FromQuery]int year,
         CancellationToken cancellationToken = default)
@@ -75,7 +75,7 @@ public class HungerController(IHungerDisabilityService service) : ControllerBase
 
  
     [HttpGet("rider/{actualWorkingId}")]
-    [ResponseCache(Duration = 300)]
+ 
     public async Task<IActionResult> GetReportByRider(
         string actualWorkingId,
         [FromQuery] DateOnly startDate,
@@ -90,7 +90,7 @@ public class HungerController(IHungerDisabilityService service) : ControllerBase
 
 
     [HttpGet("summary")]
-    [ResponseCache(Duration = 300)]
+ 
     public async Task<IActionResult> GetOverallSummary(
         [FromQuery] DateOnly startDate,
         [FromQuery] DateOnly endDate,

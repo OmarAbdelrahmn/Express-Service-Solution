@@ -13,7 +13,7 @@ public class SubstitutionController(IRiderSub service) : ControllerBase
     private readonly IRiderSub service = service;
 
     [HttpGet("")]
-    [ResponseCache(Duration = 300)]
+ 
     public async Task<IActionResult> GetAll()
     {
         var result = await service.GetAllSubstitutions();
@@ -23,7 +23,7 @@ public class SubstitutionController(IRiderSub service) : ControllerBase
     }
 
     [HttpGet("active")]
-    [ResponseCache(Duration = 300)]
+ 
     public async Task<IActionResult> GetActive()
     {
         var result = await service.GetActiveSubstitutions();
@@ -32,7 +32,7 @@ public class SubstitutionController(IRiderSub service) : ControllerBase
             : result.ToProblem();
     }
     [HttpGet("inactive")]
-    [ResponseCache(Duration = 300)]
+ 
     public async Task<IActionResult> GetInactive()
     {
         var result = await service.GetInactiveSubstitutions();

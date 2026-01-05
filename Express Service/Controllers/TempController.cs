@@ -17,7 +17,7 @@ public class TempController(ITemp service, IEmployeeService service1, IVehicleSe
 
     [HttpGet("employees")]
     [Authorize(Roles = "Master,Admin")]
-    [ResponseCache(Duration = 300)]
+ 
     public async Task<IActionResult> GetTempData()
     {
         var result = await service.GetPendingUpdatesAsync();
@@ -62,7 +62,7 @@ public class TempController(ITemp service, IEmployeeService service1, IVehicleSe
 
     [HttpGet("employee-pending-status-changes")]
     [Authorize(Roles = "Master,Admin")]
-    [ResponseCache(Duration = 300)]
+ 
     public async Task<IActionResult> GetPendingStatusChanges()
     {
         var response = await service1.GetPendingStatusChangesAsync();
@@ -121,7 +121,7 @@ public class TempController(ITemp service, IEmployeeService service1, IVehicleSe
 
     [HttpGet("vehicles")]
     [Authorize(Roles = "Master,Admin")]
-    [ResponseCache(Duration = 300)]
+ 
     public async Task<IActionResult> getv()
     {
         var response = await service2.GetPendingOperationsAsync();

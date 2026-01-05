@@ -16,7 +16,7 @@ public class RiderController(IRiderService service) : ControllerBase
     
     [HttpGet("")]
     [Authorize(Roles = "Master,Admin,Member")]
-    [ResponseCache(Duration = 300)]
+ 
     public async Task<IActionResult> GetAllRiders()
     {
         var result = await service.GetAllEmployee();
@@ -25,7 +25,7 @@ public class RiderController(IRiderService service) : ControllerBase
             ? Ok(result.Value) : result.ToProblem();
     }
     [HttpGet("statistics")]
-    [ResponseCache(Duration = 300)]
+ 
     public async Task<IActionResult> GetEmployeeStatistics()
     {
         var result = await service.GetEmployeeStatistics();
@@ -36,7 +36,7 @@ public class RiderController(IRiderService service) : ControllerBase
 
     [HttpGet("inactive")]
     [Authorize(Roles = "Master,Admin,Member")]
-    [ResponseCache(Duration = 300)]
+ 
     public async Task<IActionResult> GetAlRiders()
     {
         var result = await service.GetAllEmployeeNO();
@@ -117,7 +117,7 @@ public class RiderController(IRiderService service) : ControllerBase
 
     [HttpGet("smart-search")]
     [Authorize(Roles = "Master,Admin,Member")]
-    [ResponseCache(Duration = 300)]
+ 
 
     public async Task<IActionResult> SmartSearch([FromQuery] string keyword)
     {
@@ -129,7 +129,7 @@ public class RiderController(IRiderService service) : ControllerBase
 
     [HttpGet("search")]
     [Authorize(Roles = "Master,Admin,Member")]
-    [ResponseCache(Duration = 300)]
+ 
     public async Task<IActionResult> Search([FromQuery] EmployeeFilterr Request)
     {
         var response = await service.Filter(Request);

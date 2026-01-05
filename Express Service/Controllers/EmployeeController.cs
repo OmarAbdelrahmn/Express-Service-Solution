@@ -71,7 +71,7 @@ public class EmployeeController(IEmployeeService service) : ControllerBase
 
     [HttpGet("date-range")]
     [Authorize(Roles = "Master,Admin")]
-    [ResponseCache(Duration = 300)]
+ 
     public async Task<IActionResult> GetStatusChangesByDateRange(
        [FromQuery] DateTime startDate,
        [FromQuery] DateTime endDate)
@@ -97,7 +97,7 @@ public class EmployeeController(IEmployeeService service) : ControllerBase
     }
     [HttpGet("statistics")]
     [Authorize(Roles = "Master,Admin")]
-    [ResponseCache(Duration = 300)]
+ 
     public async Task<IActionResult> GetStatistics()
     {
         var result = await service.GetStatusChangeStatisticsAsync();
@@ -141,7 +141,7 @@ public class EmployeeController(IEmployeeService service) : ControllerBase
 
     [HttpGet("search")]
     [Authorize(Roles = "Master,Admin,Member")]
-    [ResponseCache(Duration = 300)]
+ 
     public async Task<IActionResult> Search([FromQuery] EmployeeFilter Request)
     {
         var response = await service.Filter(Request);
@@ -152,7 +152,7 @@ public class EmployeeController(IEmployeeService service) : ControllerBase
 
     [HttpGet("multi-search")]
     [Authorize(Roles = "Master,Admin,Member")]
-    [ResponseCache(Duration = 300)]
+ 
     public async Task<IActionResult> Filter([FromQuery] EmployeeFilter2 filter)
     {
         var response = await service.Filter2(filter);
@@ -163,7 +163,7 @@ public class EmployeeController(IEmployeeService service) : ControllerBase
 
     [HttpGet("smart-search")]
     [Authorize(Roles = "Master,Admin,Member")]
-    [ResponseCache(Duration = 300)]
+ 
     public async Task<IActionResult> Search([FromQuery] string q)
     {
         if (string.IsNullOrWhiteSpace(q))
@@ -177,7 +177,7 @@ public class EmployeeController(IEmployeeService service) : ControllerBase
 
     [HttpGet("deleted")]
     [Authorize(Roles = "Master,Admin,Member")]
-    [ResponseCache(Duration = 300)]
+ 
     public async Task<IActionResult> GetDeletedEmployees()
     {
         var response = await service.GetAlldeletedEmployee();

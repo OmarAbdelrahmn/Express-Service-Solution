@@ -44,7 +44,21 @@ public class AdminService(
                       c.SelectMany(x => x.roles)
                       ))
                   .ToListAsync();
+    public async Task<Result> DeletaUserAsync(string UserName)
+    {
+        if (await manager.FindByNameAsync(UserName) is not { } user)
+            return Result.Failure(UserErrors.UserNotFound);
 
+        var result = await manager.DeleteAsync(user);
+
+        if (result.Succeeded)
+            return Result.Success();
+
+        var error = result.Errors.First();
+
+        return Result.Failure(new Error(error.Code, error.Description, StatusCodes.Status400BadRequest));
+
+    }
     public async Task<Result<UserResponses>> GetUserAsync(string Id)
     {
         if (await manager.FindByIdAsync(Id) is not { } user)

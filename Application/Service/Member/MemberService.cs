@@ -565,7 +565,7 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
             ));
         }
 
-        riderSummaries = riderSummaries.OrderByDescending(r => r.TotalOrders).ToList();
+        riderSummaries = riderSummaries.OrderBy(r => r.MissingDays).ToList();
 
         var totals = new SummaryTotals(
             TotalRiders: riderSummaries.Count,
@@ -1518,11 +1518,11 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
         return Result.Success(response);
     }
 
-    public async Task<Result<List<HousingRiderResponse>>> GetHousingRiders(long managerIqamaNo)
+    public async Task<Result<List<HousingRiderResponses>>> GetHousingRiders(long managerIqamaNo)
     {
         var housingResult = await GetManagedHousing(managerIqamaNo);
         if (housingResult.IsFailure)
-            return Result.Failure<List<HousingRiderResponse>>(housingResult.Error);
+            return Result.Failure<List<HousingRiderResponses>>(housingResult.Error);
 
         var housing = housingResult.Value;
         var employeeIqamas = housing.Employees.Select(e => e.IqamaNo).ToList();
@@ -1534,7 +1534,32 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
             .Where(r => employeeIqamas.Contains(r.EmployeeIqamaNo) && !r.Employee.IsEmployee)
             .ToListAsync();
 
-        var response = riders.Select(r => new HousingRiderResponse(
+        // Get the most recent status change reasons for riders whose status is not "enable"
+        var disabledRiderIqamas = riders
+            .Where(r => r.Employee.Status.ToLower() != "enable")
+            .Select(r => r.EmployeeIqamaNo)
+            .ToList();
+
+        // Fetch the most recent TempEmployeeStatusChange for each disabled rider
+        var statusChangeReasons = new Dictionary<long, string>();
+
+        if (disabledRiderIqamas.Any())
+        {
+            var statusChanges = await context.TempEmployeeStatusChanges
+                .Where(t => disabledRiderIqamas.Contains(t.EmployeeIqamaNo))
+                .OrderByDescending(t => t.RequestedAt)
+                .ToListAsync();
+
+            // Group by EmployeeIqamaNo and take the most recent reason for each
+            statusChangeReasons = statusChanges
+                .GroupBy(t => t.EmployeeIqamaNo)
+                .ToDictionary(
+                    g => g.Key,
+                    g => g.OrderByDescending(t => t.RequestedAt).First().Reason
+                );
+        }
+
+        var response = riders.Select(r => new HousingRiderResponses(
             r.Id,
             r.EmployeeIqamaNo,
             r.Employee.NameEN,
@@ -1546,12 +1571,14 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
             r.Vehicle?.PlateNumberA,
             r.Employee.Status,
             r.Employee.Phone,
-            r.CreatedAt
+            r.CreatedAt,
+            r.Employee.Status.ToLower() != "enable" && statusChangeReasons.ContainsKey(r.EmployeeIqamaNo)
+                ? statusChangeReasons[r.EmployeeIqamaNo]
+                : null
         )).ToList();
 
         return Result.Success(response);
     }
-
     // Continuation of HousingMemberService class
 
     public async Task<Result<EmployeeDetailResponse>> GetEmployeeDetails(long managerIqamaNo, long employeeIqamaNo)

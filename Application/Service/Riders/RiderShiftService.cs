@@ -977,7 +977,10 @@ public class RiderShiftService(ApplicationDbcontext dbcontext , IRiderWorkingIdH
             if (!float.TryParse(hoursCell.ToString(), out var workingHours) || workingHours < 0 || workingHours > 24)
                 return (false, workingId, acceptedOrders, rejectedOrders, stackedDeliveries, null, "Invalid Working Hours");
 
-
+            if(acceptedOrders == 0 && rejectedOrders == 0 && stackedDeliveries == 0 && workingHours == 0)
+            {
+                return (false, workingId, acceptedOrders, rejectedOrders, stackedDeliveries, workingHours, "Accepted Orders, Rejected Orders, and Stacked Deliveries cannot all be zero");
+            }
 
  
             return (true, workingId, acceptedOrders, rejectedOrders, stackedDeliveries, workingHours, null);

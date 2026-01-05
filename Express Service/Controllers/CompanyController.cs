@@ -15,7 +15,7 @@ public class CompanyController(ICompanyService service) : ControllerBase
 
     [HttpGet("{CompanyName}")]
     [Authorize(Roles = "Master,Admin")]
-    [ResponseCache(Duration = 300)]
+ 
     public async Task<IActionResult> Get(string CompanyName)
     {
         var response = await service.Get(CompanyName);
@@ -46,7 +46,7 @@ public class CompanyController(ICompanyService service) : ControllerBase
 
     [HttpGet("")]
     [Authorize(Roles = "Master,Admin")]
-    [ResponseCache(Duration = 300)]
+ 
     public async Task<IActionResult> GetAllEmployee()
     {
         var response = await service.GetAllEmployee();

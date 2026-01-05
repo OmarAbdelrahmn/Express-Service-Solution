@@ -18,7 +18,7 @@ public class AccountController(IUserService service) : ControllerBase
     }
 
     [HttpGet("")]
-    [ResponseCache(Duration = 300)]
+ 
     public async Task<IActionResult> ShowUserProfile()
     {
         var result = await service.GetUserProfile(User.GetUserId()!);
@@ -28,7 +28,7 @@ public class AccountController(IUserService service) : ControllerBase
     
 
     [HttpPut("info")]
-    [ResponseCache(Duration = 300)]
+ 
 
     public async Task<IActionResult> UpdateUserProfile([FromBody] UpdateUserProfileRequest request)
     {
@@ -38,7 +38,7 @@ public class AccountController(IUserService service) : ControllerBase
     }
 
     [HttpPut("change-password")]
-    [ResponseCache(Duration = 300)]
+ 
 
     public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordRequest request)
     {
