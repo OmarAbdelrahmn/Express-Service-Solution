@@ -48,4 +48,28 @@ public static class HousingMemberErrors
         "Housing members must login using their Iqama number",
         StatusCodes.Status400BadRequest
     );
+
+    public static readonly Error RequestNotFound = new(
+    "HousingMember.RequestNotFound",
+    "Request not found",
+    StatusCodes.Status404NotFound
+);
+
+    public static readonly Error RequestAlreadyResolved = new(
+        "HousingMember.RequestAlreadyResolved",
+        "This request has already been resolved",
+        StatusCodes.Status400BadRequest
+    );
+
+    public static readonly Error UnauthorizedToCancel = new(
+        "HousingMember.UnauthorizedToCancel",
+        "You are not authorized to cancel this request",
+        StatusCodes.Status403Forbidden
+    );
+
+    public static readonly Error InvalidRequestType = new(
+        "HousingMember.InvalidRequestType",
+        "Invalid request type",
+        StatusCodes.Status400BadRequest
+    );
 }

@@ -14,4 +14,5 @@ public interface IHousingService
     Task<Result<HousingResponse>> CreateAsync(HousingRequest Request);
     Task<Result<UHousingResponse>> UpdateAsync(string editHousingName ,HousingRequest  Request);
     Task<Result> DeleteAsync(string Name, CancellationToken cancellationToken = default);
+    Task<Result> RemoveEmployeeFromHousing(long IqamaNo);
 }

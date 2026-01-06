@@ -344,7 +344,12 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
 
                 var riderShifts = group.ToList();
                 var actualWorkingDays = riderShifts.Count;
-                var missingDays = totalExpectedDays - actualWorkingDays;
+
+                // Count days with less than 10 working hours
+                var daysWithLessThan10Hours = riderShifts.Count(s => s.WorkingHours < 10);
+
+                // Calculate missing days: days with no shifts + days with less than 10 hours
+                var missingDays = (totalExpectedDays - actualWorkingDays) + daysWithLessThan10Hours;
 
                 var totalWorkingHours = riderShifts.Sum(s => s.WorkingHours);
                 var targetWorkingHours = totalExpectedDays * TARGET_HOURS_PER_DAY2;
@@ -401,7 +406,6 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
 
         return Result.Success(reports);
     }
-
     public async Task<Result<List<HousingRejectionReport>>> GetAllHousingsRejectionReportAsync(
         DateOnly startDate,
         DateOnly endDate,
@@ -418,7 +422,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
         {
             var employeeIqamas = housing.Employees.Select(e => e.IqamaNo).ToList();
             var riderIds = await _dbcontext.RiderDetails
-                .Where(r => employeeIqamas.Contains(r.EmployeeIqamaNo))
+                .Where(r => employeeIqamas.Contains(r.EmployeeIqamaNo) && r.CompanyId == 1)
                 .Select(r => r.Id)
                 .ToListAsync(cancellationToken);
 

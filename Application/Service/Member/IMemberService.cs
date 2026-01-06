@@ -19,6 +19,19 @@ public interface IMemberService
     DateOnly endDate,
     CancellationToken cancellationToken = default);
 
+
+    // Cancel Requests
+    Task<Result> CancelVehicleOperationRequestAsync(long managerIqamaNo, int requestId);
+    Task<Result> CancelEmployeeStatusChangeRequestAsync(long managerIqamaNo, int requestId);
+
+    Task<Result> CancelRequestAsync(long managerIqamaNo, RequestType requestType, int requestId);
+
+    public enum RequestType
+    {
+        VehicleOperation = 1,
+        EmployeeStatusChange = 2
+    }
+
     Task<Result<HousingAllRidersSummaryReport>> GetHousingAllRidersSummaryReportAsync(
         long managerIqamaNo,
         DateOnly startDate,

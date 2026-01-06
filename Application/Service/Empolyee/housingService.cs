@@ -14,7 +14,24 @@ public class HousingService(ApplicationDbcontext dbcontext) : IHousingService
 {
     private readonly ApplicationDbcontext dbcontext = dbcontext;
 
+    public async Task<Result> RemoveEmployeeFromHousing(long IqamaNo)
+    {
+        var employee = await dbcontext.Employees
+            .FirstOrDefaultAsync(e => e.IqamaNo == IqamaNo);
 
+        if (employee is null)
+            return Result.Failure(new Error("EmployeeNotFound", "No employee found with this Iqama number", 404));
+
+        if (employee.HousingId is null)
+            return Result.Failure(new Error("NotInHousing", "This employee is not assigned to any housing", 400));
+
+        // Remove from housing
+        employee.HousingId = null;
+
+        await dbcontext.SaveChangesAsync();
+
+        return Result.Success();
+    }
     public async Task<Result<HousingResponse>> CreateAsync(HousingRequest Request)
     {
         var isExist = await dbcontext.Housings.AnyAsync(c => c.Name == Request.Name);

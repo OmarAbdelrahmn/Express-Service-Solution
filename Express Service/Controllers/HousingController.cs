@@ -13,7 +13,16 @@ public class HousingController(IHousingService service , IEmployeeService servic
     private readonly IHousingService service = service;
     private readonly IEmployeeService service1 = service1;
 
+    [HttpDelete("remove-from-housing/{iqamaNo}")]
+    public async Task<IActionResult> RemoveEmployeeFromHousing(long iqamaNo)
+    {
+        var result = await service.RemoveEmployeeFromHousing(iqamaNo);
 
+        if (!result.IsSuccess)
+            return result.ToProblem();
+
+        return Ok(new { message = $"Employee with Iqama {iqamaNo} successfully removed from housing" });
+    }
     [HttpPut("{IqamaNo}/add/{HousingName}")]
     [Authorize(Roles = "Master,Admin,Member")]
     public async Task<IActionResult> add(long IqamaNo, string HousingName)

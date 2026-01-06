@@ -10,6 +10,7 @@ using Microsoft.EntityFrameworkCore;
 using System;
 using System.Collections.Generic;
 using System.Text;
+using static Application.Service.Member.IMemberService;
 
 namespace Application.Service.Member;
 
@@ -26,7 +27,118 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
 
 
     // Add this method to the MemberService class
+    public async Task<Result> CancelVehicleOperationRequestAsync(
+    long managerIqamaNo,
+    int requestId)
+    {
+        var housingResult = await GetManagedHousing(managerIqamaNo);
+        if (housingResult.IsFailure)
+            return housingResult;
 
+        var housing = housingResult.Value;
+
+        // Find the request
+        var request = await context.TempVehicleOperations
+            .FirstOrDefaultAsync(r => r.Id == requestId);
+
+        if (request == null)
+            return Result.Failure(HousingMemberErrors.RequestNotFound);
+
+        // Check if already resolved
+        if (request.IsResolved)
+            return Result.Failure(HousingMemberErrors.RequestAlreadyResolved);
+
+        // Get manager name to verify they made the request
+        var manager = await context.Employees
+            .FirstOrDefaultAsync(e => e.IqamaNo == managerIqamaNo);
+
+        if (manager == null)
+            return Result.Failure(UserErrors.UserNotFound);
+
+        // Verify this manager made the request
+        if (request.RequestedBy != manager.NameAR)
+            return Result.Failure(HousingMemberErrors.UnauthorizedToCancel);
+
+        // Verify the rider belongs to this housing
+        var employeeIqamas = housing.Employees.Select(e => e.IqamaNo).ToList();
+        if (request.RiderIqamaNo != 0 && !employeeIqamas.Contains(request.RiderIqamaNo))
+            return Result.Failure(HousingMemberErrors.UnauthorizedToCancel);
+
+        // Mark as resolved/cancelled
+        request.IsResolved = true;
+        request.Resolution = "Cancelled";
+        request.ResolvedBy = manager.NameAR;
+        request.ResolvedAt = DateTime.UtcNow.AddHours(3);
+        request.AdminNotes = "Cancelled by housing manager";
+
+        await context.SaveChangesAsync();
+
+        return Result.Success();
+    }
+
+    public async Task<Result> CancelEmployeeStatusChangeRequestAsync(
+        long managerIqamaNo,
+        int requestId)
+    {
+        var housingResult = await GetManagedHousing(managerIqamaNo);
+        if (housingResult.IsFailure)
+            return housingResult;
+
+        var housing = housingResult.Value;
+
+        // Find the request
+        var request = await context.TempEmployeeStatusChanges
+            .FirstOrDefaultAsync(r => r.Id == requestId);
+
+        if (request == null)
+            return Result.Failure(HousingMemberErrors.RequestNotFound);
+
+        // Check if already resolved
+        if (request.IsResolved)
+            return Result.Failure(HousingMemberErrors.RequestAlreadyResolved);
+
+        // Get manager name to verify they made the request
+        var manager = await context.Employees
+            .FirstOrDefaultAsync(e => e.IqamaNo == managerIqamaNo);
+
+        if (manager == null)
+            return Result.Failure(UserErrors.UserNotFound);
+
+        // Verify this manager made the request
+        if (request.RequestedBy != manager.NameAR)
+            return Result.Failure(HousingMemberErrors.UnauthorizedToCancel);
+
+        // Verify the employee belongs to this housing
+        var employeeIqamas = housing.Employees.Select(e => e.IqamaNo).ToList();
+        if (!employeeIqamas.Contains(request.EmployeeIqamaNo))
+            return Result.Failure(HousingMemberErrors.UnauthorizedToCancel);
+
+        // Mark as resolved/cancelled
+        request.IsResolved = true;
+        request.Resolution = "Cancelled";
+        request.ResolvedBy = manager.NameAR;
+        request.ResolvedAt = DateTime.UtcNow.AddHours(3);
+        request.AdminNotes = "Cancelled by housing manager";
+
+        await context.SaveChangesAsync();
+
+        return Result.Success();
+    }
+
+    public async Task<Result> CancelRequestAsync(
+        long managerIqamaNo,
+        RequestType requestType,
+        int requestId)
+    {
+        return requestType switch
+        {
+            RequestType.VehicleOperation =>
+                await CancelVehicleOperationRequestAsync(managerIqamaNo, requestId),
+            RequestType.EmployeeStatusChange =>
+                await CancelEmployeeStatusChangeRequestAsync(managerIqamaNo, requestId),
+            _ => Result.Failure(HousingMemberErrors.InvalidRequestType)
+        };
+    }
     // Add this method to the MemberService class
     public async Task<Result<List<HousingProblemVehicleResponse>>> GetHousingProblemVehicles(long managerIqamaNo)
     {

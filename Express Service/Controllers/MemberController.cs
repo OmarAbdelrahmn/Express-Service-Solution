@@ -4,6 +4,7 @@ using Application.Service.Member;
 using k8s.Models;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using static Application.Service.Member.IMemberService;
 
 namespace Express_Service.Controllers;
 
@@ -25,6 +26,53 @@ public class MemberController(IMemberService housingService) : ControllerBase
             iqamaNo, workingId, startDate, endDate);
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
+
+
+    [HttpDelete("requests/vehicle-operation/{requestId}")]
+    public async Task<IActionResult> CancelVehicleOperation(int requestId)
+    {
+        var managerIqamaNo = long.Parse(User.Identity!.Name!);
+        var result = await housingService.CancelVehicleOperationRequestAsync(
+            managerIqamaNo,
+            requestId
+        );
+
+        return result.IsSuccess
+            ? Ok(new { message = "Request cancelled successfully" })
+            : result.ToProblem();
+    }
+
+    [HttpDelete("requests/employee-status/{requestId}")]
+    public async Task<IActionResult> CancelEmployeeStatusChange(int requestId)
+    {
+        var managerIqamaNo = long.Parse(User.Identity!.Name!);
+        var result = await housingService.CancelEmployeeStatusChangeRequestAsync(
+            managerIqamaNo,
+            requestId
+        );
+
+        return result.IsSuccess
+            ? Ok(new { message = "Request cancelled successfully" })
+            : result.ToProblem();
+    }
+
+    //// Generic endpoint
+    //[HttpDelete("requests/cancel")]
+    //public async Task<IActionResult> CancelRequest(
+    //    [FromQuery] RequestType requestType,
+    //    [FromQuery] int requestId)
+    //{
+    //    var managerIqamaNo = long.Parse(User.Identity!.Name!);
+    //    var result = await housingService.CancelRequestAsync(
+    //        managerIqamaNo,
+    //        requestType,
+    //        requestId
+    //    );
+
+    //    return result.IsSuccess
+    //        ? Ok(new { message = "Request cancelled successfully" })
+    //        : result.ToProblem();
+    //}
 
     /// <summary>
     /// Get summary report for all riders in housing showing hours and orders performance
