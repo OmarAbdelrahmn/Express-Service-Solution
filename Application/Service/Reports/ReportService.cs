@@ -23,7 +23,9 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
     /// </summary>
     /// 
     private const float TARGET_HOURS_PER_DAY = 9f;
+    private const float TARGET_HOURS_PER_DAY2 = 10.5f;
     private const int TARGET_ORDERS_PER_DAY = 14;
+    private const int TARGET_ORDERS_PER_DAY2 = 12;
 
 
     // Add this method to the ReportService class
@@ -224,6 +226,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                 .Include(s => s.Rider)
                     .ThenInclude(r => r.Employee)
                 .Where(s => riderIds.Contains(s.RiderId) &&
+                           s.CompanyId == 1 &&
                            s.ShiftDate >= startDate &&
                            s.ShiftDate <= endDate)
                 .ToListAsync(cancellationToken);
@@ -248,6 +251,107 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
 
                 var totalOrders = riderShifts.Sum(s => s.AcceptedDailyOrders);
                 var targetOrders = totalExpectedDays * TARGET_ORDERS_PER_DAY;
+                var ordersDifference = totalOrders - targetOrders;
+
+                riderSummaries.Add(new RiderSummaryDetail(
+                    RiderId: rider.Id,
+                    IqamaNo: rider.EmployeeIqamaNo,
+                    RiderNameAR: rider.Employee.NameAR,
+                    RiderNameEN: rider.Employee.NameEN,
+                    WorkingId: riderShifts.First().WorkingId,
+                    ActualWorkingDays: actualWorkingDays,
+                    MissingDays: missingDays > 0 ? -missingDays : 0,
+                    TotalWorkingHours: totalWorkingHours,
+                    TargetWorkingHours: targetWorkingHours,
+                    HoursDifference: hoursDifference,
+                    TotalOrders: totalOrders,
+                    TargetOrders: targetOrders,
+                    OrdersDifference: ordersDifference
+                ));
+            }
+
+            riderSummaries = riderSummaries.OrderByDescending(r => r.TotalOrders).ToList();
+
+            var totals = new SummaryTotals(
+                TotalRiders: riderSummaries.Count,
+                TotalWorkingDays: riderSummaries.Sum(r => r.ActualWorkingDays),
+                TotalMissingDays: riderSummaries.Sum(r => Math.Abs(r.MissingDays)),
+                TotalWorkingHours: riderSummaries.Sum(r => r.TotalWorkingHours),
+                TotalTargetHours: riderSummaries.Sum(r => r.TargetWorkingHours),
+                HoursDifference: riderSummaries.Sum(r => r.HoursDifference),
+                TotalOrders: riderSummaries.Sum(r => r.TotalOrders),
+                TotalTargetOrders: riderSummaries.Sum(r => r.TargetOrders),
+                OrdersDifference: riderSummaries.Sum(r => r.OrdersDifference)
+            );
+
+            var summaryReport = new AllRidersSummaryReport(
+                StartDate: startDate,
+                EndDate: endDate,
+                TotalExpectedDays: totalExpectedDays,
+                RiderSummaries: riderSummaries,
+                Totals: totals
+            );
+
+            reports.Add(new HousingAllRidersSummaryReport(
+                HousingName: housing.Name,
+                SummaryReport: summaryReport
+            ));
+        }
+
+        return Result.Success(reports);
+    }
+    public async Task<Result<List<HousingAllRidersSummaryReport>>> GetAllHousingsSummaryReportAsync2(
+        DateOnly startDate,
+        DateOnly endDate,
+        CancellationToken cancellationToken = default)
+    {
+        var housings = await _dbcontext.Housings
+            .Include(h => h.Employees)
+            .ToListAsync(cancellationToken);
+
+        var reports = new List<HousingAllRidersSummaryReport>();
+
+        foreach (var housing in housings)
+        {
+            var employeeIqamas = housing.Employees.Select(e => e.IqamaNo).ToList();
+            var riderIds = await _dbcontext.RiderDetails
+                .Where(r => employeeIqamas.Contains(r.EmployeeIqamaNo))
+                .Select(r => r.Id)
+                .ToListAsync(cancellationToken);
+
+            if (!riderIds.Any()) continue;
+
+            var totalExpectedDays = endDate.DayNumber - startDate.DayNumber + 1;
+
+            var shifts = await _dbcontext.RiderShifts
+                .Include(s => s.Rider)
+                    .ThenInclude(r => r.Employee)
+                .Where(s => riderIds.Contains(s.RiderId) &&
+                           s.CompanyId == 2 &&
+                           s.ShiftDate >= startDate &&
+                           s.ShiftDate <= endDate)
+                .ToListAsync(cancellationToken);
+
+            if (!shifts.Any()) continue;
+
+            var riderGroups = shifts.GroupBy(s => s.RiderId);
+            var riderSummaries = new List<RiderSummaryDetail>();
+
+            foreach (var group in riderGroups)
+            {
+                var rider = group.First().Rider;
+                if (rider?.Employee == null) continue;
+
+                var riderShifts = group.ToList();
+                var actualWorkingDays = riderShifts.Count;
+                var missingDays = totalExpectedDays - actualWorkingDays;
+
+                var totalWorkingHours = riderShifts.Sum(s => s.WorkingHours);
+                var targetWorkingHours = totalExpectedDays * TARGET_HOURS_PER_DAY2;
+                var hoursDifference = totalWorkingHours - targetWorkingHours;
+
+                var totalOrders = riderShifts.Sum(s => s.AcceptedDailyOrders);
+                var targetOrders = totalExpectedDays * TARGET_ORDERS_PER_DAY2;
                 var ordersDifference = totalOrders - targetOrders;
 
                 riderSummaries.Add(new RiderSummaryDetail(
@@ -428,7 +532,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
         {
             var rider = await _dbcontext.RiderDetails
                 .Include(r => r.Employee)
-                .FirstOrDefaultAsync(r => r.WorkingId == workingId, cancellationToken);
+                .FirstOrDefaultAsync(r => r.WorkingId == workingId , cancellationToken);
 
             if (rider == null)
                 return Result.Failure<RiderDailyDetailReport>(
@@ -436,6 +540,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
 
             var shifts = await _dbcontext.RiderShifts
                 .Where(s => s.RiderId == rider.Id &&
+                            s.CompanyId == 1 &&
                            s.ShiftDate >= startDate &&
                            s.ShiftDate <= endDate)
                 .OrderBy(s => s.ShiftDate)
@@ -485,6 +590,115 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
             var missingDays = totalDays - totalWorkingDays;
             var totalWorkingHours = shifts.Sum(s => s.WorkingHours);
             var targetWorkingHours = totalDays * TARGET_HOURS_PER_DAY;
+            var hoursDifference = totalWorkingHours - targetWorkingHours;
+            var totalOrders = shifts.Sum(s => s.AcceptedDailyOrders);
+            var totalRejections = shifts.Sum(s => s.RejectedDailyOrders);
+            var totalRealRejections = shifts.Sum(s => s.RealRejectedDailyOrders);
+
+            var report = new RiderDailyDetailReport(
+                RiderId: rider.Id,
+                IqamaNo: rider.EmployeeIqamaNo,
+                RiderNameAR: rider.Employee.NameAR,
+                RiderNameEN: rider.Employee.NameEN,
+                WorkingId: workingId,
+                StartDate: startDate,
+                EndDate: endDate,
+                DailyDetails: dailyDetails,
+                TotalWorkingDays: totalWorkingDays,
+                MissingDays: missingDays,
+                TotalWorkingHours: totalWorkingHours,
+                TargetWorkingHours: targetWorkingHours,
+                HoursDifference: hoursDifference,
+                IsAboveTarget: hoursDifference >= 0,
+                TotalOrders: totalOrders,
+                TotalRejections: totalRejections,
+                TotalRealRejections: totalRealRejections
+            );
+
+            return Result.Success(report);
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<RiderDailyDetailReport>(
+                new Error($"Error generating daily detail report: {ex.Message}", "server_error", 500));
+        }
+    }
+    public async Task<Result<RiderDailyDetailReport>> GetRiderDailyDetailReportAsync2(
+    string workingId,
+    DateOnly startDate,
+    DateOnly endDate,
+    CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(workingId))
+            return Result.Failure<RiderDailyDetailReport>(
+                new Error("Invalid working ID", "invalid_input", 400));
+
+        if (endDate < startDate)
+            return Result.Failure<RiderDailyDetailReport>(
+                new Error("End date must be after start date", "invalid_input", 400));
+
+        try
+        {
+            var rider = await _dbcontext.RiderDetails
+                .Include(r => r.Employee)
+                .FirstOrDefaultAsync(r => r.WorkingId == workingId , cancellationToken);
+
+            if (rider == null)
+                return Result.Failure<RiderDailyDetailReport>(
+                    new Error($"Rider with working ID {workingId} not found", "not_found", 404));
+
+            var shifts = await _dbcontext.RiderShifts
+                .Where(s => s.RiderId == rider.Id &&
+                            s.CompanyId == 2 &&
+                           s.ShiftDate >= startDate &&
+                           s.ShiftDate <= endDate)
+                .OrderBy(s => s.ShiftDate)
+                .ToListAsync(cancellationToken);
+
+            var shiftDictionary = shifts.ToDictionary(s => s.ShiftDate, s => s);
+
+            var dailyDetails = new List<DailyShiftDetail>();
+            var totalDays = endDate.DayNumber - startDate.DayNumber + 1;
+            var currentDate = startDate;
+
+            while (currentDate <= endDate)
+            {
+                if (shiftDictionary.TryGetValue(currentDate, out var shift))
+                {
+                    var hoursDiff = shift.WorkingHours - TARGET_HOURS_PER_DAY2;
+                    dailyDetails.Add(new DailyShiftDetail(
+                        Date: currentDate,
+                        HasShift: true,
+                        AcceptedOrders: shift.AcceptedDailyOrders,
+                        RejectedOrders: shift.RejectedDailyOrders,
+                        RealRejectedOrders: shift.RealRejectedDailyOrders,
+                        WorkingHours: shift.WorkingHours,
+                        TargetHours: TARGET_HOURS_PER_DAY2,
+                        HoursDifference: hoursDiff,
+                        ShiftStatus: shift.ShiftStatus
+                    ));
+                }
+                else
+                {
+                    dailyDetails.Add(new DailyShiftDetail(
+                        Date: currentDate,
+                        HasShift: false,
+                        AcceptedOrders: 0,
+                        RejectedOrders: 0,
+                        RealRejectedOrders: 0,
+                        WorkingHours: 0,
+                        TargetHours: TARGET_HOURS_PER_DAY2,
+                        HoursDifference: -TARGET_HOURS_PER_DAY2,
+                        ShiftStatus: "Missing"
+                    ));
+                }
+                currentDate = currentDate.AddDays(1);
+            }
+
+            var totalWorkingDays = shifts.Count;
+            var missingDays = totalDays - totalWorkingDays;
+            var totalWorkingHours = shifts.Sum(s => s.WorkingHours);
+            var targetWorkingHours = totalDays * TARGET_HOURS_PER_DAY2;
             var hoursDifference = totalWorkingHours - targetWorkingHours;
             var totalOrders = shifts.Sum(s => s.AcceptedDailyOrders);
             var totalRejections = shifts.Sum(s => s.RejectedDailyOrders);
@@ -960,6 +1174,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                     .Select(s => new RiderDailyPerformance(
                         RiderId: s.RiderId,
                         RiderName: s.Rider?.Employee.NameAR ?? "Unknown",
+                        RiderNameE: s.Rider?.Employee.NameEN ?? "Unknown",
                         s.Rider?.Employee.Phone ?? "050",
                         WorkingId: s.WorkingId ?? "0",
                         AcceptedOrders: s.AcceptedDailyOrders,

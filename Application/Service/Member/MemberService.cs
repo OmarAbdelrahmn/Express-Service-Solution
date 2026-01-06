@@ -877,6 +877,7 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
             .Select(s => new RiderDailyPerformance(
                 RiderId: s.RiderId,
                 RiderName: s.Rider?.Employee.NameAR ?? "Unknown",
+                RiderNameE: s.Rider?.Employee.NameEN ?? "Unknown",
                 s.Rider?.Employee.Phone ?? "050",
                 WorkingId: s.WorkingId ?? "0",
                 AcceptedOrders: s.AcceptedDailyOrders,

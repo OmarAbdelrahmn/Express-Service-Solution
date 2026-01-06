@@ -17,6 +17,10 @@ public interface IReportService
         DateOnly startDate,
         DateOnly endDate,
         CancellationToken cancellationToken = default);
+    Task<Result<List<HousingAllRidersSummaryReport>>> GetAllHousingsSummaryReportAsync2(
+        DateOnly startDate,
+        DateOnly endDate,
+        CancellationToken cancellationToken = default);
 
     Task<Result<List<HousingRejectionReport>>> GetAllHousingsRejectionReportAsync(
         DateOnly startDate,
@@ -24,6 +28,11 @@ public interface IReportService
         CancellationToken cancellationToken = default);
 
     Task<Result<RiderDailyDetailReport>> GetRiderDailyDetailReportAsync(
+    string workingId,
+    DateOnly startDate,
+    DateOnly endDate,
+    CancellationToken cancellationToken = default);
+    Task<Result<RiderDailyDetailReport>> GetRiderDailyDetailReportAsync2(
     string workingId,
     DateOnly startDate,
     DateOnly endDate,
@@ -288,6 +297,7 @@ public record HousingDailyDetails(
 public record RiderDailyPerformance(
     int RiderId,
     string RiderName,
+    string RiderNameE,
     string PhoneNumber,
     string WorkingId,
     int AcceptedOrders,

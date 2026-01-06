@@ -26,6 +26,16 @@ public class ReportController(IReportService service) : ControllerBase
             workingId, startDate, endDate);
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
+    [HttpGet("rider-daily-detail2")]
+    public async Task<IActionResult> GetRiderDailyDetail2(
+        [FromQuery] string workingId,
+        [FromQuery] DateOnly startDate,
+        [FromQuery] DateOnly endDate)
+    {
+        var result = await service.GetRiderDailyDetailReportAsync2(
+            workingId, startDate, endDate);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
    
     
     [HttpGet("rider-history")]
@@ -140,6 +150,15 @@ public class ReportController(IReportService service) : ControllerBase
             startDate, endDate);
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
+    [HttpGet("all-housings/summary2")]
+    public async Task<IActionResult> GetAllHousingsSummary2(
+        [FromQuery] DateOnly startDate,
+        [FromQuery] DateOnly endDate)
+    {
+        var result = await service.GetAllHousingsSummaryReportAsync2(
+            startDate, endDate);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
 
     /// <summary>
     /// Get rejection reports for ALL housings
@@ -202,7 +221,7 @@ public class ReportController(IReportService service) : ControllerBase
     }
 
     [HttpGet("summary")]
-    [Authorize(Roles = "Master,Admin")]
+    //[Authorize(Roles = "Master,Admin")]
     public async Task<IActionResult> GetPreviousDayCompanySummaryAsync(
     CancellationToken cancellationToken = default)
     {
