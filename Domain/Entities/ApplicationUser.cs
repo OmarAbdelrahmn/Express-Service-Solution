@@ -13,6 +13,8 @@ public class ApplicationUser : IdentityUser
 
     public string? Address { get; set; } = string.Empty;
 
+    public DateTime? LastLogin { get; set; }
+
     public bool IsDisable { get; set; }
 
     //public List<RefreshToken> RefreshTokens { get; set; } = [];

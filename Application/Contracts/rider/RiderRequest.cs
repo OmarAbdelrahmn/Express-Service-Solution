@@ -22,10 +22,11 @@ public record RiderRequest
     string Status,
     string IBAN,
     bool INKSA,
-    string WorkingId,
-    string TshirtSize,
-    string LicenseNumber,
-    string CompanyName
+    bool IsEmployee,
+    string? WorkingId,
+    string? TshirtSize,
+    string? LicenseNumber,
+    string? CompanyName
     );
 public record URiderRequest
 (

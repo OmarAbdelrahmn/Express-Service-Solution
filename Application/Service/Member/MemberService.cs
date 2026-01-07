@@ -1350,6 +1350,10 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
         // Generate JWT token
         var (token, expiresIn) = jwtProvider.GenerateToken(user, userRoles);
 
+        user.LastLogin = DateTime.UtcNow.AddHours(3);
+
+        await userManager.UpdateAsync(user);
+
         var housingInfo = new HousingBasicInfo(
             housing.Id,
             housing.Name,

@@ -60,6 +60,7 @@ public record UEmpolyeeRequest(
     );
 public record RiderResponse(
     long IqamaNo,
+    bool IsEmployee,
     DateOnly IqamaEndM,
     DateOnly IqamaEndH,
     string PassportNo,

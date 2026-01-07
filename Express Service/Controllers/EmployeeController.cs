@@ -15,7 +15,7 @@ public class EmployeeController(IEmployeeService service) : ControllerBase
     private readonly IEmployeeService service = service;
 
 
-    [HttpPost("bsefew")]
+    [HttpPost("change-employee-rider")]
     public async Task<IActionResult> ld(long iqama)
     {
         var response = await service.Togle(iqama);

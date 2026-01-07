@@ -64,6 +64,8 @@ public class AuthService(
                 ExpiresIn
             );
 
+            user.LastLogin = DateTime.UtcNow.AddHours(3);
+
             return Result.Success(response);
         }
 
