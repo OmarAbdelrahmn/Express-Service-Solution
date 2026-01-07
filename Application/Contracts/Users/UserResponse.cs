@@ -17,5 +17,6 @@ public record UserResponses
     string Address,
     string UserName,
     bool IsDisable,
-    IEnumerable<string> Roles
+    IEnumerable<string> Roles,
+    DateTime? LastLogin
     );

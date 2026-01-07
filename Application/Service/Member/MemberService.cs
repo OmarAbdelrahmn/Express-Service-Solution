@@ -149,7 +149,7 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
                 return Result.Failure<List<HousingProblemVehicleResponse>>(housingResult.Error);
 
             var housing = housingResult.Value;
-            var employeeIqamas = housing.Employees.Select(e => e.IqamaNo).ToList();
+            var employeeIqamas = housing.Employees.Where(e => !e.IsDeleted).Select(e => e.IqamaNo).ToList();
 
             if (!employeeIqamas.Any())
                 return Result.Success(new List<HousingProblemVehicleResponse>());
@@ -268,7 +268,7 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
             return housingResult;
 
         var housing = housingResult.Value;
-        var employeeIqamas = housing.Employees.Select(e => e.IqamaNo).ToList();
+        var employeeIqamas = housing.Employees.Where(e => !e.IsDeleted).Select(e => e.IqamaNo).ToList();
 
         // Verify vehicle exists
         var vehicle = await context.Vehicles
@@ -386,7 +386,7 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
             return Result.Failure<RiderMonthlyHistory>(housingResult.Error);
 
         var housing = housingResult.Value;
-        var employeeIqamas = housing.Employees.Select(e => e.IqamaNo).ToList();
+        var employeeIqamas = housing.Employees.Where(e => !e.IsDeleted).Select(e => e.IqamaNo).ToList();
 
         // Verify rider belongs to this housing
         if (!employeeIqamas.Contains(riderIqamaNo))
@@ -523,7 +523,7 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
             return Result.Failure<RiderDailyDetailReport>(housingResult.Error);
 
         var housing = housingResult.Value;
-        var employeeIqamas = housing.Employees.Select(e => e.IqamaNo).ToList();
+        var employeeIqamas = housing.Employees.Where(e => !e.IsDeleted).Select(e => e.IqamaNo).ToList();
 
         // Verify rider belongs to this housing
         var rider = await context.RiderDetails
@@ -623,7 +623,7 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
             return Result.Failure<AllRidersSummaryReport>(housingResult.Error);
 
         var housing = housingResult.Value;
-        var employeeIqamas = housing.Employees.Select(e => e.IqamaNo).ToList();
+        var employeeIqamas = housing.Employees.Where(e => !e.IsDeleted).Select(e => e.IqamaNo).ToList();
 
         var riderIds = await context.RiderDetails
             .Where(r => employeeIqamas.Contains(r.EmployeeIqamaNo))
@@ -712,7 +712,7 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
             return Result.Failure<RejectionReport>(housingResult.Error);
 
         var housing = housingResult.Value;
-        var employeeIqamas = housing.Employees.Select(e => e.IqamaNo).ToList();
+        var employeeIqamas = housing.Employees.Where(e => !e.IsDeleted).Select(e => e.IqamaNo).ToList();
 
         var riderIds = await context.RiderDetails
             .Where(r => employeeIqamas.Contains(r.EmployeeIqamaNo))
@@ -818,7 +818,7 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
             return Result.Failure<PeriodOrdersComparison>(housingResult.Error);
 
         var housing = housingResult.Value;
-        var employeeIqamas = housing.Employees.Select(e => e.IqamaNo).ToList();
+        var employeeIqamas = housing.Employees.Where(e => !e.IsDeleted).Select(e => e.IqamaNo).ToList();
 
         var riderIds = await context.RiderDetails
             .Where(r => employeeIqamas.Contains(r.EmployeeIqamaNo))
@@ -882,7 +882,7 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
         var housing = housingResult.Value;
 
         // 2️⃣ Get employee iqamas in this housing
-        var employeeIqamas = housing.Employees
+        var employeeIqamas = housing.Employees.Where(e => !e.IsDeleted)
             .Select(e => e.IqamaNo)
             .ToList();
 
@@ -963,7 +963,7 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
             return Result.Failure<HousingDailyDetailedReport>(housingResult.Error);
 
         var housing = housingResult.Value;
-        var employeeIqamas = housing.Employees.Select(e => e.IqamaNo).ToList();
+        var employeeIqamas = housing.Employees.Where(e => !e.IsDeleted).Select(e => e.IqamaNo).ToList();
 
         var riderIds = await context.RiderDetails
             .Where(r => employeeIqamas.Contains(r.EmployeeIqamaNo))
@@ -1025,32 +1025,34 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
         int period2Total)
     {
         if (difference == 0)
-            return "📊 Orders remained stable between periods";
+            return "📊 عدد الطلبات بقي ثابتًا بين الفترتين";
 
         if (difference > 0)
         {
             if (changePercentage >= 50)
-                return $"🚀 Significant increase of {difference:N0} orders (+{changePercentage:F1}%) - Excellent growth!";
+                return $"🚀 زيادة كبيرة بمقدار {difference:N0} طلب (+{changePercentage:F1}٪) – نمو ممتاز!";
             else if (changePercentage >= 20)
-                return $"📈 Strong increase of {difference:N0} orders (+{changePercentage:F1}%) - Good performance!";
+                return $"📈 زيادة قوية بمقدار {difference:N0} طلب (+{changePercentage:F1}٪) – أداء جيد!";
             else if (changePercentage >= 10)
-                return $"✅ Moderate increase of {difference:N0} orders (+{changePercentage:F1}%)";
+                return $"✅ زيادة متوسطة بمقدار {difference:N0} طلب (+{changePercentage:F1}٪)";
             else
-                return $"↗️ Slight increase of {difference:N0} orders (+{changePercentage:F1}%)";
+                return $"↗️ زيادة طفيفة بمقدار {difference:N0} طلب (+{changePercentage:F1}٪)";
         }
         else
         {
             var absChange = Math.Abs(changePercentage);
+
             if (absChange >= 50)
-                return $"📉 Significant decrease of {Math.Abs(difference):N0} orders ({changePercentage:F1}%) - Needs urgent attention!";
+                return $"📉 انخفاض حاد بمقدار {Math.Abs(difference):N0} طلب ({changePercentage:F1}٪) – يحتاج إلى تدخل عاجل!";
             else if (absChange >= 20)
-                return $"⚠️ Notable decrease of {Math.Abs(difference):N0} orders ({changePercentage:F1}%) - Review required";
+                return $"⚠️ انخفاض ملحوظ بمقدار {Math.Abs(difference):N0} طلب ({changePercentage:F1}٪) – يتطلب المراجعة";
             else if (absChange >= 10)
-                return $"↘️ Moderate decrease of {Math.Abs(difference):N0} orders ({changePercentage:F1}%)";
+                return $"↘️ انخفاض متوسط بمقدار {Math.Abs(difference):N0} طلب ({changePercentage:F1}٪)";
             else
-                return $"➡️ Slight decrease of {Math.Abs(difference):N0} orders ({changePercentage:F1}%)";
+                return $"➡️ انخفاض طفيف بمقدار {Math.Abs(difference):N0} طلب ({changePercentage:F1}٪)";
         }
     }
+
     public async Task<Result<HousingRiderDailyDetailReport>> GetHousingRiderDailyDetailReportAsync(
     long managerIqamaNo,
     string workingId,
@@ -1071,6 +1073,8 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
             .FirstOrDefaultAsync(r => r.WorkingId == workingId &&
                                      r.Employee.HousingId == housing.Id,
                 cancellationToken);
+
+
 
         if (rider == null)
             return Result.Failure<HousingRiderDailyDetailReport>(
@@ -1101,7 +1105,7 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
             return Result.Failure<HousingAllRidersSummaryReport>(
                 new Error("Housing not found or you are not assigned as manager", "not_found", 404));
 
-        var employeeIqamas = housing.Employees.Select(e => e.IqamaNo).ToList();
+        var employeeIqamas = housing.Employees.Where(e => !e.IsDeleted).Select(e => e.IqamaNo).ToList();
         var riderIds = await context.RiderDetails
             .Where(r => employeeIqamas.Contains(r.EmployeeIqamaNo))
             .Select(r => r.Id)
@@ -1196,7 +1200,7 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
             return Result.Failure<HousingRejectionReport>(
                 new Error("Housing not found or you are not assigned as manager", "not_found", 404));
 
-        var employeeIqamas = housing.Employees.Select(e => e.IqamaNo).ToList();
+        var employeeIqamas = housing.Employees.Where(e => !e.IsDeleted).Select(e => e.IqamaNo).ToList();
         var riderIds = await context.RiderDetails
             .Where(r => employeeIqamas.Contains(r.EmployeeIqamaNo))
             .Select(r => r.Id)
@@ -1401,7 +1405,7 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
         var today = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3));
 
         // Get statistics
-        var employeeIqamas = housing.Employees.Select(e => e.IqamaNo).ToList();
+        var employeeIqamas = housing.Employees.Where(e => !e.IsDeleted).Select(e => e.IqamaNo).ToList();
 
         // OPTIMIZATION: Load riders once with all related data
         var riders = await context.RiderDetails
@@ -1567,7 +1571,7 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
         var manager = await context.Employees
             .FirstOrDefaultAsync(e => e.IqamaNo == housing.ManagerIqamaNo);
 
-        var employeeIqamas = housing.Employees.Select(e => e.IqamaNo).ToList();
+        var employeeIqamas = housing.Employees.Where(e => !e.IsDeleted).Select(e => e.IqamaNo).ToList();
 
         var riders = await context.RiderDetails
             .Where(r => employeeIqamas.Contains(r.EmployeeIqamaNo) && !r.Employee.IsEmployee)
@@ -1604,7 +1608,7 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
             return Result.Failure<List<HousingEmployeeResponse>>(housingResult.Error);
 
         var housing = housingResult.Value;
-        var employeeIqamas = housing.Employees.Select(e => e.IqamaNo).ToList();
+        var employeeIqamas = housing.Employees.Where(e => !e.IsDeleted).Select(e => e.IqamaNo).ToList();
 
         var employeesWithRiders = await context.Employees
             .Where(e => employeeIqamas.Contains(e.IqamaNo))
@@ -1642,7 +1646,7 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
             return Result.Failure<List<HousingRiderResponses>>(housingResult.Error);
 
         var housing = housingResult.Value;
-        var employeeIqamas = housing.Employees.Select(e => e.IqamaNo).ToList();
+        var employeeIqamas = housing.Employees.Where(e => !e.IsDeleted).Select(e => e.IqamaNo).ToList();
 
         var riders = await context.RiderDetails
             .Include(r => r.Employee)
@@ -1714,6 +1718,7 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
         }
 
         var employee = await context.Employees
+            .Where(e=>!e.IsDeleted)
             .Include(e => e.Housing)
             .Include(e => e.RiderDetails!)
                 .ThenInclude(r => r.Company)
@@ -1787,7 +1792,7 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
             return Result.Failure<List<RiderShiftResponse>>(housingResult.Error);
 
         var housing = housingResult.Value;
-        var employeeIqamas = housing.Employees.Select(e => e.IqamaNo).ToList();
+        var employeeIqamas = housing.Employees.Where(e=>!e.IsDeleted).Select(e => e.IqamaNo).ToList();
 
         var riderIds = await context.RiderDetails
             .Where(r => employeeIqamas.Contains(r.EmployeeIqamaNo))
@@ -1840,7 +1845,7 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
             return Result.Failure<RiderPerformanceResponse>(housingResult.Error);
 
         var housing = housingResult.Value;
-        var employeeIqamas = housing.Employees.Select(e => e.IqamaNo).ToList();
+        var employeeIqamas = housing.Employees.Where(e => !e.IsDeleted).Select(e => e.IqamaNo).ToList();
 
         var rider = await context.RiderDetails
             .Include(r => r.Employee)
@@ -1911,7 +1916,7 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
             return Result.Failure<HousingShiftSummaryResponse>(housingResult.Error);
 
         var housing = housingResult.Value;
-        var employeeIqamas = housing.Employees.Select(e => e.IqamaNo).ToList();
+        var employeeIqamas = housing.Employees.Where(e => !e.IsDeleted).Select(e => e.IqamaNo).ToList();
 
         var riderIds = await context.RiderDetails
             .Where(r => employeeIqamas.Contains(r.EmployeeIqamaNo))
@@ -1963,7 +1968,7 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
                 return Result.Failure<List<HousingVehicleResponse>>(housingResult.Error);
 
             var housing = housingResult.Value;
-            var employeeIqamas = housing.Employees.Select(e => e.IqamaNo).ToList();
+            var employeeIqamas = housing.Employees.Where(e => !e.IsDeleted).Select(e => e.IqamaNo).ToList();
 
             if (!employeeIqamas.Any())
                 return Result.Success(new List<HousingVehicleResponse>());
@@ -2051,7 +2056,7 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
             return Result.Failure<List<VehicleStatusHistoryResponse>>(housingResult.Error);
 
         var housing = housingResult.Value;
-        var employeeIqamas = housing.Employees.Select(e => e.IqamaNo).ToList();
+        var employeeIqamas = housing.Employees.Where(e => !e.IsDeleted).Select(e => e.IqamaNo).ToList();
 
         // Verify vehicle belongs to housing riders
         var vehicleExists = await context.RiderDetails
@@ -2101,7 +2106,7 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
             return Result.Failure<List<PendingVehicleOperationResponse>>(housingResult.Error);
 
         var housing = housingResult.Value;
-        var employeeIqamas = housing.Employees.Select(e => e.IqamaNo).ToList();
+        var employeeIqamas = housing.Employees.Where(e => !e.IsDeleted).Select(e => e.IqamaNo).ToList();
 
         var pendingOps = await context.TempVehicleOperations
             .Include(t => t.Rider)
@@ -2138,7 +2143,7 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
             return Result.Failure<List<HungerDisabilityResponse>>(housingResult.Error);
 
         var housing = housingResult.Value;
-        var employeeIqamas = housing.Employees.Select(e => e.IqamaNo).ToList();
+        var employeeIqamas = housing.Employees.Where(e => !e.IsDeleted).Select(e => e.IqamaNo).ToList();
 
         var riderIds = await context.RiderDetails
             .Where(r => employeeIqamas.Contains(r.EmployeeIqamaNo))
@@ -2195,7 +2200,7 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
             return Result.Failure<List<ShiftSubstitutionResponse>>(housingResult.Error);
 
         var housing = housingResult.Value;
-        var employeeIqamas = housing.Employees.Select(e => e.IqamaNo).ToList();
+        var employeeIqamas = housing.Employees.Where(e => !e.IsDeleted).Select(e => e.IqamaNo).ToList();
 
         var riderIds = await context.RiderDetails
             .Where(r => employeeIqamas.Contains(r.EmployeeIqamaNo))
@@ -2237,7 +2242,7 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
             return Result.Failure<List<PendingEmployeeUpdateResponse>>(housingResult.Error);
 
         var housing = housingResult.Value;
-        var employeeIqamas = housing.Employees.Select(e => e.IqamaNo).ToList();
+        var employeeIqamas = housing.Employees.Where(e => !e.IsDeleted).Select(e => e.IqamaNo).ToList();
 
         var pendingUpdates = await context.TempEmployeeUpdates
             .Include(t => t.Employee)
@@ -2284,7 +2289,7 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
             return Result.Failure<List<PendingStatusChangeResponse>>(housingResult.Error);
 
         var housing = housingResult.Value;
-        var employeeIqamas = housing.Employees.Select(e => e.IqamaNo).ToList();
+        var employeeIqamas = housing.Employees.Where(e => !e.IsDeleted).Select(e => e.IqamaNo).ToList();
 
         var pendingChanges = await context.TempEmployeeStatusChanges
             .Include(t => t.Employee)
@@ -2315,7 +2320,7 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
             return Result.Failure<HousingMonthlyReportResponse>(housingResult.Error);
 
         var housing = housingResult.Value;
-        var employeeIqamas = housing.Employees.Select(e => e.IqamaNo).ToList();
+        var employeeIqamas = housing.Employees.Where(e => !e.IsDeleted).Select(e => e.IqamaNo).ToList();
 
         var riderDetails = await context.RiderDetails
             .Include(r => r.Employee)
@@ -2416,7 +2421,7 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
             return housingResult;
 
         var housing = housingResult.Value;
-        var employeeIqamas = housing.Employees.Select(e => e.IqamaNo).ToList();
+        var employeeIqamas = housing.Employees.Where(e => !e.IsDeleted).Select(e => e.IqamaNo).ToList();
 
         // Verify rider belongs to this housing
         var rider = await context.RiderDetails
@@ -2509,7 +2514,7 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
             return housingResult;
 
         var housing = housingResult.Value;
-        var employeeIqamas = housing.Employees.Select(e => e.IqamaNo).ToList();
+        var employeeIqamas = housing.Employees.Where(e => !e.IsDeleted).Select(e => e.IqamaNo).ToList();
 
         // Verify rider belongs to this housing
         var rider = await context.RiderDetails
@@ -2587,7 +2592,7 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
             return housingResult;
 
         var housing = housingResult.Value;
-        var employeeIqamas = housing.Employees.Select(e => e.IqamaNo).ToList();
+        var employeeIqamas = housing.Employees.Where(e => !e.IsDeleted).Select(e => e.IqamaNo).ToList();
 
         RiderDetails? rider = null;
 
@@ -2715,7 +2720,7 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
             return housingResult;
 
         var housing = housingResult.Value;
-        var employeeIqamas = housing.Employees.Select(e => e.IqamaNo).ToList();
+        var employeeIqamas = housing.Employees.Where(e => !e.IsDeleted).Select(e => e.IqamaNo).ToList();
 
         // Verify the employee/rider belongs to this housing
         if (!employeeIqamas.Contains(request.EmployeeIqamaNo))

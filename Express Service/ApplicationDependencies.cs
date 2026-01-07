@@ -3,12 +3,14 @@ using Application.Auth;
 using Application.Authentication;
 using Application.Roles;
 using Application.Service;
+using Application.Service.DE;
 using Application.Service.Empolyee;
 using Application.Service.Member;
 using Application.Service.Reports;
 using Application.Service.Riders;
 using Application.Services.Auth;
 using Application.User;
+using DocumentFormat.OpenXml.Office2016.Drawing.ChartDrawing;
 using Domain;
 using Domain.Entities;
 using FluentValidation;
@@ -51,7 +53,8 @@ public static class ApplicationDependencies
         Services.AddScoped<IImportService, ImportService>();
         Services.AddScoped<IRiderWorkingIdHistoryService, RiderWorkingIdHistoryService>();
         Services.AddScoped<IMemberService, MemberService>();
-
+        // In your Program.cs or Startup.cs
+        Services.AddScoped<IDeletedEmployeeImportService, DeletedEmployeeImportService>();
 
         Services.AddAuth(configuration)
                 .AddMappester()

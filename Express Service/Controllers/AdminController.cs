@@ -1,4 +1,5 @@
 ﻿using Application.Admin;
+using Application.Service.DE;
 using Application.User;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -13,11 +14,21 @@ public class AdminController(IAdminService service,IUserService service1) : Cont
 {
     private readonly IAdminService service = service;
     private readonly IUserService service1 = service1;
+    //private readonly IDeletedEmployeeImportService service2 = service2;
+
+
+    //[HttpGet("deleted-employees")]
+    //public async Task<IActionResult> GetDeletedEmployees()
+    //{
+    //    var deletedEmployees = await service2.RestoreAllDeletedEmployeesAsync();
+    //    return deletedEmployees.IsSuccess ?
+    //        Ok(deletedEmployees.Value) :
+    //        deletedEmployees.ToProblem();
+    //}
+
 
     [HttpGet("users")]
     [Authorize(Roles = "Master")]
- 
-
     public async Task<IActionResult> GetUsers()
     {
         var users = await service.GetAllUsers();

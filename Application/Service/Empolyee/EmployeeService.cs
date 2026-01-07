@@ -758,18 +758,79 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
         );
     }
 
-    public async Task<Result<IEnumerable<DeletedEmployees>>> GetAlldeletedEmployee()
-    {
-        var employees = await dbcontext.DeletedEmployees.AsNoTracking().ToListAsync();
 
-        if (employees.Count == 0)
-            return Result.Failure<IEnumerable<DeletedEmployees>>(
-                new Error("No Deleted Employees Found", "no deleted employees", 400)
+    public async Task<Result<IEnumerable<DeletedEmployeeResponse>>> GetAlldeletedEmployee()
+    {
+        var deletedEmployees = await dbcontext.Employees
+            .Where(e => e.IsDeleted)
+            .Include(e => e.RiderDetails)
+                .ThenInclude(rd => rd.Company)
+            .Include(e => e.Housing)
+            .AsNoTracking()
+            .ToListAsync();
+
+        if (deletedEmployees.Count == 0)
+            return Result.Failure<IEnumerable<DeletedEmployeeResponse>>(
+                new Error("No Deleted Employees Found", "No deleted employees", 400)
             );
 
-        return Result.Success<IEnumerable<DeletedEmployees>>(employees);
-    }
+        var response = deletedEmployees.Select(emp => new DeletedEmployeeResponse(
+            IqamaNo: emp.IqamaNo,
+            IqamaEndM: emp.IqamaEndM,
+            IqamaEndH: emp.IqamaEndH,
+            PassportNo: emp.PassportNo,
+            PassportEnd: emp.PassportEnd,
+            sponsorNo: emp.sponsorNo,
+            Sponsor: emp.Sponsor,
+            JobTitle: emp.JobTitle,
+            NameAR: emp.NameAR,
+            NameEN: emp.NameEN,
+            Country: emp.Country,
+            Phone: emp.Phone,
+            DateOfBirth: emp.DateOfBirth,
+            Status: emp.Status,
+            IBAN: emp.IBAN,
+            INKSA: emp.INKSA,
+            CreatedAt: emp.CreatedAt,
+            DeletedAt: emp.DeletedAt,
+            HousingName: emp.Housing?.Name,
+            // Rider details if exists
+            WorkingId: emp.RiderDetails?.WorkingId,
+            TshirtSize: emp.RiderDetails?.TshirtSize,
+            LicenseNumber: emp.RiderDetails?.LicenseNumber,
+            CompanyName: emp.RiderDetails?.Company?.Name,
+            VehicleNumber: emp.RiderDetails?.VehicleNumber
+        )).ToList();
 
+        return Result.Success<IEnumerable<DeletedEmployeeResponse>>(response);
+    }
+    public record DeletedEmployeeResponse(
+    long IqamaNo,
+    DateOnly IqamaEndM,
+    DateOnly IqamaEndH,
+    string? PassportNo,
+    DateOnly? PassportEnd,
+    long sponsorNo,
+    string Sponsor,
+    string JobTitle,
+    string NameAR,
+    string NameEN,
+    string Country,
+    string Phone,
+    DateOnly DateOfBirth,
+    string Status,
+    string? IBAN,
+    bool INKSA,
+    DateTime CreatedAt,
+    DateTime? DeletedAt,
+    string? HousingName,
+    // Rider details
+    string? WorkingId,
+    string? TshirtSize,
+    string? LicenseNumber,
+    string? CompanyName,
+    string? VehicleNumber
+);
     public async Task<Result<EmployeeStatusHistoryResponse>> GetEmployeeStatusHistoryAsync(long IqamaNo)
     {
         try

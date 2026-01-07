@@ -32,16 +32,18 @@ public class AdminService(
                    u.Address,
                    u.FullName,
                    u.IsDisable,
-                   roles = roles.Select(r => r.Name!).ToList()
+                   roles = roles.Select(r => r.Name!).ToList(),
+                   u.LastLogin
                })
-                  .GroupBy(x => new { x.Id, x.UserName, x.Address, x.FullName, x.IsDisable })
+                  .GroupBy(x => new { x.Id, x.UserName, x.Address, x.FullName, x.IsDisable , x.LastLogin })
                   .Select(c => new UserResponses(
                       c.Key.Id,
                       c.Key.FullName,
                       c.Key.Address,
                       c.Key.UserName,
                       c.Key.IsDisable,
-                      c.SelectMany(x => x.roles)
+                      c.SelectMany(x => x.roles),
+                      c.Key.LastLogin
                       ))
                   .ToListAsync();
     public async Task<Result> DeletaUserAsync(string UserName)
@@ -73,7 +75,9 @@ public class AdminService(
             user.Address!,
             user.UserName!,
             user.IsDisable,
-            userroles
+            userroles,
+            user.LastLogin
+
         );
 
         return Result.Success(response);
@@ -92,7 +96,8 @@ public class AdminService(
             user.Address!,
             user.UserName!,
             user.IsDisable,
-            userroles
+            userroles,
+            user.LastLogin
         );
 
         return Result.Success(response);

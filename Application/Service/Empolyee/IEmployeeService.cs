@@ -14,7 +14,7 @@ public interface IEmployeeService
 {
     Task<bool> Togle(long iqama);
     Task<Result<IEnumerable<EmpolyeeResponse>>>GetAllEmployee();
-    Task<Result<IEnumerable<DeletedEmployees>>>GetAlldeletedEmployee();
+    Task<Result<IEnumerable<DeletedEmployeeResponse>>> GetAlldeletedEmployee();
     Task<Result<IEnumerable<EmpolyeeResponse>>>Get(long IqamaNo);
     Task<Result<EmpolyeeResponse>>Get1(long IqamaNo);
     Task<Result<EmpolyeeResponse>> CreateAsync(EmpolyeeRequest Request);

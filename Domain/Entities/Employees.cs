@@ -25,8 +25,10 @@ public class Employees
     public bool INKSA { get; set; } = true;
     public bool IsEmployee { get; set; } = false;
     public int? HousingId { get; set; }
-    public Housing? Housing { get; set; } 
+    public Housing? Housing { get; set; }
 
+    public bool IsDeleted { get; set; } = false;
+    public DateTime? DeletedAt { get; set; }
     public RiderDetails? RiderDetails { get; set; }
 
     public EmployeeDocuments? EmployeeDocuments { get; set; }

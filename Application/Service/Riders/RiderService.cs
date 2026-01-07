@@ -25,9 +25,11 @@ public class RiderService(ApplicationDbcontext dbcontext,IRiderWorkingIdHistoryS
         try
         {
             var totalEmployees = await dbcontext.Employees
+                        .Where(e => !e.IsDeleted)
                 .CountAsync();
 
             var totalRiders = await dbcontext.Employees
+                        .Where(e => !e.IsDeleted)
                 .Where(e => !e.IsEmployee)
                 .CountAsync();
 
@@ -53,6 +55,7 @@ public class RiderService(ApplicationDbcontext dbcontext,IRiderWorkingIdHistoryS
 
         var isexist = await dbcontext
            .Employees
+                   .Where(e => !e.IsDeleted)
            .Where(r => r.IqamaNo.ToString().StartsWith(IqamaNo.ToString()))
            .Include(e => e.Housing)
            .Include(e => e.RiderDetails)
@@ -63,81 +66,28 @@ public class RiderService(ApplicationDbcontext dbcontext,IRiderWorkingIdHistoryS
         if (isexist is null)
             return Result.Failure<IEnumerable<RiderResponse>>(error: new Error("No rider Found", "no rider found with this Iqama", 400));
 
-
-        var res = isexist.Select(emp => new RiderResponse(
-       emp.IqamaNo,
-              emp.IsEmployee,
-       emp.IqamaEndM,
-       emp.IqamaEndH,
-       emp.PassportNo!,
-       emp.PassportEnd ?? default,
-       emp.Sponsor,
-       emp.sponsorNo,
-       emp.JobTitle,
-       emp.NameAR,
-       emp.NameEN,
-       emp.Country,
-       emp.Phone,
-       emp.DateOfBirth,
-       emp.Status,
-       emp.IBAN!,
-       emp.INKSA,
-       emp.CreatedAt,
-       emp.Housing?.Name ?? "none",
-       emp.RiderDetails?.WorkingId!,
-         emp.IqamaNo,
-            emp.RiderDetails?.TshirtSize,
-            emp.RiderDetails?.LicenseNumber,
-            emp.RiderDetails?.Company.Name
-            )).ToList();
+        var response = isexist.Select(MapToResponse).ToList();
 
 
-        return Result.Success<IEnumerable<RiderResponse>>(res);
+
+        return Result.Success<IEnumerable<RiderResponse>>(response);
     }
     public async Task<Result<IEnumerable<RiderResponse>>> GetAllEmployee()
     {
-        var isexist = await dbcontext
-            .Employees
+        var employees = await dbcontext.Employees
+                    .Where(e => !e.IsDeleted)
             .AsNoTracking()
             .Include(e => e.Housing)
             .Include(e => e.RiderDetails)
                 .ThenInclude(rd => rd.Company)
             .ToListAsync();
 
-        if (isexist.Count == 0)
+        if (!employees.Any())
             return Result.Failure<IEnumerable<RiderResponse>>(
-                new Error("No rider Found", "no rider", 400)
-            );
+                new Error("NotFound", "No employees or riders found", 404));
 
-        var res = isexist.Select(emp => new RiderResponse(
-       emp.IqamaNo,
-       emp.IsEmployee,
-       emp.IqamaEndM,
-       emp.IqamaEndH,
-       emp.PassportNo!,
-       emp.PassportEnd ?? default,
-       emp.Sponsor,
-       emp.sponsorNo,
-       emp.JobTitle,
-       emp.NameAR,
-       emp.NameEN,
-       emp.Country,
-       emp.Phone,
-       emp.DateOfBirth,
-       emp.Status,
-       emp.IBAN!,
-       emp.INKSA,
-       emp.CreatedAt,
-       emp.Housing?.Name,
-       emp.RiderDetails?.WorkingId!,
-         emp.IqamaNo,
-            emp.RiderDetails?.TshirtSize,
-            emp.RiderDetails?.LicenseNumber,
-            emp.RiderDetails?.Company.Name
-            )).ToList();
-
-
-        return Result.Success<IEnumerable<RiderResponse>>(res);
+        var response = employees.Select(MapToResponse).ToList();
+        return Result.Success<IEnumerable<RiderResponse>>(response);
     }
     public async Task<Result> CreateAsync(RiderRequest Request)
     {
@@ -145,10 +95,11 @@ public class RiderService(ApplicationDbcontext dbcontext,IRiderWorkingIdHistoryS
 
         try
         {
-            var isexist = dbcontext.RiderDetails.Any(x => x.EmployeeIqamaNo == Request.IqamaNo);
-            if (isexist)
-                return Result.Failure(error: new Error("rider exists", "rider already exists with this Iqama", 400));
-
+            // Check if employee already exists
+            var exists = await dbcontext.Employees.AnyAsync(x => x.IqamaNo == Request.IqamaNo);
+            if (exists)
+                return Result.Failure(new Error("AlreadyExists",
+                    "Employee/Rider already exists with this Iqama", 400));
 
             var employee = new Employees
             {
@@ -171,24 +122,23 @@ public class RiderService(ApplicationDbcontext dbcontext,IRiderWorkingIdHistoryS
                 IsEmployee = Request.IsEmployee,
             };
 
-            if (Request.IsEmployee && Request.WorkingId == null && Request.CompanyName == null)
+            // Only create RiderDetails if WorkingId and CompanyName are provided
+            if (!string.IsNullOrWhiteSpace(Request.WorkingId) &&
+                !string.IsNullOrWhiteSpace(Request.CompanyName))
             {
+                var company = await dbcontext.Companies
+                    .FirstOrDefaultAsync(c => c.Name == Request.CompanyName);
 
-                await dbcontext.Employees.AddAsync(employee);
-                await dbcontext.SaveChangesAsync();
-                return Result.Success();
+                if (company is null)
+                    return Result.Failure(new Error("NotFound",
+                        $"Company '{Request.CompanyName}' not found", 404));
 
-
-            }
-
-
-            else
-            {
-                var Company = await dbcontext.Companies.FirstOrDefaultAsync(c => c.Name == Request.CompanyName);
-
-                if (Company is null)
-                    return Result.Failure(error: new Error("no company found", $"no company found with this name ", 400));
-
+                // Check if WorkingId already exists
+                var workingIdExists = await dbcontext.RiderDetails
+                    .AnyAsync(rd => rd.WorkingId == Request.WorkingId);
+                if (workingIdExists)
+                    return Result.Failure(new Error("AlreadyExists",
+                        $"WorkingId '{Request.WorkingId}' is already assigned", 400));
 
                 employee.RiderDetails = new RiderDetails
                 {
@@ -196,19 +146,20 @@ public class RiderService(ApplicationDbcontext dbcontext,IRiderWorkingIdHistoryS
                     WorkingId = Request.WorkingId,
                     TshirtSize = Request.TshirtSize,
                     LicenseNumber = Request.LicenseNumber,
-                    CompanyId = Company.Id
+                    CompanyId = company.Id
                 };
 
                 await dbcontext.Employees.AddAsync(employee);
                 await dbcontext.SaveChangesAsync();
 
+                // Record in history
                 var historyResult = await _workingIdHistoryService.RecordWorkingIdChange(
-                Request.IqamaNo,
-                Request.WorkingId,
-                Company.Id,
-                $"Initial assignment - Company: {Company.Name}",
-                cancellationToken: default  // ✅ Use named parameter
-            );
+                    Request.IqamaNo,
+                    Request.WorkingId,
+                    company.Id,
+                    $"Initial assignment - Company: {company.Name}",
+                    cancellationToken: default
+                );
 
                 if (historyResult.IsFailure)
                 {
@@ -216,71 +167,61 @@ public class RiderService(ApplicationDbcontext dbcontext,IRiderWorkingIdHistoryS
                     return Result.Failure(new Error("HistoryError",
                         $"Failed to record history: {historyResult.Error.Description}", 500));
                 }
-
-                await transaction.CommitAsync();
-                return Result.Success();
-
             }
+            else
+            {
+                // Create employee without RiderDetails
+                await dbcontext.Employees.AddAsync(employee);
+                await dbcontext.SaveChangesAsync();
+            }
+
+            await transaction.CommitAsync();
+            return Result.Success();
         }
         catch (Exception ex)
         {
             await transaction.RollbackAsync();
-            return Result.Failure(new Error("Server Error", ex.Message, 500));
+            return Result.Failure(new Error("ServerError", ex.Message, 500));
         }
     }
+
     public async Task<Result> DeleteAsync(long IqamaNo, CancellationToken cancellationToken = default)
     {
         using var transaction = await dbcontext.Database.BeginTransactionAsync(cancellationToken);
 
         try
         {
-            var isexist = await dbcontext.Employees.Include(c=>c.RiderDetails).FirstOrDefaultAsync(c=>c.IqamaNo == IqamaNo);
+            var employee = await dbcontext.Employees
+                .Include(c => c.RiderDetails)
+                .FirstOrDefaultAsync(c => c.IqamaNo == IqamaNo, cancellationToken);
 
-            if (isexist is null)
-                return Result.Failure<EmpolyeeResponse>(error: new Error("No rider Found", "no rider found with this Iqama", 400));
+            if (employee is null)
+                return Result.Failure(new Error("NotFound",
+                    "Employee/Rider not found with this Iqama", 404));
 
+            if (employee.IsDeleted)
+                return Result.Failure(new Error("AlreadyDeleted",
+                    "Employee/Rider is already deleted", 400));
 
+            // ✅ Soft delete: Mark as deleted instead of removing
+            employee.IsDeleted = true;
+            employee.DeletedAt = DateTime.UtcNow.AddHours(3);
+            employee.Status = "deleted";
 
-            var Done = new DeletedEmployees
+            // ✅ Deactivate history records (preserve audit trail)
+            if (employee.RiderDetails != null)
             {
-                IqamaNo = isexist.IqamaNo,
-                IqamaEndM = isexist.IqamaEndM,
-                IqamaEndH = isexist.IqamaEndH,
-                PassportNo = isexist.PassportNo,
-                PassportEnd = isexist.PassportEnd,
-                Sponsor = isexist.Sponsor,
-                JobTitle = isexist.JobTitle,
-                NameAR = isexist.NameAR,
-                NameEN = isexist.NameEN,
-                Country = isexist.Country,
-                Phone = isexist.Phone,
-                DateOfBirth = isexist.DateOfBirth.ToDateTime(TimeOnly.MaxValue),
-                Status = isexist.Status,
-                AcountStatus = isexist.Status,
-                IBAN = isexist.IBAN,
-                CreatedAt = isexist.CreatedAt,
-                INKSA = isexist.INKSA,
-                HousingId = isexist.HousingId,
-                WorkingId = isexist.RiderDetails?.WorkingId,
-                TshirtSize = isexist.RiderDetails?.TshirtSize,
-                LicenseNumber = isexist.RiderDetails?.LicenseNumber,
-                CompanyId = isexist.RiderDetails?.CompanyId,
-                VehicleId = 0
-            };
+                var activeHistories = await dbcontext.RiderWorkingIdHistories
+                    .Where(h => h.RiderIqamaNo == IqamaNo && h.IsActive)
+                    .ToListAsync(cancellationToken);
 
-            //var histories = await dbcontext.RiderWorkingIdHistories
-            //.Where(h => h.RiderIqamaNo == IqamaNo)
-            //.ToListAsync(cancellationToken);
-
-            //        dbcontext.RiderWorkingIdHistories.RemoveRange(histories);
-
-
-            await dbcontext.DeletedEmployees.AddAsync(Done, cancellationToken);
-
-            dbcontext.RiderDetails.Remove(isexist.RiderDetails);
-
-          
-            dbcontext.Employees.Remove(isexist);
+                foreach (var history in activeHistories)
+                {
+                    history.IsActive = false;
+                    history.EndDate = DateTime.UtcNow.AddHours(3);
+                    history.Notes = $"{history.Notes} | Employee soft-deleted on {DateTime.UtcNow.AddHours(3):yyyy-MM-dd}";
+                }
+            }
 
             await dbcontext.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
@@ -290,7 +231,7 @@ public class RiderService(ApplicationDbcontext dbcontext,IRiderWorkingIdHistoryS
         catch (Exception ex)
         {
             await transaction.RollbackAsync(cancellationToken);
-            return Result.Failure(new Error("error", ex.Message, 500));
+            return Result.Failure(new Error("ServerError", ex.Message, 500));
         }
     }
     public async Task<Result<RiderResponse>> UpdateAsync(long IqamaNo, URiderRequest request)
@@ -299,116 +240,107 @@ public class RiderService(ApplicationDbcontext dbcontext,IRiderWorkingIdHistoryS
 
         try
         {
-
-            var employee = await dbcontext.Employees
-        .Include(e => e.Housing)
-        .Include(e => e.RiderDetails)
-            .ThenInclude(rd => rd.Company)
-        .FirstOrDefaultAsync(e => e.IqamaNo == IqamaNo);
+            var employee = await dbcontext.Employees.Where(e => !e.IsDeleted)
+                .Include(e => e.Housing)
+                .Include(e => e.RiderDetails)
+                    .ThenInclude(rd => rd.Company)
+                .FirstOrDefaultAsync(e => e.IqamaNo == IqamaNo);
 
             if (employee is null)
-                return Result.Failure<RiderResponse>(error: new Error("No rider Found", "no rider found with this Iqama", 400));
+                return Result.Failure<RiderResponse>(
+                    new Error("NotFound", "Employee/Rider not found with this Iqama", 404));
 
-            var riderDetails = employee.RiderDetails;
-
+            // Update basic employee fields
+            UpdateEmployeeFields(employee, request);
 
             bool workingIdChanged = false;
             int? newCompanyId = null;
             string? newWorkingId = null;
 
-            if (!string.IsNullOrWhiteSpace(request.WorkingId) &&
-                request.WorkingId != riderDetails.WorkingId)
+            // Handle RiderDetails updates
+            if (employee.RiderDetails != null)
             {
-                newWorkingId = request.WorkingId;
-                workingIdChanged = true;
-            }
+                // Check for WorkingId change
+                if (!string.IsNullOrWhiteSpace(request.WorkingId) &&
+                    request.WorkingId != employee.RiderDetails.WorkingId)
+                {
+                    // Validate new WorkingId is not in use
+                    var workingIdExists = await dbcontext.RiderDetails
+                        .AnyAsync(rd => rd.WorkingId == request.WorkingId &&
+                                       rd.Id != employee.RiderDetails.Id);
+                    if (workingIdExists)
+                        return Result.Failure<RiderResponse>(
+                            new Error("AlreadyExists",
+                                $"WorkingId '{request.WorkingId}' is already assigned", 400));
 
-            if (request.CompanyName is not null)
+                    newWorkingId = request.WorkingId;
+                    workingIdChanged = true;
+                }
+
+                // Check for Company change
+                if (!string.IsNullOrWhiteSpace(request.CompanyName))
+                {
+                    var company = await dbcontext.Companies
+                        .FirstOrDefaultAsync(c => c.Name == request.CompanyName);
+
+                    if (company is null)
+                        return Result.Failure<RiderResponse>(
+                            new Error("NotFound",
+                                $"Company '{request.CompanyName}' not found", 404));
+
+                    if (company.Id != employee.RiderDetails.CompanyId)
+                    {
+                        newCompanyId = company.Id;
+                        workingIdChanged = true;
+                    }
+                }
+
+                // Update RiderDetails fields
+                UpdateRiderDetailsFields(employee.RiderDetails, request);
+            }
+            else if (!string.IsNullOrWhiteSpace(request.WorkingId) &&
+                     !string.IsNullOrWhiteSpace(request.CompanyName))
             {
+                // Create RiderDetails if it doesn't exist but details are provided
                 var company = await dbcontext.Companies
                     .FirstOrDefaultAsync(c => c.Name == request.CompanyName);
 
                 if (company is null)
                     return Result.Failure<RiderResponse>(
-                        new Error("no company found", $"no company found with name {request.CompanyName}", 400));
+                        new Error("NotFound",
+                            $"Company '{request.CompanyName}' not found", 404));
 
-                if (company.Id != riderDetails.CompanyId)
+                var workingIdExists = await dbcontext.RiderDetails
+                    .AnyAsync(rd => rd.WorkingId == request.WorkingId);
+                if (workingIdExists)
+                    return Result.Failure<RiderResponse>(
+                        new Error("AlreadyExists",
+                            $"WorkingId '{request.WorkingId}' is already assigned", 400));
+
+                employee.RiderDetails = new RiderDetails
                 {
-                    newCompanyId = company.Id;
-                    workingIdChanged = true;
-                }
-            }
+                    EmployeeIqamaNo = IqamaNo,
+                    WorkingId = request.WorkingId,
+                    TshirtSize = request.TshirtSize,
+                    LicenseNumber = request.LicenseNumber,
+                    CompanyId = company.Id
+                };
 
-            if (request.IqamaEndM.HasValue)
-                employee.IqamaEndM = request.IqamaEndM.Value;
-            if (request.IqamaEndH.HasValue)
-                employee.IqamaEndH = request.IqamaEndH.Value;
-
-            if (request.PassportNo is not null)
-                employee.PassportNo = request.PassportNo;
-
-            if (request.PassportEnd.HasValue)
-                employee.PassportEnd = request.PassportEnd;
-
-            if (request.Sponsor is not null)
-                employee.Sponsor = request.Sponsor;
-            
-            if (request.sponsorNo is not null)
-                employee.sponsorNo = request.sponsorNo ?? 0;
-
-            if (request.JobTitle is not null)
-                employee.JobTitle = request.JobTitle;
-
-            if (request.NameAR is not null)
-                employee.NameAR = request.NameAR;
-
-            if (request.NameEN is not null)
-                employee.NameEN = request.NameEN;
-
-            if (request.Country is not null)
-                employee.Country = request.Country;
-
-            if (request.Phone is not null)
-                employee.Phone = request.Phone;
-
-            if (request.DateOfBirth.HasValue)
-                employee.DateOfBirth = request.DateOfBirth.Value;
-
-            if (request.Status is not null)
-                employee.Status = request.Status;
-
-            if (request.IBAN is not null)
-                employee.IBAN = request.IBAN;
-
-            if (request.INKSA is not null)
-                employee.INKSA = request.INKSA.Value;
-
-            if (!string.IsNullOrWhiteSpace(request.WorkingId) || int.TryParse(request.WorkingId, out var id) || id > 0)
-                riderDetails.WorkingId = request.WorkingId;
-
-            if (request.TshirtSize is not null)
-                riderDetails.TshirtSize = request.TshirtSize;
-
-            if (request.LicenseNumber is not null)
-                riderDetails.LicenseNumber = request.LicenseNumber;
-
-            if (request.CompanyName is not null)
-            {
-                var company = await dbcontext.Companies.FirstOrDefaultAsync(c => c.Name == request.CompanyName);
-                if (company is null)
-                    return Result.Failure<RiderResponse>(error: new Error("no company found", $"no company found with this name {request.CompanyName}", 400));
-                riderDetails.CompanyId = company.Id;
+                workingIdChanged = true;
+                newWorkingId = request.WorkingId;
+                newCompanyId = company.Id;
             }
 
             await dbcontext.SaveChangesAsync();
 
-            if (workingIdChanged)
+            // Record history if WorkingId or Company changed
+            if (workingIdChanged && employee.RiderDetails != null)
             {
-                var finalWorkingId = newWorkingId ?? riderDetails.WorkingId!;
-                var finalCompanyId = newCompanyId ?? riderDetails.CompanyId;
+                var finalWorkingId = newWorkingId ?? employee.RiderDetails.WorkingId!;
+                var finalCompanyId = newCompanyId ?? employee.RiderDetails.CompanyId;
 
                 var company = await dbcontext.Companies
-                    .AsNoTracking()  
+                    .AsNoTracking()
                     .FirstOrDefaultAsync(c => c.Id == finalCompanyId);
 
                 var historyResult = await _workingIdHistoryService.RecordWorkingIdChange(
@@ -416,7 +348,7 @@ public class RiderService(ApplicationDbcontext dbcontext,IRiderWorkingIdHistoryS
                     finalWorkingId,
                     finalCompanyId,
                     $"Updated - Company: {company?.Name ?? "Unknown"}",
-                    cancellationToken: default 
+                    cancellationToken: default
                 );
 
                 if (historyResult.IsFailure)
@@ -427,22 +359,24 @@ public class RiderService(ApplicationDbcontext dbcontext,IRiderWorkingIdHistoryS
                 }
             }
 
-            var response = MapToResponse(employee, riderDetails);
             await transaction.CommitAsync();
 
+            var response = MapToResponse(employee);
             return Result.Success(response);
         }
         catch (Exception ex)
         {
             await transaction.RollbackAsync();
-            return Result.Failure<RiderResponse>(new Error("Server Error", ex.Message, 500));
+            return Result.Failure<RiderResponse>(new Error("ServerError", ex.Message, 500));
         }
     }
+
+
     public async Task<List<RiderResponse>> SmartSearch(string keyword)
     {
         keyword = keyword.ToLower();
 
-        var query = dbcontext.Employees
+        var query = await dbcontext.Employees.Where(e => !e.IsDeleted)
             .Include(e => e.Housing)
             .Include(e => e.RiderDetails)
                 .ThenInclude(rd => rd.Company)
@@ -452,53 +386,28 @@ public class RiderService(ApplicationDbcontext dbcontext,IRiderWorkingIdHistoryS
                 e.Country.ToLower().Contains(keyword) ||
                 e.Sponsor.ToLower().Contains(keyword) ||
                 e.JobTitle.ToLower().Contains(keyword) ||
-                e.IBAN.ToLower().Contains(keyword) ||
-                e.IqamaNo .ToString().StartsWith(keyword) ||
-                e.sponsorNo.ToString().ToLower().StartsWith(keyword)
+                (e.IBAN != null && e.IBAN.ToLower().Contains(keyword)) ||
+                e.IqamaNo.ToString().StartsWith(keyword) ||
+                e.sponsorNo.ToString().StartsWith(keyword) ||
+                (e.RiderDetails != null && e.RiderDetails.WorkingId != null &&
+                 e.RiderDetails.WorkingId.ToLower().Contains(keyword))
             )
-            .Select(emp => new RiderResponse(
-                emp.IqamaNo,
-                emp.IsEmployee,
-                emp.IqamaEndM,
-                emp.IqamaEndH,
-                emp.PassportNo,
-                emp.PassportEnd ?? default,
-                emp.Sponsor,
-                emp.sponsorNo,
-                emp.JobTitle,
-                emp.NameAR,
-                emp.NameEN,
-                emp.Country,
-                emp.Phone,
-                emp.DateOfBirth,
-                emp.Status,
-                emp.IBAN,
-                emp.INKSA,
-                emp.CreatedAt,
+            .ToListAsync();
 
-                emp.Housing.Name ?? "null",
-
-                emp.RiderDetails.WorkingId,
-                emp.IqamaNo,
-                emp.RiderDetails.TshirtSize,
-                emp.RiderDetails.LicenseNumber,
-                emp.RiderDetails.Company.Name
-            ));
-
-        return await query.ToListAsync();
+        return query.Select(MapToResponse).ToList();
     }
     public async Task<Result<IEnumerable<RiderResponse>>> Filter(EmployeeFilterr filter)
     {
-        var query = dbcontext.Employees
+        var query = dbcontext.Employees.Where(e => !e.IsDeleted)
             .Include(e => e.RiderDetails)
                 .ThenInclude(rd => rd.Company)
             .Include(e => e.Housing)
             .AsQueryable();
 
-        if (filter.IqamaEndH is not null)
+        if (filter.IqamaEndH.HasValue)
             query = query.Where(e => e.IqamaEndH == filter.IqamaEndH);
 
-        if (filter.IqamaEndM is not null)
+        if (filter.IqamaEndM.HasValue)
             query = query.Where(e => e.IqamaEndM == filter.IqamaEndM);
 
         if (!string.IsNullOrWhiteSpace(filter.Sponsor))
@@ -507,7 +416,7 @@ public class RiderService(ApplicationDbcontext dbcontext,IRiderWorkingIdHistoryS
         if (filter.sponsorNo.HasValue)
             query = query.Where(e => e.sponsorNo == filter.sponsorNo.Value);
 
-        if (filter.PassportEnd is not null)
+        if (filter.PassportEnd.HasValue)
             query = query.Where(e => e.PassportEnd == filter.PassportEnd);
 
         if (!string.IsNullOrWhiteSpace(filter.JobTitle))
@@ -526,79 +435,27 @@ public class RiderService(ApplicationDbcontext dbcontext,IRiderWorkingIdHistoryS
             query = query.Where(e => e.Status.Contains(filter.Status));
 
         if (!string.IsNullOrWhiteSpace(filter.WorkingId))
-            query = query.Where(e => e.RiderDetails.WorkingId.Contains(filter.WorkingId));
-       
-        if (!string.IsNullOrWhiteSpace(filter.CompanyName))
-            query = query.Where(e => e.RiderDetails.Company.Name.Contains(filter.CompanyName));
+            query = query.Where(e => e.RiderDetails != null &&
+                                     e.RiderDetails.WorkingId!.Contains(filter.WorkingId));
 
-        if (filter.INKSA is not null)
+        if (!string.IsNullOrWhiteSpace(filter.CompanyName))
+            query = query.Where(e => e.RiderDetails != null &&
+                                     e.RiderDetails.Company.Name.Contains(filter.CompanyName));
+
+        if (filter.INKSA.HasValue)
             query = query.Where(e => e.INKSA == filter.INKSA);
 
         if (!string.IsNullOrWhiteSpace(filter.HousingName))
             query = query.Where(e => e.Housing != null &&
                                      e.Housing.Name.Contains(filter.HousingName));
 
-        var res = query.Select(emp => new RiderResponse(
-       emp.IqamaNo,
-         emp.IsEmployee,
-       emp.IqamaEndM,
-       emp.IqamaEndH,
-       emp.PassportNo!,
-       emp.PassportEnd ?? default,
-       emp.Sponsor,
-       emp.sponsorNo,
-       emp.JobTitle,
-       emp.NameAR,
-       emp.NameEN,
-       emp.Country,
-       emp.Phone,
-       emp.DateOfBirth,
-       emp.Status,
-       emp.IBAN!,
-       emp.INKSA,
-       emp.CreatedAt,
-       emp.Housing.Name ?? "none",
-       emp.RiderDetails.WorkingId!,
-         emp.IqamaNo,
-            emp.RiderDetails.TshirtSize!,
-            emp.RiderDetails.LicenseNumber!,
-            emp.RiderDetails.Company.Name
-            )).ToList();
+        var results = await query.ToListAsync();
+        var response = results.Select(MapToResponse).ToList();
 
-
-        return Result.Success<IEnumerable<RiderResponse>>(res);
+        return Result.Success<IEnumerable<RiderResponse>>(response);
     }
 
 
-    private static RiderResponse MapToResponse(Employees employee, RiderDetails rider)
-    {
-        return new RiderResponse(
-            IqamaNo: employee.IqamaNo,
-             employee.IsEmployee,
-            IqamaEndM: employee.IqamaEndM,
-            IqamaEndH: employee.IqamaEndH,
-            PassportNo: employee.PassportNo,
-            PassportEnd: employee.PassportEnd ?? default,
-            Sponsor: employee.Sponsor,
-            sponsorNo: employee.sponsorNo,
-            JobTitle: employee.JobTitle,
-            NameAR: employee.NameAR,
-            NameEN: employee.NameEN,
-            Country: employee.Country,
-            Phone: employee.Phone,
-            DateOfBirth: employee.DateOfBirth,
-            Status: employee.Status,
-            IBAN: employee.IBAN,
-            CreatedAt: employee.CreatedAt,
-            INKSA: employee.INKSA,
-            HousingAddress: employee.Housing?.Name,
-            WorkingId: rider.WorkingId ?? "0",
-            EmployeeIqamaNo: rider.EmployeeIqamaNo,
-            TshirtSize: rider.TshirtSize!,
-            LicenseNumber: rider.LicenseNumber!,
-            CompanyName: rider.Company.Name
-        );
-    }
     public async Task<Result> ChangeWorkinId(string OldWorkinId, string NewWorkingId)
     {
         using var transaction = await dbcontext.Database.BeginTransactionAsync();
@@ -670,129 +527,196 @@ public class RiderService(ApplicationDbcontext dbcontext,IRiderWorkingIdHistoryS
 
         try
         {
-            var employee = await dbcontext.Employees.AnyAsync(e => e.IqamaNo == IqamaNo);
+            var employee = await dbcontext.Employees
+                        .Where(e => !e.IsDeleted)
+                .Include(e => e.RiderDetails)
+                .FirstOrDefaultAsync(e => e.IqamaNo == IqamaNo);
 
-            if (!employee)
-                return Result.Failure(new Error("Not Found", "No employee found with the specified Iqama No", 404));
+            if (employee is null)
+                return Result.Failure(
+                    new Error("NotFound", "Employee not found with the specified Iqama No", 404));
 
-            var isRider = await dbcontext.RiderDetails.AnyAsync(r => r.EmployeeIqamaNo == IqamaNo);
+            if (employee.RiderDetails != null)
+                return Result.Failure(
+                    new Error("AlreadyExists", "Rider details already exist for this employee", 400));
 
-            if (isRider)
-                return Result.Failure(new Error("Found", "rider details found for this employee", 404));
+            var company = await dbcontext.Companies
+                .FirstOrDefaultAsync(c => c.Name == request.CompanyName);
 
+            if (company is null)
+                return Result.Failure(
+                    new Error("NotFound", $"Company '{request.CompanyName}' not found", 404));
 
-            var Company = await dbcontext.Companies.FirstOrDefaultAsync(c => c.Name == request.CompanyName);
+            var workingIdExists = await dbcontext.RiderDetails
+                .AnyAsync(rd => rd.WorkingId == request.WorkingId);
+            if (workingIdExists)
+                return Result.Failure(
+                    new Error("AlreadyExists",
+                        $"WorkingId '{request.WorkingId}' is already assigned", 400));
 
-            if (Company is null)
-                return Result.Failure(error: new Error("no company found", $"no company found with this name {Company.Name}", 400));
-
-            var emtor = new RiderDetails
+            var riderDetails = new RiderDetails
             {
                 EmployeeIqamaNo = IqamaNo,
                 WorkingId = request.WorkingId,
                 TshirtSize = request.TshirtSize,
                 LicenseNumber = request.LicenseNumber,
-                CompanyId = Company.Id
+                CompanyId = company.Id
             };
-            await dbcontext.RiderDetails.AddAsync(emtor);
+
+            await dbcontext.RiderDetails.AddAsync(riderDetails);
             await dbcontext.SaveChangesAsync();
+
+            var historyResult = await _workingIdHistoryService.RecordWorkingIdChange(
+                IqamaNo,
+                request.WorkingId,
+                company.Id,
+                $"Rider details added - Company: {company.Name}",
+                cancellationToken: default
+            );
+
+            if (historyResult.IsFailure)
+            {
+                await transaction.RollbackAsync();
+                return Result.Failure(new Error("HistoryError",
+                    $"Failed to record history: {historyResult.Error.Description}", 500));
+            }
+
             await transaction.CommitAsync();
             return Result.Success();
         }
         catch (Exception ex)
         {
             await transaction.RollbackAsync();
-            return Result.Failure(new Error("Server Error", ex.Message, 500));
-
+            return Result.Failure(new Error("ServerError", ex.Message, 500));
         }
     }
 
-    public async Task<Result<RiderResponse>> Getbyid(int Id)
+    public async Task<Result<RiderResponse>> Getbyid(long Id)
     {
-        var rider = await
-            dbcontext.Employees
+        var employee = await dbcontext.Employees
+                    .Where(e => !e.IsDeleted)
             .Include(e => e.Housing)
             .Include(e => e.RiderDetails)
                 .ThenInclude(rd => rd.Company)
-            .FirstOrDefaultAsync(e => e.IqamaNo == Id && !e.IsEmployee);
+            .FirstOrDefaultAsync(e => e.IqamaNo == Id);
 
-        if (rider is null)
-            return Result.Failure<RiderResponse>(error: new Error("No rider Found", "no rider found with this Iqama", 400));
+        if (employee is null)
+            return Result.Failure<RiderResponse>(
+                new Error("NotFound", "No employee or rider found with this ID", 404));
 
-        var response = new RiderResponse(
-            rider.IqamaNo,
-            rider.IsEmployee,
-            rider.IqamaEndM,
-            rider.IqamaEndH,
-            rider.PassportNo!,
-            rider.PassportEnd ?? default,
-            rider.Sponsor,
-            rider.sponsorNo,
-            rider.JobTitle,
-            rider.NameAR,
-            rider.NameEN,
-            rider.Country,
-            rider.Phone,
-            rider.DateOfBirth,
-            rider.Status,
-            rider.IBAN!,
-            rider.INKSA,
-            rider.CreatedAt,
-            rider.Housing?.Name,
-            rider.RiderDetails!.WorkingId!,
-            rider.IqamaNo,
-            rider.RiderDetails.TshirtSize!,
-            rider.RiderDetails.LicenseNumber!,
-            rider.RiderDetails.Company.Name
-            );
-        return Result.Success(response);
+        return Result.Success(MapToResponse(employee));
     }
 
     public async Task<Result<IEnumerable<RiderResponse>>> GetAllEmployeeNO()
     {
-        var isexist = await dbcontext
-            .Employees
+        var employees = await dbcontext.Employees
+                    .Where(e => !e.IsDeleted)
             .AsNoTracking()
-            .Where(r => r.IsEmployee == false && r.RiderDetails.VehicleNumber == null && r.Status == "disable")
+            .Where(r => !r.IsEmployee && r.RiderDetails != null &&
+                        r.RiderDetails.VehicleNumber == null && r.Status == "disable")
             .Include(e => e.Housing)
             .Include(e => e.RiderDetails)
                 .ThenInclude(rd => rd.Company)
             .ToListAsync();
 
-        if (isexist.Count == 0)
+        if (!employees.Any())
             return Result.Failure<IEnumerable<RiderResponse>>(
-                new Error("No rider Found", "no rider", 400)
-            );
+                new Error("NotFound", "No riders found matching criteria", 404));
 
-        var res = isexist.Select(emp => new RiderResponse(
-       emp.IqamaNo,
-         emp.IsEmployee,
-       emp.IqamaEndM,
-       emp.IqamaEndH,
-       emp.PassportNo!,
-       emp.PassportEnd ?? default,
-       emp.Sponsor,
-       emp.sponsorNo,
-       emp.JobTitle,
-       emp.NameAR,
-       emp.NameEN,
-       emp.Country,
-       emp.Phone,
-       emp.DateOfBirth,
-       emp.Status,
-       emp.IBAN!,
-       emp.INKSA,
-       emp.CreatedAt,
-       emp.Housing?.Name,
-       emp.RiderDetails.WorkingId!,
-         emp.IqamaNo,
-            emp.RiderDetails.TshirtSize!,
-            emp.RiderDetails.LicenseNumber!,
-            emp.RiderDetails.Company.Name
-            )).ToList();
+        var response = employees.Select(MapToResponse).ToList();
+        return Result.Success<IEnumerable<RiderResponse>>(response);
+    }
 
 
-        return Result.Success<IEnumerable<RiderResponse>>(res);
+    private static void UpdateEmployeeFields(Employees employee, URiderRequest request)
+    {
+        if (request.IqamaEndM.HasValue)
+            employee.IqamaEndM = request.IqamaEndM.Value;
+
+        if (request.IqamaEndH.HasValue)
+            employee.IqamaEndH = request.IqamaEndH.Value;
+
+        if (!string.IsNullOrWhiteSpace(request.PassportNo))
+            employee.PassportNo = request.PassportNo;
+
+        if (request.PassportEnd.HasValue)
+            employee.PassportEnd = request.PassportEnd;
+
+        if (!string.IsNullOrWhiteSpace(request.Sponsor))
+            employee.Sponsor = request.Sponsor;
+
+        if (request.sponsorNo.HasValue)
+            employee.sponsorNo = request.sponsorNo.Value;
+
+        if (!string.IsNullOrWhiteSpace(request.JobTitle))
+            employee.JobTitle = request.JobTitle;
+
+        if (!string.IsNullOrWhiteSpace(request.NameAR))
+            employee.NameAR = request.NameAR;
+
+        if (!string.IsNullOrWhiteSpace(request.NameEN))
+            employee.NameEN = request.NameEN;
+
+        if (!string.IsNullOrWhiteSpace(request.Country))
+            employee.Country = request.Country;
+
+        if (!string.IsNullOrWhiteSpace(request.Phone))
+            employee.Phone = request.Phone;
+
+        if (request.DateOfBirth.HasValue)
+            employee.DateOfBirth = request.DateOfBirth.Value;
+
+        if (!string.IsNullOrWhiteSpace(request.Status))
+            employee.Status = request.Status;
+
+        if (!string.IsNullOrWhiteSpace(request.IBAN))
+            employee.IBAN = request.IBAN;
+
+        if (request.INKSA.HasValue)
+            employee.INKSA = request.INKSA.Value;
+    }
+
+    private static void UpdateRiderDetailsFields(RiderDetails riderDetails, URiderRequest request)
+    {
+        if (!string.IsNullOrWhiteSpace(request.WorkingId))
+            riderDetails.WorkingId = request.WorkingId;
+
+        if (!string.IsNullOrWhiteSpace(request.TshirtSize))
+            riderDetails.TshirtSize = request.TshirtSize;
+
+        if (!string.IsNullOrWhiteSpace(request.LicenseNumber))
+            riderDetails.LicenseNumber = request.LicenseNumber;
+    }
+
+    private static RiderResponse MapToResponse(Employees employee)
+    {
+        return new RiderResponse(
+            IqamaNo: employee.IqamaNo,
+            IsEmployee: employee.IsEmployee,
+            IqamaEndM: employee.IqamaEndM,
+            IqamaEndH: employee.IqamaEndH,
+            PassportNo: employee.PassportNo ?? string.Empty,
+            PassportEnd: employee.PassportEnd ?? default,
+            Sponsor: employee.Sponsor,
+            sponsorNo: employee.sponsorNo,
+            JobTitle: employee.JobTitle,
+            NameAR: employee.NameAR,
+            NameEN: employee.NameEN,
+            Country: employee.Country,
+            Phone: employee.Phone,
+            DateOfBirth: employee.DateOfBirth,
+            Status: employee.Status,
+            IBAN: employee.IBAN ?? string.Empty,
+            INKSA: employee.INKSA,
+            CreatedAt: employee.CreatedAt,
+            HousingAddress: employee.Housing?.Name ?? "None",
+            WorkingId: employee.RiderDetails?.WorkingId ?? "N/A",
+            EmployeeIqamaNo: employee.IqamaNo,
+            TshirtSize: employee.RiderDetails?.TshirtSize ?? "N/A",
+            LicenseNumber: employee.RiderDetails?.LicenseNumber ?? "N/A",
+            CompanyName: employee.RiderDetails?.Company?.Name ?? "N/A"
+        );
     }
 }
+
 
