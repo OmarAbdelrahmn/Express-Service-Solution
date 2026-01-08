@@ -15,6 +15,56 @@ public class HungerController(IHungerDisabilityService service) : ControllerBase
 {
     private readonly IHungerDisabilityService service = service;
 
+    [HttpDelete("date/{shiftDate}")]
+    public async Task<IActionResult> DeleteAllByDate(
+    DateOnly shiftDate,
+    CancellationToken cancellationToken = default)
+    {
+        var response = await service.DeleteAllByDateAsync(shiftDate, cancellationToken);
+        return response.IsSuccess ? Ok(response.Value) : response.ToProblem();
+    }
+
+    /// <summary>
+    /// Delete a specific rider's record for a specific day
+    /// </summary>
+    [HttpDelete("rider/{actualWorkingId}/date/{shiftDate}")]
+    public async Task<IActionResult> DeleteByRiderAndDate(
+        string actualWorkingId,
+        DateOnly shiftDate,
+        CancellationToken cancellationToken = default)
+    {
+        var response = await service.DeleteByRiderAndDateAsync(actualWorkingId, shiftDate, cancellationToken);
+        return response.IsSuccess ? Ok(response.Value) : response.ToProblem();
+    }
+
+    /// <summary>
+    /// Delete all records within a date range
+    /// </summary>
+    [HttpDelete("date-range")]
+    public async Task<IActionResult> DeleteAllByDateRange(
+        [FromQuery] DateOnly startDate,
+        [FromQuery] DateOnly endDate,
+        CancellationToken cancellationToken = default)
+    {
+        var response = await service.DeleteAllByDateRangeAsync(startDate, endDate, cancellationToken);
+        return response.IsSuccess ? Ok(response.Value) : response.ToProblem();
+    }
+
+    /// <summary>
+    /// Delete a specific rider's records within a date range
+    /// </summary>
+    [HttpDelete("rider/{actualWorkingId}/date-range")]
+    public async Task<IActionResult> DeleteByRiderAndDateRange(
+        string actualWorkingId,
+        [FromQuery] DateOnly startDate,
+        [FromQuery] DateOnly endDate,
+        CancellationToken cancellationToken = default)
+    {
+        var response = await service.DeleteByRiderAndDateRangeAsync(
+            actualWorkingId, startDate, endDate, cancellationToken);
+        return response.IsSuccess ? Ok(response.Value) : response.ToProblem();
+    }
+
     [HttpPost("import")]
     public async Task<IActionResult> ImportFromExcel(
          IFormFile file,

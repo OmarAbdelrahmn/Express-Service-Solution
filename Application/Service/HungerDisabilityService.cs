@@ -13,6 +13,203 @@ public class HungerDisabilityService(
 {
     private const int DAILY_TARGET = 14;
 
+    public async Task<Result<DeletionResult>> DeleteAllByDateAsync(
+    DateOnly shiftDate,
+    CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var records = await dbcontext.Set<HungerDisability>()
+                .Where(h => h.ShiftDate == shiftDate)
+                .ToListAsync(cancellationToken);
+
+            if (!records.Any())
+            {
+                return Result.Failure<DeletionResult>(
+                    new Error("NotFound", $"No records found for date {shiftDate}", 404));
+            }
+
+            var count = records.Count;
+            dbcontext.Set<HungerDisability>().RemoveRange(records);
+            await dbcontext.SaveChangesAsync(cancellationToken);
+
+            return Result.Success(new DeletionResult(
+                DeletedCount: count,
+                Message: $"Successfully deleted all {count} records for {shiftDate}",
+                Details: new List<string> { $"Deleted {count} rider records from {shiftDate}" }
+            ));
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<DeletionResult>(
+                new Error("ServerError", $"Error deleting records: {ex.Message}", 500));
+        }
+    }
+
+    /// <summary>
+    /// Delete a specific rider's record for a specific day
+    /// </summary>
+    public async Task<Result<DeletionResult>> DeleteByRiderAndDateAsync(
+        string actualWorkingId,
+        DateOnly shiftDate,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var records = await dbcontext.Set<HungerDisability>()
+                .Include(h => h.Rider)
+                    .ThenInclude(r => r.Employee)
+                .Where(h => h.ActualWorkingId == actualWorkingId && h.ShiftDate == shiftDate)
+                .ToListAsync(cancellationToken);
+
+            if (!records.Any())
+            {
+                return Result.Failure<DeletionResult>(
+                    new Error("NotFound",
+                        $"No record found for rider {actualWorkingId} on {shiftDate}", 404));
+            }
+
+            var riderName = records.First().Rider.Employee.NameEN;
+            var count = records.Count;
+
+            dbcontext.Set<HungerDisability>().RemoveRange(records);
+            await dbcontext.SaveChangesAsync(cancellationToken);
+
+            return Result.Success(new DeletionResult(
+                DeletedCount: count,
+                Message: $"Successfully deleted record for {riderName} ({actualWorkingId}) on {shiftDate}",
+                Details: new List<string>
+                {
+                $"Rider: {riderName}",
+                $"Working ID: {actualWorkingId}",
+                $"Date: {shiftDate}",
+                $"Records deleted: {count}"
+                }
+            ));
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<DeletionResult>(
+                new Error("ServerError", $"Error deleting rider record: {ex.Message}", 500));
+        }
+    }
+
+    /// <summary>
+    /// Delete all records within a date range
+    /// </summary>
+    public async Task<Result<DeletionResult>> DeleteAllByDateRangeAsync(
+        DateOnly startDate,
+        DateOnly endDate,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            if (startDate > endDate)
+            {
+                return Result.Failure<DeletionResult>(
+                    new Error("InvalidInput", "Start date must be before or equal to end date", 400));
+            }
+
+            var records = await dbcontext.Set<HungerDisability>()
+                .Where(h => h.ShiftDate >= startDate && h.ShiftDate <= endDate)
+                .ToListAsync(cancellationToken);
+
+            if (!records.Any())
+            {
+                return Result.Failure<DeletionResult>(
+                    new Error("NotFound",
+                        $"No records found between {startDate} and {endDate}", 404));
+            }
+
+            var count = records.Count;
+            var uniqueRiders = records.Select(r => r.ActualWorkingId).Distinct().Count();
+            var dateRange = records.Select(r => r.ShiftDate).Distinct().OrderBy(d => d).ToList();
+
+            dbcontext.Set<HungerDisability>().RemoveRange(records);
+            await dbcontext.SaveChangesAsync(cancellationToken);
+
+            return Result.Success(new DeletionResult(
+                DeletedCount: count,
+                Message: $"Successfully deleted {count} records from {startDate} to {endDate}",
+                Details: new List<string>
+                {
+                $"Total records deleted: {count}",
+                $"Unique riders affected: {uniqueRiders}",
+                $"Date range: {startDate} to {endDate}",
+                $"Days covered: {dateRange.Count}"
+                }
+            ));
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<DeletionResult>(
+                new Error("ServerError", $"Error deleting records: {ex.Message}", 500));
+        }
+    }
+
+    /// <summary>
+    /// Delete a specific rider's records within a date range
+    /// </summary>
+    public async Task<Result<DeletionResult>> DeleteByRiderAndDateRangeAsync(
+        string actualWorkingId,
+        DateOnly startDate,
+        DateOnly endDate,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            if (startDate > endDate)
+            {
+                return Result.Failure<DeletionResult>(
+                    new Error("InvalidInput", "Start date must be before or equal to end date", 400));
+            }
+
+            var records = await dbcontext.Set<HungerDisability>()
+                .Include(h => h.Rider)
+                    .ThenInclude(r => r.Employee)
+                .Where(h => h.ActualWorkingId == actualWorkingId &&
+                           h.ShiftDate >= startDate &&
+                           h.ShiftDate <= endDate)
+                .ToListAsync(cancellationToken);
+
+            if (!records.Any())
+            {
+                return Result.Failure<DeletionResult>(
+                    new Error("NotFound",
+                        $"No records found for rider {actualWorkingId} between {startDate} and {endDate}", 404));
+            }
+
+            var riderName = records.First().Rider.Employee.NameEN;
+            var count = records.Count;
+            var totalDays = records.Sum(r => r.Days);
+            var totalOrders = records.Sum(r => r.AcceptedDailyOrders);
+            var dates = records.Select(r => r.ShiftDate).Distinct().OrderBy(d => d).ToList();
+
+            dbcontext.Set<HungerDisability>().RemoveRange(records);
+            await dbcontext.SaveChangesAsync(cancellationToken);
+
+            return Result.Success(new DeletionResult(
+                DeletedCount: count,
+                Message: $"Successfully deleted {count} records for {riderName} ({actualWorkingId}) from {startDate} to {endDate}",
+                Details: new List<string>
+                {
+                $"Rider: {riderName}",
+                $"Working ID: {actualWorkingId}",
+                $"Records deleted: {count}",
+                $"Date range: {startDate} to {endDate}",
+                $"Total days removed: {totalDays}",
+                $"Total orders removed: {totalOrders}",
+                $"Specific dates: {string.Join(", ", dates)}"
+                }
+            ));
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<DeletionResult>(
+                new Error("ServerError", $"Error deleting rider records: {ex.Message}", 500));
+        }
+    }
+
     public async Task<Result<HungerDisabilityImportResult>> ImportFromExcelAsync(
         Stream excelStream,
         DateOnly shiftDate,
