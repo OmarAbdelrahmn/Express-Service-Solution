@@ -1,16 +1,19 @@
 ﻿using Application.Service;
+using Application.Service.Backgroundimports;
 using k8s.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Timeouts;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Express_Service.Controllers;
 
 [Route("api/[controller]")]
 [ApiController]
-public class ImportController(IImportService service) : ControllerBase
+public class ImportController(IImportService service , IBackgroundImportService service1) : ControllerBase
 {
     private readonly IImportService service = service;
+    private readonly IBackgroundImportService service1 = service1;
 
     [HttpPost("riders")]
     public async Task<IActionResult> ImportEmployeesAndRidersAsync(IFormFile file)
@@ -580,4 +583,98 @@ public class ImportController(IImportService service) : ControllerBase
         result.ToProblem() : Ok(result.Value);
 
     }
+
+
+    [HttpPost("bulk-ifo")]
+    public async Task<IActionResult> VerifyRidersFromExcelAsync(IFormFile file)
+    {
+        if (file == null || file.Length == 0)
+            return BadRequest(new { error = "No file uploaded or file is empty" });
+
+        if (!file.FileName.EndsWith(".xlsx") && !file.FileName.EndsWith(".xls"))
+            return BadRequest(new { error = "File must be Excel format (.xlsx or .xls)" });
+
+
+
+        var result = await service.VerifyRidersFromExcelAsync(file, "omar");
+
+        return result.IsFailure ?
+        result.ToProblem() : Ok(result.Value);
+
     }
+
+
+    /// <summary>
+    /// Start rider verification in background - Returns immediately with Job ID
+    /// </summary>
+    [HttpPost("verify-riders/start")]
+    [DisableRequestSizeLimit]
+    [RequestFormLimits(MultipartBodyLengthLimit = 524288000)]
+    public async Task<IActionResult> StartRiderVerification(IFormFile file)
+    {
+        if (file == null || file.Length == 0)
+            return BadRequest(new { error = "No file uploaded" });
+
+        var uploadedBy = "omar";
+        var jobId = await service1.StartRiderVerificationAsync(file, uploadedBy);
+
+        return Ok(new
+        {
+            jobId,
+            message = "Verification started in background",
+            statusUrl = $"/api/import/verify-riders/status/{jobId}",
+            resultUrl = $"/api/import/verify-riders/result/{jobId}"
+        });
+    }
+
+    /// <summary>
+    /// Check job progress - Poll this endpoint every 2-5 seconds
+    /// </summary>
+    [HttpGet("verify-riders/status/{jobId}")]
+    public IActionResult GetVerificationStatus(string jobId)
+    {
+        var status = service1.GetJobStatus(jobId);
+
+        if (status == null)
+            return NotFound(new { error = "Job not found or expired" });
+
+        return Ok(status);
+    }
+
+    /// <summary>
+    /// Get final results - Only available when status is "Completed"
+    /// </summary>
+    [HttpGet("verify-riders/result/{jobId}")]
+    public IActionResult GetVerificationResult(string jobId)
+    {
+        var status = service1.GetJobStatus(jobId);
+
+        if (status == null)
+            return NotFound(new { error = "Job not found or expired" });
+
+        if (status.Status != "Completed")
+            return BadRequest(new { error = $"Job is still {status.Status}" });
+
+        var result = service1.GetJobResult(jobId);
+
+        if (result == null)
+            return NotFound(new { error = "Result not available" });
+
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// OLD SYNCHRONOUS METHOD - Will timeout on large files!
+    /// Use /start endpoint instead for files with 10K+ rows
+    /// </summary>
+    [HttpPost("verify-riders")]
+    [DisableRequestSizeLimit]
+    [RequestFormLimits(MultipartBodyLengthLimit = 524288000)]
+    [RequestTimeout(600000)] // 10 minutes
+    public async Task<IActionResult> VerifyRidersSync(IFormFile file)
+    {
+        var uploadedBy = User.Identity?.Name ?? "Unknown";
+        var result = await service.VerifyRidersFromExcelAsync(file, uploadedBy);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+}

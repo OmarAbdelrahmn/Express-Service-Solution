@@ -16,6 +16,515 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
 {
     private readonly ApplicationDbcontext _dbcontext = dbcontext;
 
+    public async Task<Result<RiderVerificationResponse>> VerifyRidersFromExcelAsync(
+        IFormFile file,
+        string uploadedBy,
+        Action<int, int>? progressCallback = null)
+    {
+        if (file == null || file.Length == 0)
+            return Result.Failure<RiderVerificationResponse>(
+                new Error("InvalidFile", "File is empty or null", 400));
+
+        if (!file.FileName.EndsWith(".xlsx") && !file.FileName.EndsWith(".xls"))
+            return Result.Failure<RiderVerificationResponse>(
+                new Error("InvalidFormat", "File must be Excel format (.xlsx or .xls)", 400));
+
+        var details = new List<RiderVerificationDetail>();
+        var errors = new List<string>();
+
+        int fullyMatched = 0;
+        int workingIdFoundNameMismatch = 0;
+        int nameFoundWorkingIdMismatch = 0;
+        int completelyNotFound = 0;
+        int errorRecords = 0;
+
+        var startTime = DateTime.UtcNow;
+
+        try
+        {
+            // Load all rider data into memory
+            var riderDetailsLookup = await LoadRiderDetailsLookup();
+            var workingIdHistoryLookup = await LoadWorkingIdHistoryLookup();
+
+            using var stream = file.OpenReadStream();
+            using var workbook = new XLWorkbook(stream);
+            var worksheet = workbook.Worksheet(1);
+
+            if (worksheet == null)
+            {
+                return Result.Failure<RiderVerificationResponse>(
+                    new Error("InvalidWorksheet", "Could not read worksheet", 400));
+            }
+
+            var headerRow = FindRiderVerificationHeaderRow(worksheet);
+            if (headerRow == null)
+            {
+                return Result.Failure<RiderVerificationResponse>(
+                    new Error("EmptyFile", "Excel file has no header row", 400));
+            }
+
+            var columnMap = BuildRiderVerificationColumnMapping(headerRow);
+            if (!columnMap.IsValid)
+            {
+                return Result.Failure<RiderVerificationResponse>(
+                    new Error("InvalidColumns", columnMap.ErrorMessage!, 400));
+            }
+
+            var dataRows = worksheet.RowsUsed()
+                .Where(r => r.RowNumber() > headerRow.RowNumber())
+                .ToList();
+
+            var totalRows = dataRows.Count;
+            var rowNumber = headerRow.RowNumber();
+            var processedCount = 0;
+
+            // Report initial total
+            progressCallback?.Invoke(0, totalRows);
+
+            foreach (var row in dataRows)
+            {
+                rowNumber++;
+                processedCount++;
+
+                // Report progress every 1000 rows
+                if (processedCount % 1000 == 0)
+                {
+                    progressCallback?.Invoke(processedCount, totalRows);
+                }
+
+                try
+                {
+                    var rowData = ParseRiderVerificationRowData(row, columnMap, rowNumber);
+
+                    if (!rowData.IsValid)
+                    {
+                        errorRecords++;
+                        details.Add(new RiderVerificationDetail(
+                            rowNumber,
+                            rowData.WorkingId ?? "N/A",
+                            rowData.NameAR ?? "N/A",
+                            VerificationStatus.ValidationError,
+                            null, null, null, null,
+                            rowData.ErrorMessage
+                        ));
+                        continue;
+                    }
+
+                    var verification = VerifyRiderData(
+                        rowData.WorkingId!,
+                        rowData.NameAR!,
+                        riderDetailsLookup,
+                        workingIdHistoryLookup
+                    );
+
+                    switch (verification.Status)
+                    {
+                        case VerificationStatus.FullyMatched:
+                            fullyMatched++;
+                            break;
+
+                        case VerificationStatus.WorkingIdFoundNameMismatch:
+                            workingIdFoundNameMismatch++;
+                            details.Add(new RiderVerificationDetail(
+                                rowNumber,
+                                rowData.WorkingId!,
+                                rowData.NameAR!,
+                                verification.Status,
+                                verification.FoundInTable,
+                                verification.ActualWorkingId,
+                                verification.ActualNameAR,
+                                verification.FoundIqamaNo,
+                                $"WorkingId exists but name mismatch: Expected '{rowData.NameAR}', Found '{verification.ActualNameAR}'"
+                            ));
+                            break;
+
+                        case VerificationStatus.NameFoundWorkingIdMismatch:
+                            nameFoundWorkingIdMismatch++;
+                            details.Add(new RiderVerificationDetail(
+                                rowNumber,
+                                rowData.WorkingId!,
+                                rowData.NameAR!,
+                                verification.Status,
+                                verification.FoundInTable,
+                                verification.ActualWorkingId,
+                                verification.ActualNameAR,
+                                verification.FoundIqamaNo,
+                                $"Name exists but WorkingId mismatch: Expected '{rowData.WorkingId}', Found '{verification.ActualWorkingId}'"
+                            ));
+                            break;
+
+                        case VerificationStatus.CompletelyNotFound:
+                            completelyNotFound++;
+                            details.Add(new RiderVerificationDetail(
+                                rowNumber,
+                                rowData.WorkingId!,
+                                rowData.NameAR!,
+                                verification.Status,
+                                null, null, null, null,
+                                "Neither WorkingId nor NameAR found in system"
+                            ));
+                            break;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    errorRecords++;
+                    errors.Add($"Row {rowNumber}: {ex.Message}");
+
+                    details.Add(new RiderVerificationDetail(
+                        rowNumber,
+                        "N/A", "N/A",
+                        VerificationStatus.ValidationError,
+                        null, null, null, null,
+                        $"Processing error: {ex.Message}"
+                    ));
+                }
+            }
+
+            // Final progress update
+            progressCallback?.Invoke(totalRows, totalRows);
+
+            var response = new RiderVerificationResponse(
+                TotalRecordsProcessed: dataRows.Count,
+                FullyMatched: fullyMatched,
+                WorkingIdFoundNameMismatch: workingIdFoundNameMismatch,
+                NameFoundWorkingIdMismatch: nameFoundWorkingIdMismatch,
+                CompletelyNotFound: completelyNotFound,
+                ErrorRecords: errorRecords,
+                Details: details,
+                ProcessingErrors: errors,
+                ProcessedAt: DateTime.UtcNow.AddHours(3)
+            );
+
+            return Result.Success(response);
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<RiderVerificationResponse>(
+                new Error("ProcessingError", $"Failed to process Excel file: {ex.Message}", 500));
+        }
+    }
+
+    // ===========================
+    // Helper Methods
+    // ===========================
+
+    private async Task<Dictionary<string, RiderLookupData>> LoadRiderDetailsLookup()
+    {
+        var riders = await _dbcontext.RiderDetails
+            .Include(r => r.Employee)
+            .Where(r => !string.IsNullOrEmpty(r.WorkingId))
+            .Select(r => new RiderLookupData
+            {
+                WorkingId = r.WorkingId!,
+                NameAR = r.Employee.NameAR,
+                IqamaNo = r.EmployeeIqamaNo,
+                Source = "RiderDetails"
+            })
+            .AsNoTracking()
+            .ToListAsync();
+
+        // Create lookups by both WorkingId and NameAR
+        var lookup = new Dictionary<string, RiderLookupData>();
+
+        foreach (var rider in riders)
+        {
+            var workingIdKey = $"WID:{rider.WorkingId.Trim().ToLower()}";
+            var nameKey = $"NAME:{rider.NameAR.Trim().ToLower()}";
+
+            if (!lookup.ContainsKey(workingIdKey))
+                lookup[workingIdKey] = rider;
+
+            if (!lookup.ContainsKey(nameKey))
+                lookup[nameKey] = rider;
+        }
+
+        return lookup;
+    }
+
+    private async Task<Dictionary<string, RiderLookupData>> LoadWorkingIdHistoryLookup()
+    {
+        var history = await _dbcontext.RiderWorkingIdHistories
+            .Include(h => h.Employee)
+            .Where(h => !string.IsNullOrEmpty(h.WorkingId))
+            .Select(h => new RiderLookupData
+            {
+                WorkingId = h.WorkingId,
+                NameAR = h.Employee.NameAR,
+                IqamaNo = h.RiderIqamaNo,
+                Source = "WorkingIdHistory"
+            })
+            .AsNoTracking()
+            .ToListAsync();
+
+        var lookup = new Dictionary<string, RiderLookupData>();
+
+        foreach (var item in history)
+        {
+            var workingIdKey = $"WID:{item.WorkingId.Trim().ToLower()}";
+            var nameKey = $"NAME:{item.NameAR.Trim().ToLower()}";
+
+            if (!lookup.ContainsKey(workingIdKey))
+                lookup[workingIdKey] = item;
+
+            if (!lookup.ContainsKey(nameKey))
+                lookup[nameKey] = item;
+        }
+
+        return lookup;
+    }
+
+    private RiderVerificationResult VerifyRiderData(
+        string excelWorkingId,
+        string excelNameAR,
+        Dictionary<string, RiderLookupData> riderDetailsLookup,
+        Dictionary<string, RiderLookupData> workingIdHistoryLookup)
+    {
+        var workingIdKey = $"WID:{excelWorkingId.Trim().ToLower()}";
+        var nameKey = $"NAME:{excelNameAR.Trim().ToLower()}";
+
+        RiderLookupData? foundByWorkingId = null;
+        RiderLookupData? foundByName = null;
+        string? foundInTable = null;
+
+        // Check RiderDetails first
+        if (riderDetailsLookup.TryGetValue(workingIdKey, out var rdByWorkingId))
+        {
+            foundByWorkingId = rdByWorkingId;
+            foundInTable = "RiderDetails";
+        }
+
+        if (riderDetailsLookup.TryGetValue(nameKey, out var rdByName))
+        {
+            foundByName = rdByName;
+            if (foundInTable == null)
+                foundInTable = "RiderDetails";
+        }
+
+        // Check WorkingIdHistory if not found
+        if (foundByWorkingId == null && workingIdHistoryLookup.TryGetValue(workingIdKey, out var whByWorkingId))
+        {
+            foundByWorkingId = whByWorkingId;
+            foundInTable = foundInTable == "RiderDetails" ? "Both" : "WorkingIdHistory";
+        }
+
+        if (foundByName == null && workingIdHistoryLookup.TryGetValue(nameKey, out var whByName))
+        {
+            foundByName = whByName;
+            if (foundInTable == null)
+                foundInTable = "WorkingIdHistory";
+            else if (foundInTable == "RiderDetails")
+                foundInTable = "Both";
+        }
+
+        // Determine status
+        if (foundByWorkingId != null && foundByName != null)
+        {
+            // Check if they match the same person
+            if (foundByWorkingId.IqamaNo == foundByName.IqamaNo &&
+                foundByWorkingId.WorkingId.Equals(excelWorkingId, StringComparison.OrdinalIgnoreCase) &&
+                foundByWorkingId.NameAR.Equals(excelNameAR, StringComparison.OrdinalIgnoreCase))
+            {
+                return new RiderVerificationResult
+                {
+                    Status = VerificationStatus.FullyMatched,
+                    FoundInTable = foundInTable,
+                    ActualWorkingId = foundByWorkingId.WorkingId,
+                    ActualNameAR = foundByWorkingId.NameAR,
+                    FoundIqamaNo = foundByWorkingId.IqamaNo
+                };
+            }
+
+            // WorkingId exists but name is different
+            if (foundByWorkingId.WorkingId.Equals(excelWorkingId, StringComparison.OrdinalIgnoreCase))
+            {
+                return new RiderVerificationResult
+                {
+                    Status = VerificationStatus.WorkingIdFoundNameMismatch,
+                    FoundInTable = foundInTable,
+                    ActualWorkingId = foundByWorkingId.WorkingId,
+                    ActualNameAR = foundByWorkingId.NameAR,
+                    FoundIqamaNo = foundByWorkingId.IqamaNo
+                };
+            }
+
+            // Name exists but WorkingId is different
+            return new RiderVerificationResult
+            {
+                Status = VerificationStatus.NameFoundWorkingIdMismatch,
+                FoundInTable = foundInTable,
+                ActualWorkingId = foundByName.WorkingId,
+                ActualNameAR = foundByName.NameAR,
+                FoundIqamaNo = foundByName.IqamaNo
+            };
+        }
+
+        if (foundByWorkingId != null)
+        {
+            return new RiderVerificationResult
+            {
+                Status = VerificationStatus.WorkingIdFoundNameMismatch,
+                FoundInTable = foundInTable,
+                ActualWorkingId = foundByWorkingId.WorkingId,
+                ActualNameAR = foundByWorkingId.NameAR,
+                FoundIqamaNo = foundByWorkingId.IqamaNo
+            };
+        }
+
+        if (foundByName != null)
+        {
+            return new RiderVerificationResult
+            {
+                Status = VerificationStatus.NameFoundWorkingIdMismatch,
+                FoundInTable = foundInTable,
+                ActualWorkingId = foundByName.WorkingId,
+                ActualNameAR = foundByName.NameAR,
+                FoundIqamaNo = foundByName.IqamaNo
+            };
+        }
+
+        return new RiderVerificationResult
+        {
+            Status = VerificationStatus.CompletelyNotFound
+        };
+    }
+
+
+    // ===========================
+    // Helper Methods
+    // ===========================
+
+    private IXLRow? FindRiderVerificationHeaderRow(IXLWorksheet worksheet)
+    {
+        var knownColumns = new[]
+        {
+            "riderId", "Working ID", "معرف العمل", "رقم العمل",
+            "riderName", "Name AR", "الاسم", "الاسم العربي", "اسم السائق"
+        };
+
+        for (int i = 1; i <= Math.Min(10, worksheet.RowsUsed().Count()); i++)
+        {
+            var row = worksheet.Row(i);
+            var cellValues = row.CellsUsed()
+                .Select(c => c.IsMerged()
+                    ? c.MergedRange().FirstCell().GetString().Trim()
+                    : c.GetString().Trim())
+                .Where(v => !string.IsNullOrWhiteSpace(v))
+                .ToList();
+
+            int matchCount = cellValues.Count(cv =>
+                knownColumns.Any(kc =>
+                    cv.Equals(kc, StringComparison.OrdinalIgnoreCase) ||
+                    cv.Replace(" ", "").Equals(kc.Replace(" ", ""), StringComparison.OrdinalIgnoreCase)));
+
+            if (matchCount >= 2)
+                return row;
+        }
+
+        return worksheet.Row(1);
+    }
+
+    private RiderVerificationColumnMapping BuildRiderVerificationColumnMapping(IXLRow headerRow)
+    {
+        var mapping = new RiderVerificationColumnMapping();
+        var cells = headerRow.CellsUsed().ToList();
+
+        mapping.WorkingIdCol = FindColumn(cells,
+            "driverId", "Working ID", "WorkingID", "معرف العمل", "رقم العمل", "المعرف");
+
+        mapping.NameARCol = FindColumn(cells,
+            "driverName", "Name AR", "الاسم", "الاسم العربي", "اسم السائق", "اسم الموظف");
+
+        var missing = new List<string>();
+        if (mapping.WorkingIdCol == 0) missing.Add("WorkingId");
+        if (mapping.NameARCol == 0) missing.Add("NameAR");
+
+        if (missing.Any())
+        {
+            mapping.IsValid = false;
+            mapping.ErrorMessage = $"Required columns missing: {string.Join(", ", missing)}";
+        }
+        else
+        {
+            mapping.IsValid = true;
+        }
+
+        return mapping;
+    }
+
+    private RiderVerificationRowData ParseRiderVerificationRowData(
+        IXLRow row,
+        RiderVerificationColumnMapping map,
+        int rowNumber)
+    {
+        var data = new RiderVerificationRowData { RowNumber = rowNumber };
+
+        try
+        {
+            data.WorkingId = GetCellValue(row, map.WorkingIdCol)?.Trim();
+            if (string.IsNullOrWhiteSpace(data.WorkingId))
+            {
+                data.IsValid = false;
+                data.ErrorMessage = "WorkingId is required";
+                return data;
+            }
+
+            data.NameAR = GetCellValue(row, map.NameARCol)?.Trim();
+            if (string.IsNullOrWhiteSpace(data.NameAR))
+            {
+                data.IsValid = false;
+                data.ErrorMessage = "Arabic Name is required";
+                return data;
+            }
+
+            data.IsValid = true;
+        }
+        catch (Exception ex)
+        {
+            data.IsValid = false;
+            data.ErrorMessage = $"Error parsing row: {ex.Message}";
+        }
+
+        return data;
+    }
+
+    // ===========================
+    // Internal Classes
+    // ===========================
+
+    internal class RiderVerificationColumnMapping
+    {
+        public bool IsValid { get; set; }
+        public string? ErrorMessage { get; set; }
+        public int WorkingIdCol { get; set; }
+        public int NameARCol { get; set; }
+    }
+
+    internal class RiderVerificationRowData
+    {
+        public int RowNumber { get; set; }
+        public bool IsValid { get; set; }
+        public string? ErrorMessage { get; set; }
+        public string? WorkingId { get; set; }
+        public string? NameAR { get; set; }
+    }
+
+    internal class RiderLookupData
+    {
+        public string WorkingId { get; set; } = string.Empty;
+        public string NameAR { get; set; } = string.Empty;
+        public long IqamaNo { get; set; }
+        public string Source { get; set; } = string.Empty;
+    }
+
+    internal class RiderVerificationResult
+    {
+        public VerificationStatus Status { get; set; }
+        public string? FoundInTable { get; set; }
+        public string? ActualWorkingId { get; set; }
+        public string? ActualNameAR { get; set; }
+        public long? FoundIqamaNo { get; set; }
+    }
     public async Task<Result<DeletedEmployeeImportResponse>> ImportDeletedEmployeesAsync(
     IFormFile file,
     string uploadedBy)

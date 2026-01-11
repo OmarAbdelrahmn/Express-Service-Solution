@@ -3,6 +3,7 @@ using Application.Auth;
 using Application.Authentication;
 using Application.Roles;
 using Application.Service;
+using Application.Service.Backgroundimports;
 using Application.Service.DE;
 using Application.Service.Empolyee;
 using Application.Service.Member;
@@ -53,9 +54,8 @@ public static class ApplicationDependencies
         Services.AddScoped<IImportService, ImportService>();
         Services.AddScoped<IRiderWorkingIdHistoryService, RiderWorkingIdHistoryService>();
         Services.AddScoped<IMemberService, MemberService>();
-        // In your Program.cs or Startup.cs
         Services.AddScoped<IDeletedEmployeeImportService, DeletedEmployeeImportService>();
-
+        Services.AddSingleton<IBackgroundImportService, BackgroundImportService>();
         Services.AddAuth(configuration)
                 .AddMappester()
                 .AddFluentValidation()

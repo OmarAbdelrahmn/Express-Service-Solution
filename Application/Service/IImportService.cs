@@ -35,9 +35,48 @@ public interface IImportService
     Task<Result<VehicleUsageCheckResponse>> CheckVehicleUsageFromExcelAsync(
     IFormFile file,
     string uploadedBy);
+
+    Task<Result<RiderVerificationResponse>> VerifyRidersFromExcelAsync(
+        IFormFile file,
+        string uploadedBy,
+        Action<int, int>? progressCallback = null);
+
 }
 // Application/DTOs/VehicleUsageCheckDtos.cs
 // Application/DTOs/VehicleUsageCheckDtos.cs
+
+public record RiderVerificationResponse(
+    int TotalRecordsProcessed,
+    int FullyMatched,              // Both WorkingId and NameAR exist
+    int WorkingIdFoundNameMismatch, // WorkingId exists but different name
+    int NameFoundWorkingIdMismatch, // NameAR exists but different WorkingId
+    int CompletelyNotFound,         // Neither WorkingId nor NameAR found
+    int ErrorRecords,
+    List<RiderVerificationDetail> Details,
+    List<string> ProcessingErrors,
+    DateTime ProcessedAt
+);
+
+public record RiderVerificationDetail(
+    int RowNumber,
+    string WorkingIdFromExcel,
+    string NameARFromExcel,
+    VerificationStatus Status,
+    string? FoundInTable,           // "RiderDetails", "WorkingIdHistory", or "Both"
+    string? ActualWorkingId,        // What's in the system
+    string? ActualNameAR,           // What's in the system
+    long? FoundIqamaNo,
+    string? ErrorMessage
+);
+
+public enum VerificationStatus
+{
+    FullyMatched = 1,              // Both match
+    WorkingIdFoundNameMismatch = 2, // ID exists, name different
+    NameFoundWorkingIdMismatch = 3, // Name exists, ID different
+    CompletelyNotFound = 4,         // Nothing found
+    ValidationError = 5             // Invalid data in Excel
+}
 
 public record VehicleUsageCheckResponse(
     int TotalVehicles,

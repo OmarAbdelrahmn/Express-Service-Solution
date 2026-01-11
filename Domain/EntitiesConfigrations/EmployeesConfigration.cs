@@ -29,6 +29,15 @@ public class EmployeesConfigration : IEntityTypeConfiguration<Employees>
         builder.HasIndex(e => e.Status).HasDatabaseName("IX_Employees_Status");
 
 
+
+        // ✅ ADD THESE INDEXES FOR PERFORMANCE
+        builder.HasIndex(e => e.NameAR);
+
+        builder.HasIndex(e => e.NameEN);
+
+        builder.HasIndex(e => e.HousingId);
+
+
     }
 }
 

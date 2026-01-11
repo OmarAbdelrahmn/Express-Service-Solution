@@ -228,6 +228,8 @@ public class ApplicationDbcontext(DbContextOptions<ApplicationDbcontext> options
             entity.HasIndex(h => new { h.WorkingId, h.IsActive });
             entity.HasIndex(h => new { h.RiderIqamaNo, h.IsActive });
 
+            entity.HasIndex(h => h.CompanyId);
+
             entity.Property(h => h.WorkingId)
                 .IsRequired()
                 .HasMaxLength(50);

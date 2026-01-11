@@ -12,5 +12,13 @@ public class RiderDetailsConfigration : IEntityTypeConfiguration<RiderDetails>
     {
         builder.HasKey(rd => rd.Id);
 
+        builder.HasIndex(rd => rd.WorkingId);
+
+        builder.HasIndex(rd => rd.EmployeeIqamaNo);
+
+        builder.HasIndex(rd => rd.VehicleNumber);
+
+        builder.HasIndex(rd => rd.CompanyId);
+
     }
 }
