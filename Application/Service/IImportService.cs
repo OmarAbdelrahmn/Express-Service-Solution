@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Http;
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using static Application.Service.ImportService;
 
 namespace Application.Service;
 
@@ -45,6 +46,11 @@ public interface IImportService
     IFormFile file,
     string uploadedBy,
     Action<int, int>? progressCallback = null);
+
+    Task<Result<RiderShiftBulkImportResponse>> BulkImportRiderShiftsAsync(
+        IFormFile file,
+        string uploadedBy,
+        Action<int, int>? progressCallback = null);
 
 }
 // Application/DTOs/VehicleUsageCheckDtos.cs

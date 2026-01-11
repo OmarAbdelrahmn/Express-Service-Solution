@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.Text;
+using static Application.Service.ImportService;
 
 namespace Application.Service.Backgroundimports;
 
@@ -14,4 +15,9 @@ public interface IBackgroundImportService
 
     Task<string> StartWorkingIdSyncAsync(IFormFile file, string uploadedBy);
     WorkingIdSyncResponse? GetWorkingIdSyncResult(string jobId);
+
+
+    Task<string> StartRiderShiftImportAsync(IFormFile file, string uploadedBy);
+    RiderShiftBulkImportResponse? GetRiderShiftImportResult(string jobId);
+
 }

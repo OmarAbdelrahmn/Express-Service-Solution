@@ -11,6 +11,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
+using static Application.Service.ImportService;
 
 namespace Application.Service;
 
@@ -348,7 +349,7 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
 
             // Load default company for creating new RiderDetails
             var defaultCompany = await _dbcontext.Companies
-                .Where(c=>c.Id == 1)
+                .Where(c => c.Id == 1)
                 .FirstOrDefaultAsync();
 
             if (defaultCompany == null)
@@ -1108,6 +1109,48 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
     // Internal Classes
     // ===========================
 
+    // ============================================
+    // ADD THESE TO Application/Service/IImportService.cs
+    // AT THE END OF THE FILE (after WorkingIdSyncResponse)
+    // ============================================
+
+    public record RiderShiftBulkImportResponse(
+        int TotalRecordsProcessed,
+        int SuccessfulShifts,
+        int UpdatedShifts,
+        int SkippedDuplicates,
+        int WorkingIdNotFound,
+        int HousingNotFound,
+        int ValidationErrors,
+        List<RiderShiftImportDetail> Details,
+        List<string> ProcessingErrors,
+        DateTime ProcessedAt
+    );
+
+    public record RiderShiftImportDetail(
+        int RowNumber,
+        string WorkingIdFromExcel,
+        DateOnly ShiftDate,
+        ImportStatus Status,
+        string? Action,
+        int? FoundRiderId,
+        long? FoundIqamaNo,
+        string? FoundInTable,
+        int? HousingId,
+        int AcceptedOrders,
+        string ShiftStatus,
+        string? ErrorMessage
+    );
+
+    public enum ImportStatus
+    {
+        Success = 1,
+        Updated = 2,
+        SkippedDuplicate = 3,
+        WorkingIdNotFound = 4,
+        HousingNotFound = 5,
+        ValidationError = 6
+    }
     internal class RiderVerificationColumnMapping
     {
         public bool IsValid { get; set; }
@@ -2119,7 +2162,7 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
             }
             data.SerialNumber = serialNumber;
 
-            data.PlateNumberA = GetCellValue1(row, map.PlateNumberACol)?.Replace(" ","");
+            data.PlateNumberA = GetCellValue1(row, map.PlateNumberACol)?.Replace(" ", "");
             if (string.IsNullOrWhiteSpace(data.PlateNumberA))
             {
                 data.IsValid = false;
@@ -2802,8 +2845,8 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
 
             // Rider fields
             data.WorkingId = GetCellValue(row, map.WorkingIdCol) ?? "0";
-            data.TshirtSize = GetCellValue(row, map.TshirtSizeCol)??"s";
-            data.LicenseNumber = GetCellValue(row, map.LicenseNumberCol)??"0";
+            data.TshirtSize = GetCellValue(row, map.TshirtSizeCol) ?? "s";
+            data.LicenseNumber = GetCellValue(row, map.LicenseNumberCol) ?? "0";
             data.CompanyName = GetCellValue(row, map.CompanyNameCol);
 
             data.IsValid = true;
@@ -2920,6 +2963,7 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
         }
     }
 
+
     private string? GetCellValue(IXLRow row, int columnIndex)
     {
         if (columnIndex == 0) return null;
@@ -2929,14 +2973,36 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
             var cell = row.Cell(columnIndex);
             if (cell.IsEmpty()) return null;
 
-            if (cell.DataType == XLDataType.DateTime)
+            if (cell.IsMerged())
             {
-                return cell.GetDateTime().ToString("dd/MM/yyyy");
+                cell = cell.MergedRange().FirstCell();
             }
 
+            // ✅ CRITICAL: Handle numbers FIRST
             if (cell.DataType == XLDataType.Number)
             {
-                return cell.GetDouble().ToString();
+                var numValue = cell.GetDouble();
+
+                // Return as integer if whole number
+                if (numValue == Math.Floor(numValue))
+                {
+                    return ((long)numValue).ToString();
+                }
+
+                return numValue.ToString();
+            }
+
+            if (cell.DataType == XLDataType.DateTime)
+            {
+                try
+                {
+                    var dateTime = cell.GetDateTime();
+                    return dateTime.ToString("yyyy-MM-dd");
+                }
+                catch
+                {
+                    return cell.GetText().Trim();
+                }
             }
 
             if (cell.DataType == XLDataType.Text)
@@ -2949,39 +3015,125 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
                 return cell.GetBoolean().ToString();
             }
 
-            var cellValue = cell.Value;
-            return cellValue.ToString()?.Trim();
+            var value = cell.Value;
+
+            return value.ToString()?.Trim();
         }
-        catch
+        catch (Exception ex)
         {
+            Console.WriteLine($"[GetCellValue] Error at column {columnIndex}: {ex.Message}");
             return null;
         }
     }
 
+    private bool TryParseInt(string? value, out int result)
+    {
+        result = 0;
+
+        if (string.IsNullOrWhiteSpace(value))
+            return false;
+
+        value = value.Trim();
+
+        if (int.TryParse(value, out result))
+            return true;
+
+        if (double.TryParse(value, out double doubleResult))
+        {
+            result = (int)Math.Round(doubleResult);
+            return true;
+        }
+
+        value = value.Replace(",", "").Replace(" ", "");
+
+        if (int.TryParse(value, out result))
+            return true;
+
+        return false;
+    }
     private DateOnly? ParseGregorianDate(string? dateStr)
     {
         if (string.IsNullOrWhiteSpace(dateStr))
             return null;
 
-        string[] formats = {
-            "dd/MM/yyyy", "d/M/yyyy", "dd-MM-yyyy", "d-M-yyyy",
-            "MM/dd/yyyy", "M/d/yyyy", "MM-dd-yyyy", "M-d-yyyy",
-            "yyyy/MM/dd", "yyyy-MM-dd", "yyyy/M/d", "yyyy-M-d",
-            "dd.MM.yyyy", "d.M.yyyy"
-        };
+        // Clean up the input
+        dateStr = dateStr.Trim();
 
+        // Try direct DateOnly parse first (handles most formats)
+        if (DateOnly.TryParse(dateStr, out DateOnly directResult))
+        {
+            return directResult;
+        }
+
+        // Comprehensive list of date formats
+        string[] formats = {
+        // Common formats with slashes
+        "dd/MM/yyyy", "d/M/yyyy", "dd/M/yyyy", "d/MM/yyyy",
+        "MM/dd/yyyy", "M/d/yyyy", "M/dd/yyyy", "MM/d/yyyy",
+        "yyyy/MM/dd", "yyyy/M/d", "yyyy/MM/d", "yyyy/M/dd",
+        
+        // Common formats with dashes
+        "dd-MM-yyyy", "d-M-yyyy", "dd-M-yyyy", "d-MM-yyyy",
+        "MM-dd-yyyy", "M-d-yyyy", "M-dd-yyyy", "MM-d-yyyy",
+        "yyyy-MM-dd", "yyyy-M-d", "yyyy-MM-d", "yyyy-M-dd",
+        
+        // Formats with dots
+        "dd.MM.yyyy", "d.M.yyyy", "dd.M.yyyy", "d.MM.yyyy",
+        "MM.dd.yyyy", "M.d.yyyy",
+        "yyyy.MM.dd", "yyyy.M.d",
+        
+        // ISO 8601 formats
+        "yyyy-MM-dd", "yyyyMMdd",
+        
+        // Month name formats
+        "dd-MMM-yyyy", "d-MMM-yyyy",
+        "dd MMM yyyy", "d MMM yyyy",
+        "MMM dd, yyyy", "MMMM dd, yyyy",
+        
+        // Two-digit year formats
+        "dd/MM/yy", "d/M/yy", "MM/dd/yy", "M/d/yy",
+        "dd-MM-yy", "d-M-yy", "MM-dd-yy", "M-d-yy",
+        "yy/MM/dd", "yy-MM-dd",
+        
+        // Additional common formats
+        "dd/MM/yyyy HH:mm:ss", "MM/dd/yyyy HH:mm:ss",
+        "yyyy-MM-dd HH:mm:ss",
+        "dd/MM/yyyy hh:mm:ss tt", "MM/dd/yyyy hh:mm:ss tt"
+    };
+
+        // Try parsing with each format
         foreach (var format in formats)
         {
             if (DateTime.TryParseExact(dateStr, format,
-                CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime date))
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.None,
+                out DateTime date))
             {
                 return DateOnly.FromDateTime(date);
             }
+
+            // Also try with current culture
+            if (DateTime.TryParseExact(dateStr, format,
+                CultureInfo.CurrentCulture,
+                DateTimeStyles.None,
+                out DateTime dateWithCulture))
+            {
+                return DateOnly.FromDateTime(dateWithCulture);
+            }
         }
 
-        if (DateTime.TryParse(dateStr, out DateTime generalDate))
+        // Try general parse as last resort
+        if (DateTime.TryParse(dateStr, CultureInfo.InvariantCulture,
+            DateTimeStyles.None, out DateTime generalDate))
         {
             return DateOnly.FromDateTime(generalDate);
+        }
+
+        // Try with current culture
+        if (DateTime.TryParse(dateStr, CultureInfo.CurrentCulture,
+            DateTimeStyles.None, out DateTime generalDateCulture))
+        {
+            return DateOnly.FromDateTime(generalDateCulture);
         }
 
         return null;
@@ -3814,7 +3966,7 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
             "NameEN", "Name EN", "الاسم بالإنجليزية", "English Name", "Name");
 
         mapping.WorkingIdCol = FindColumn(cells,
-            "WorkingId", "Working ID", "معرف العمل", "WorkID", "رقم العمل","المعرف");
+            "WorkingId", "Working ID", "معرف العمل", "WorkID", "رقم العمل", "المعرف");
 
         mapping.CompanyNameCol = FindColumn(cells,
             "CompanyName", "Company Name", "اسم الشركة", "الشركة");
@@ -4550,9 +4702,9 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
     }
 
 
-public async Task<Result<VehicleUsageCheckResponse>> CheckVehicleUsageFromExcelAsync(
-    IFormFile file,
-    string uploadedBy)
+    public async Task<Result<VehicleUsageCheckResponse>> CheckVehicleUsageFromExcelAsync(
+        IFormFile file,
+        string uploadedBy)
     {
         if (file == null || file.Length == 0)
             return Result.Failure<VehicleUsageCheckResponse>(
@@ -4846,136 +4998,827 @@ public async Task<Result<VehicleUsageCheckResponse>> CheckVehicleUsageFromExcelA
         return data;
     }
 
-// Internal classes for Vehicle Usage Check
-internal class VehicleUsageColumnMapping
-{
-    public bool IsValid { get; set; }
-    public string? ErrorMessage { get; set; }
-    public int PlateNumberACol { get; set; }
-}
+    // Internal classes for Vehicle Usage Check
+    internal class VehicleUsageColumnMapping
+    {
+        public bool IsValid { get; set; }
+        public string? ErrorMessage { get; set; }
+        public int PlateNumberACol { get; set; }
+    }
 
-internal class VehicleUsageRowData
-{
-    public int RowNumber { get; set; }
-    public bool IsValid { get; set; }
-    public string? ErrorMessage { get; set; }
-    public string? PlateNumberA { get; set; }
-}
-}
-internal class HousingColumnMapping
-{
-    public bool IsValid { get; set; }
-    public string? ErrorMessage { get; set; }
-    public int IqamaNoCol { get; set; }
-    public int HousingNameCol { get; set; }
-}
+    internal class VehicleUsageRowData
+    {
+        public int RowNumber { get; set; }
+        public bool IsValid { get; set; }
+        public string? ErrorMessage { get; set; }
+        public string? PlateNumberA { get; set; }
+    }
 
-internal class HousingRowData
-{
-    public int RowNumber { get; set; }
-    public bool IsValid { get; set; }
-    public string? ErrorMessage { get; set; }
-    public long? IqamaNo { get; set; }
-    public string? HousingName { get; set; }
-}
-internal class VehicleColumnMapping
-{
-    public bool IsValid { get; set; }
-    public string? ErrorMessage { get; set; }
 
-    public int VehicleNumberCol { get; set; }
-    public int SerialNumberCol { get; set; }
-    public int PlateNumberACol { get; set; }
-    public int PlateNumberECol { get; set; }
+    // ============================================
+    // ADD THIS METHOD TO YOUR ImportService.cs
+    // ============================================
 
-    public int VehicleTypeCol { get; set; }
-    public int ManufacturerCol { get; set; }
-    public int ManufactureYearCol { get; set; }
-    public int LicenseExpiryDateCol { get; set; }
-    public int LocationCol { get; set; }
-    public int StatusCol { get; set; }
-    public int RiderIqamaNoCol { get; set; }
-}
+    public async Task<Result<RiderShiftBulkImportResponse>> BulkImportRiderShiftsAsync(
+        IFormFile file,
+        string uploadedBy,
+        Action<int, int>? progressCallback = null)
+    {
+        if (file == null || file.Length == 0)
+            return Result.Failure<RiderShiftBulkImportResponse>(
+                new Error("InvalidFile", "File is empty or null", 400));
 
-internal class VehicleRowData
-{
-    public int RowNumber { get; set; }
-    public bool IsValid { get; set; }
-    public string? ErrorMessage { get; set; }
+        if (!file.FileName.EndsWith(".xlsx") && !file.FileName.EndsWith(".xls"))
+            return Result.Failure<RiderShiftBulkImportResponse>(
+                new Error("InvalidFormat", "File must be Excel format (.xlsx or .xls)", 400));
 
-    public string? VehicleNumber { get; set; }
-    public int SerialNumber { get; set; }
-    public string? PlateNumberA { get; set; }
-    public string? PlateNumberE { get; set; }
+        var details = new List<RiderShiftImportDetail>();
+        var errors = new List<string>();
 
-    public string? VehicleType { get; set; }
-    public string? Manufacturer { get; set; }
-    public int ManufactureYear { get; set; }
-    public DateOnly? LicenseExpiryDate { get; set; }
-    public string? Location { get; set; }
-    public string? Status { get; set; }
-    public long? RiderIqamaNo { get; set; }
+        int successfulShifts = 0;
+        int updatedShifts = 0;
+        int skippedDuplicates = 0;
+        int workingIdNotFound = 0;
+        int housingNotFound = 0;
+        int validationErrors = 0;
 
-    public string? OwnerName { get; set; }
-    public long OwnerId { get; set; }
+        try
+        {
+            Console.WriteLine($"[BulkImportShifts] Starting import for file: {file.FileName}");
 
-}
+            // Load rider lookup data into memory for fast access
+            Console.WriteLine("[BulkImportShifts] Loading rider details lookup...");
+            var riderLookup = await LoadRiderLookupForShifts();
+            Console.WriteLine($"[BulkImportShifts] Loaded {riderLookup.Count} rider entries");
 
-internal class ColumnMapping
-{
-    public bool IsValid { get; set; }
-    public string? ErrorMessage { get; set; }
+            // Load housing lookup
+            Console.WriteLine("[BulkImportShifts] Loading housing lookup...");
+            var housingLookup = await LoadHousingLookup();
+            Console.WriteLine($"[BulkImportShifts] Loaded {housingLookup.Count} housing entries");
 
-    public int IqamaNoCol { get; set; }
-    public int NameARCol { get; set; }
-    public int NameENCol { get; set; }
-    public int IqamaEndMCol { get; set; }
-    public int IqamaEndHCol { get; set; }
-    public int PassportNoCol { get; set; }
-    public int PassportEndCol { get; set; }
-    public int SponsorCol { get; set; }
-    public int SponsorNoCol { get; set; }
-    public int JobTitleCol { get; set; }
-    public int CountryCol { get; set; }
-    public int PhoneCol { get; set; }
-    public int DateOfBirthCol { get; set; }
-    public int StatusCol { get; set; }
-    public int IBANCol { get; set; }
-    public int INKSACol { get; set; }
+            using var stream = file.OpenReadStream();
+            Console.WriteLine($"[BulkImportShifts] File stream opened, length: {stream.Length} bytes");
 
-    public int WorkingIdCol { get; set; }
-    public int TshirtSizeCol { get; set; }
-    public int LicenseNumberCol { get; set; }
-    public int CompanyNameCol { get; set; }
-}
+            using var workbook = new XLWorkbook(stream);
+            var worksheet = workbook.Worksheet(1);
 
-internal class RowData
-{
-    public int RowNumber { get; set; }
-    public bool IsValid { get; set; }
-    public string? ErrorMessage { get; set; }
+            if (worksheet == null)
+            {
+                Console.WriteLine("[BulkImportShifts] ERROR: Could not read worksheet");
+                return Result.Failure<RiderShiftBulkImportResponse>(
+                    new Error("InvalidWorksheet", "Could not read worksheet", 400));
+            }
 
-    public long IqamaNo { get; set; }
-    public string? NameAR { get; set; }
-    public string? NameEN { get; set; }
-    public DateOnly? IqamaEndM { get; set; }
-    public DateOnly? IqamaEndH { get; set; }
-    public string? PassportNo { get; set; }
-    public DateOnly? PassportEnd { get; set; }
-    public string? Sponsor { get; set; }
-    public long SponsorNo { get; set; }
-    public string? JobTitle { get; set; }
-    public string? Country { get; set; }
-    public string? Phone { get; set; }
-    public DateOnly? DateOfBirth { get; set; }
-    public string? Status { get; set; }
-    public string? IBAN { get; set; }
-    public bool INKSA { get; set; }
+            Console.WriteLine($"[BulkImportShifts] Worksheet loaded: {worksheet.Name}");
 
-    public string? WorkingId { get; set; }
-    public string? TshirtSize { get; set; }
-    public string? LicenseNumber { get; set; }
-    public string? CompanyName { get; set; }
-    public int? CompanyId { get; set; }
+            var headerRow = FindShiftImportHeaderRow(worksheet);
+            if (headerRow == null)
+            {
+                Console.WriteLine("[BulkImportShifts] ERROR: No header row found");
+                return Result.Failure<RiderShiftBulkImportResponse>(
+                    new Error("EmptyFile", "Excel file has no header row", 400));
+            }
+
+            Console.WriteLine($"[BulkImportShifts] Header row found at row {headerRow.RowNumber()}");
+
+            var columnMap = BuildShiftImportColumnMapping(headerRow);
+            if (!columnMap.IsValid)
+            {
+                Console.WriteLine($"[BulkImportShifts] ERROR: Invalid columns - {columnMap.ErrorMessage}");
+                return Result.Failure<RiderShiftBulkImportResponse>(
+                    new Error("InvalidColumns", columnMap.ErrorMessage!, 400));
+            }
+
+            Console.WriteLine($"[BulkImportShifts] Column mapping successful");
+
+            var dataRows = worksheet.RowsUsed()
+                .Where(r => r.RowNumber() > headerRow.RowNumber())
+                .ToList();
+
+            var totalRows = dataRows.Count;
+            Console.WriteLine($"[BulkImportShifts] Total data rows to process: {totalRows}");
+
+            if (totalRows == 0)
+            {
+                Console.WriteLine("[BulkImportShifts] WARNING: No data rows found");
+                return Result.Failure<RiderShiftBulkImportResponse>(
+                    new Error("EmptyFile", "No data rows found in Excel file", 400));
+            }
+
+            // Report initial progress
+            try
+            {
+                progressCallback?.Invoke(0, totalRows);
+                Console.WriteLine($"[BulkImportShifts] Initial progress callback sent: 0/{totalRows}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[BulkImportShifts] ERROR in progress callback: {ex.Message}");
+            }
+
+            // Track duplicates within this import to skip them
+            var processedShifts = new HashSet<string>();
+
+            // Batch processing for better performance
+            const int BATCH_SIZE = 1000;
+            var shiftsToInsert = new List<RiderShift>();
+            var shiftsToUpdate = new List<RiderShift>();
+
+            var rowNumber = headerRow.RowNumber();
+            int processedCount = 0;
+
+            foreach (var row in dataRows)
+            {
+                rowNumber++;
+                processedCount++;
+
+                try
+                {
+                    var rowData = ParseShiftImportRowData(row, columnMap, rowNumber);
+
+                    if (!rowData.IsValid)
+                    {
+                        validationErrors++;
+                        // ✅ ADD TO DETAILS (This is an error)
+                        details.Add(new RiderShiftImportDetail(
+                            rowNumber,
+                            rowData.WorkingId ?? "N/A",
+                            rowData.ShiftDate ?? DateOnly.MinValue,
+                            ImportStatus.ValidationError,
+                            null, null, null, null, null,
+                            rowData.AcceptedOrders,
+                            rowData.ShiftStatus ?? "N/A",
+                            rowData.ErrorMessage
+                        ));
+                        continue;
+                    }
+
+                    // Check for duplicates within this import
+                    var shiftKey = $"{rowData.WorkingId}_{rowData.ShiftDate}";
+                    if (processedShifts.Contains(shiftKey))
+                    {
+                        skippedDuplicates++;
+                        // ✅ ADD TO DETAILS (This is an error)
+                        details.Add(new RiderShiftImportDetail(
+                            rowNumber,
+                            rowData.WorkingId!,
+                            rowData.ShiftDate!.Value,
+                            ImportStatus.SkippedDuplicate,
+                            "Duplicate in Excel",
+                            null, null, null,
+                            rowData.HousingId,
+                            rowData.AcceptedOrders,
+                            rowData.ShiftStatus!,
+                            "Duplicate WorkingId + ShiftDate"
+                        ));
+                        continue;
+                    }
+
+                    processedShifts.Add(shiftKey);
+
+                    // Find rider by WorkingId
+                    var workingIdKey = rowData.WorkingId!.Trim().ToLower();
+
+                    if (!riderLookup.TryGetValue(workingIdKey, out var riderInfo))
+                    {
+                        workingIdNotFound++;
+                        // ✅ ADD TO DETAILS (This is an error)
+                        details.Add(new RiderShiftImportDetail(
+                            rowNumber,
+                            rowData.WorkingId!,
+                            rowData.ShiftDate!.Value,
+                            ImportStatus.WorkingIdNotFound,
+                            null, null, null, null,
+                            rowData.HousingId,
+                            rowData.AcceptedOrders,
+                            rowData.ShiftStatus!,
+                            "WorkingId not found"
+                        ));
+                        continue;
+                    }
+
+                    // Validate housing if provided
+                    if (rowData.HousingId.HasValue && !housingLookup.ContainsKey(rowData.HousingId.Value))
+                    {
+                        housingNotFound++;
+                        // ✅ ADD TO DETAILS (This is an error)
+                        details.Add(new RiderShiftImportDetail(
+                            rowNumber,
+                            rowData.WorkingId!,
+                            rowData.ShiftDate!.Value,
+                            ImportStatus.HousingNotFound,
+                            null,
+                            riderInfo.RiderId,
+                            riderInfo.IqamaNo,
+                            riderInfo.Source,
+                            rowData.HousingId,
+                            rowData.AcceptedOrders,
+                            rowData.ShiftStatus!,
+                            $"Housing ID {rowData.HousingId} not found"
+                        ));
+                        continue;
+                    }
+
+                    // Check if shift already exists in database
+                    var existingShift = await _dbcontext.RiderShifts
+                        .FirstOrDefaultAsync(s =>
+                            s.RiderId == riderInfo.RiderId &&
+                            s.ShiftDate == rowData.ShiftDate!.Value);
+
+                    if (existingShift != null)
+                    {
+                        // Update existing shift
+                        existingShift.AcceptedDailyOrders = rowData.AcceptedOrders;
+                        existingShift.ShiftStatus = rowData.ShiftStatus!;
+                        existingShift.HousingId = rowData.HousingId;
+                        existingShift.WorkingId = rowData.WorkingId!;
+
+                        shiftsToUpdate.Add(existingShift);
+                        updatedShifts++;
+
+                        details.Add(new RiderShiftImportDetail(
+                            rowNumber,
+                            rowData.WorkingId!,
+                            rowData.ShiftDate!.Value,
+                            ImportStatus.Updated,
+                            "Updated existing shift",
+                            riderInfo.RiderId,
+                            riderInfo.IqamaNo,
+                            riderInfo.Source,
+                            rowData.HousingId,
+                            rowData.AcceptedOrders,
+                            rowData.ShiftStatus!,
+                            null
+                        ));
+                    }
+                    else
+                    {
+                        // Create new shift
+                        var newShift = new RiderShift
+                        {
+                            RiderId = riderInfo.RiderId,
+                            WorkingId = rowData.WorkingId!,
+                            ShiftDate = rowData.ShiftDate!.Value,
+                            AcceptedDailyOrders = rowData.AcceptedOrders,
+                            RejectedDailyOrders = 0,
+                            StackedDeliveries = 0,
+                            RealRejectedDailyOrders = 0,
+                            HousingId = rowData.HousingId,
+                            WorkingHours = 9,
+                            CompanyId = 1,
+                            ShiftStatus = rowData.ShiftStatus!,
+                            CreatedAt = DateTime.UtcNow.AddHours(3)
+                        };
+
+                        shiftsToInsert.Add(newShift);
+                        successfulShifts++;
+
+                        details.Add(new RiderShiftImportDetail(
+                            rowNumber,
+                            rowData.WorkingId!,
+                            rowData.ShiftDate!.Value,
+                            ImportStatus.Success,
+                            "Created new shift",
+                            riderInfo.RiderId,
+                            riderInfo.IqamaNo,
+                            riderInfo.Source,
+                            rowData.HousingId,
+                            rowData.AcceptedOrders,
+                            rowData.ShiftStatus!,
+                            null
+                        ));
+                    }
+
+                    // Batch save every 1000 records
+                    if (shiftsToInsert.Count >= BATCH_SIZE)
+                    {
+                        await _dbcontext.RiderShifts.AddRangeAsync(shiftsToInsert);
+                        await _dbcontext.SaveChangesAsync();
+                        Console.WriteLine($"[BulkImportShifts] Saved batch of {shiftsToInsert.Count} new shifts");
+                        shiftsToInsert.Clear();
+                    }
+
+                    if (shiftsToUpdate.Count >= BATCH_SIZE)
+                    {
+                        await _dbcontext.SaveChangesAsync();
+                        Console.WriteLine($"[BulkImportShifts] Updated batch of {shiftsToUpdate.Count} shifts");
+                        shiftsToUpdate.Clear();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    validationErrors++;
+                    errors.Add($"Row {rowNumber}: {ex.Message}");
+
+                    // ✅ ADD TO DETAILS (This is an error)
+                    details.Add(new RiderShiftImportDetail(
+                        rowNumber,
+                        "N/A",
+                        DateOnly.MinValue,
+                        ImportStatus.ValidationError,
+                        null, null, null, null, null,
+                        0,
+                        "N/A",
+                        $"Processing error: {ex.Message}"
+                    ));
+                }
+
+                // Report progress every 500 rows
+                if (processedCount % 500 == 0)
+                {
+                    try
+                    {
+                        progressCallback?.Invoke(processedCount, totalRows);
+                        Console.WriteLine($"[BulkImportShifts] Progress: {processedCount}/{totalRows} ({(processedCount * 100.0 / totalRows):F1}%)");
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[BulkImportShifts] ERROR in progress callback at row {processedCount}: {ex.Message}");
+                    }
+                }
+            }
+
+            // Save remaining batches
+            if (shiftsToInsert.Any())
+            {
+                await _dbcontext.RiderShifts.AddRangeAsync(shiftsToInsert);
+                await _dbcontext.SaveChangesAsync();
+                Console.WriteLine($"[BulkImportShifts] Saved final batch of {shiftsToInsert.Count} new shifts");
+            }
+
+            if (shiftsToUpdate.Any())
+            {
+                await _dbcontext.SaveChangesAsync();
+                Console.WriteLine($"[BulkImportShifts] Updated final batch of {shiftsToUpdate.Count} shifts");
+            }
+
+            // Final progress update
+            try
+            {
+                progressCallback?.Invoke(totalRows, totalRows);
+                Console.WriteLine($"[BulkImportShifts] Final progress callback sent: {totalRows}/{totalRows}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[BulkImportShifts] ERROR in final progress callback: {ex.Message}");
+            }
+
+            Console.WriteLine($"[BulkImportShifts] Import complete:");
+            Console.WriteLine($"  - Total: {totalRows}");
+            Console.WriteLine($"  - Successful: {successfulShifts}");
+            Console.WriteLine($"  - Updated: {updatedShifts}");
+            Console.WriteLine($"  - Skipped Duplicates: {skippedDuplicates}");
+            Console.WriteLine($"  - WorkingId Not Found: {workingIdNotFound}");
+            Console.WriteLine($"  - Housing Not Found: {housingNotFound}");
+            Console.WriteLine($"  - Validation Errors: {validationErrors}");
+
+            var response = new RiderShiftBulkImportResponse(
+                TotalRecordsProcessed: totalRows,
+                SuccessfulShifts: successfulShifts,
+                UpdatedShifts: updatedShifts,
+                SkippedDuplicates: skippedDuplicates,
+                WorkingIdNotFound: workingIdNotFound,
+                HousingNotFound: housingNotFound,
+                ValidationErrors: validationErrors,
+                Details: details,
+                ProcessingErrors: errors,
+                ProcessedAt: DateTime.UtcNow.AddHours(3)
+            );
+
+            return Result.Success(response);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[BulkImportShifts] FATAL ERROR: {ex}");
+            return Result.Failure<RiderShiftBulkImportResponse>(
+                new Error("ProcessingError", $"Failed to process Excel file: {ex.Message}", 500));
+        }
+    }
+
+    // ============================================
+    // HELPER METHODS - ADD TO ImportService.cs
+    // ============================================
+
+    private async Task<Dictionary<string, ShiftRiderInfo>> LoadRiderLookupForShifts()
+    {
+        var lookup = new Dictionary<string, ShiftRiderInfo>(StringComparer.OrdinalIgnoreCase);
+
+        // Load from RiderDetails
+        var riderDetails = await _dbcontext.RiderDetails
+            .Where(r => !string.IsNullOrEmpty(r.WorkingId))
+            .Select(r => new ShiftRiderInfo
+            {
+                RiderId = r.Id,
+                WorkingId = r.WorkingId!,
+                IqamaNo = r.EmployeeIqamaNo,
+                Source = "RiderDetails"
+            })
+            .AsNoTracking()
+            .ToListAsync();
+
+        foreach (var rider in riderDetails)
+        {
+            var key = rider.WorkingId.Trim().ToLower();
+            if (!lookup.ContainsKey(key))
+            {
+                lookup[key] = rider;
+            }
+        }
+
+        // Load from WorkingIdHistory
+        var historyRecords = await _dbcontext.RiderWorkingIdHistories
+            .Where(h => !string.IsNullOrEmpty(h.WorkingId))
+            .Include(h => h.Employee)
+                .ThenInclude(e => e.RiderDetails)
+            .Where(h => h.Employee.RiderDetails != null)
+            .Select(h => new ShiftRiderInfo
+            {
+                RiderId = h.Employee.RiderDetails!.Id,
+                WorkingId = h.WorkingId,
+                IqamaNo = h.RiderIqamaNo,
+                Source = "WorkingIdHistory"
+            })
+            .AsNoTracking()
+            .ToListAsync();
+
+        foreach (var record in historyRecords)
+        {
+            var key = record.WorkingId.Trim().ToLower();
+            if (!lookup.ContainsKey(key))
+            {
+                lookup[key] = record;
+            }
+        }
+
+        return lookup;
+    }
+
+    private async Task<Dictionary<int, string>> LoadHousingLookup()
+    {
+        return await _dbcontext.Housings
+            .AsNoTracking()
+            .ToDictionaryAsync(h => h.Id, h => h.Name);
+    }
+
+    private IXLRow? FindShiftImportHeaderRow(IXLWorksheet worksheet)
+    {
+        var knownColumns = new[]
+        {
+        "driverId", "Driver ID", "Working ID", "WorkingID", "معرف السائق", "رقم السائق",
+        "shiftDate", "Shift Date", "Date", "التاريخ", "تاريخ الوردية",
+        "acceptedOrders", "Accepted Orders", "Orders", "الطلبات المقبولة",
+        "housingId", "Housing ID", "Housing", "رقم السكن"
+    };
+
+        for (int i = 1; i <= Math.Min(10, worksheet.RowsUsed().Count()); i++)
+        {
+            var row = worksheet.Row(i);
+            var cellValues = row.CellsUsed()
+                .Select(c => c.IsMerged()
+                    ? c.MergedRange().FirstCell().GetString().Trim()
+                    : c.GetString().Trim())
+                .Where(v => !string.IsNullOrWhiteSpace(v))
+                .ToList();
+
+            int matchCount = cellValues.Count(cv =>
+                knownColumns.Any(kc =>
+                    cv.Equals(kc, StringComparison.OrdinalIgnoreCase) ||
+                    cv.Replace(" ", "").Equals(kc.Replace(" ", ""), StringComparison.OrdinalIgnoreCase)));
+
+            if (matchCount >= 2)
+                return row;
+        }
+
+        return worksheet.Row(1);
+    }
+
+    private ShiftImportColumnMapping BuildShiftImportColumnMapping(IXLRow headerRow)
+    {
+        var mapping = new ShiftImportColumnMapping();
+        var cells = headerRow.CellsUsed().ToList();
+
+        mapping.WorkingIdCol = FindColumn(cells,
+            "driverId", "Driver ID", "Working ID", "WorkingID", "معرف السائق", "رقم السائق", "معرف العمل");
+
+        mapping.ShiftDateCol = FindColumn(cells,
+            "reqDate", "Shift Date", "Date", "التاريخ", "تاريخ الوردية", "تاريخ");
+
+        mapping.AcceptedOrdersCol = FindColumn(cells,
+            "dailyRec", "Accepted Orders", "Orders", "Daily Orders", "الطلبات المقبولة", "الطلبات");
+
+        mapping.HousingIdCol = FindColumn(cells,
+            "housing", "Housing ID", "Housing", "رقم السكن", "السكن");
+
+        var missing = new List<string>();
+        if (mapping.WorkingIdCol == 0) missing.Add("WorkingId/DriverId");
+        if (mapping.ShiftDateCol == 0) missing.Add("ShiftDate");
+        if (mapping.AcceptedOrdersCol == 0) missing.Add("AcceptedOrders");
+
+        if (missing.Any())
+        {
+            mapping.IsValid = false;
+            mapping.ErrorMessage = $"Required columns missing: {string.Join(", ", missing)}";
+        }
+        else
+        {
+            mapping.IsValid = true;
+        }
+
+        return mapping;
+    }
+
+    private DateOnly? ParseShiftDate(string? dateStr)
+    {
+        if (string.IsNullOrWhiteSpace(dateStr))
+            return null;
+
+        // Clean up the input
+        dateStr = dateStr.Trim();
+
+        // Try direct DateOnly parse first
+        if (DateOnly.TryParse(dateStr, out DateOnly directResult))
+        {
+            return directResult;
+        }
+
+        // Comprehensive list of date formats
+        string[] formats = {
+        // Excel common formats
+        "M/d/yyyy", "MM/dd/yyyy", "M/dd/yyyy", "MM/d/yyyy",
+        "d/M/yyyy", "dd/MM/yyyy", "d/MM/yyyy", "dd/M/yyyy",
+        
+        // ISO formats
+        "yyyy-MM-dd", "yyyy/MM/dd", "yyyyMMdd",
+        "yyyy-M-d", "yyyy/M/d",
+        
+        // With dashes
+        "dd-MM-yyyy", "d-M-yyyy", "MM-dd-yyyy", "M-d-yyyy",
+        
+        // With dots (European)
+        "dd.MM.yyyy", "d.M.yyyy",
+        
+        // Month names
+        "dd-MMM-yyyy", "d-MMM-yyyy", "MMM dd yyyy",
+        "dd MMM yyyy", "d MMM yyyy",
+        
+        // Two digit years
+        "dd/MM/yy", "d/M/yy", "MM/dd/yy", "M/d/yy",
+        "yy-MM-dd", "yy/MM/dd",
+        
+        // With time (ignore time part)
+        "M/d/yyyy h:mm", "M/d/yyyy HH:mm",
+        "dd/MM/yyyy HH:mm", "yyyy-MM-dd HH:mm:ss"
+    };
+
+        // Try parsing with each format
+        foreach (var format in formats)
+        {
+            // Try with invariant culture
+            if (DateTime.TryParseExact(dateStr, format,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.None,
+                out DateTime date))
+            {
+                return DateOnly.FromDateTime(date);
+            }
+        }
+
+        // Try general parse
+        if (DateTime.TryParse(dateStr, out DateTime generalDate))
+        {
+            return DateOnly.FromDateTime(generalDate);
+        }
+
+        return null;
+    }
+
+    private ShiftImportRowData ParseShiftImportRowData(
+      IXLRow row,
+      ShiftImportColumnMapping map,
+      int rowNumber)
+    {
+        var data = new ShiftImportRowData { RowNumber = rowNumber };
+
+        try
+        {
+            data.WorkingId = GetCellValue(row, map.WorkingIdCol)?.Trim();
+            if (string.IsNullOrWhiteSpace(data.WorkingId))
+            {
+                data.IsValid = false;
+                data.ErrorMessage = "WorkingId/DriverId is required";
+                return data;
+            }
+
+            var dateStr = GetCellValue(row, map.ShiftDateCol);
+            if (string.IsNullOrWhiteSpace(dateStr))
+            {
+                data.IsValid = false;
+                data.ErrorMessage = "ShiftDate is required";
+                return data;
+            }
+
+            var shiftDate = ParseShiftDate(dateStr);
+            if (!shiftDate.HasValue)
+            {
+                data.IsValid = false;
+                data.ErrorMessage = $"Invalid date: '{dateStr}'";
+                return data;
+            }
+            data.ShiftDate = shiftDate.Value;
+
+            // ✅ FIXED: Parse AcceptedOrders
+            var ordersStr = GetCellValue(row, map.AcceptedOrdersCol);
+
+            if (string.IsNullOrWhiteSpace(ordersStr))
+            {
+                data.IsValid = false;
+                data.ErrorMessage = "AcceptedOrders is required";
+                return data;
+            }
+
+            if (!TryParseInt(ordersStr, out int acceptedOrders))
+            {
+                data.IsValid = false;
+                data.ErrorMessage = $"Invalid AcceptedOrders: '{ordersStr}'";
+                return data;
+            }
+
+            if (acceptedOrders < 0)
+            {
+                data.IsValid = false;
+                data.ErrorMessage = $"AcceptedOrders cannot be negative: {acceptedOrders}";
+                return data;
+            }
+
+            data.AcceptedOrders = acceptedOrders;
+            data.ShiftStatus = acceptedOrders >= 14 ? "completed" : "failed";
+
+            var housingStr = GetCellValue(row, map.HousingIdCol);
+            if (!string.IsNullOrWhiteSpace(housingStr) && TryParseInt(housingStr, out int housingId))
+            {
+                data.HousingId = housingId;
+            }
+
+            data.IsValid = true;
+        }
+        catch (Exception ex)
+        {
+            data.IsValid = false;
+            data.ErrorMessage = $"Error parsing row: {ex.Message}";
+        }
+
+        return data;
+    }
+
+    // ============================================
+    // INTERNAL CLASSES - ADD TO ImportService.cs
+    // ============================================
+
+    internal class ShiftRiderInfo
+    {
+        public int RiderId { get; set; }
+        public string WorkingId { get; set; } = string.Empty;
+        public long IqamaNo { get; set; }
+        public string Source { get; set; } = string.Empty;
+    }
+
+    internal class ShiftImportColumnMapping
+    {
+        public bool IsValid { get; set; }
+        public string? ErrorMessage { get; set; }
+        public int WorkingIdCol { get; set; }
+        public int ShiftDateCol { get; set; }
+        public int AcceptedOrdersCol { get; set; }
+        public int HousingIdCol { get; set; }
+    }
+
+    internal class ShiftImportRowData
+    {
+        public int RowNumber { get; set; }
+        public bool IsValid { get; set; }
+        public string? ErrorMessage { get; set; }
+        public string? WorkingId { get; set; }
+        public DateOnly? ShiftDate { get; set; }
+        public int AcceptedOrders { get; set; }
+        public int? HousingId { get; set; }
+        public string? ShiftStatus { get; set; }
+    }
+
+    internal class HousingColumnMapping
+    {
+        public bool IsValid { get; set; }
+        public string? ErrorMessage { get; set; }
+        public int IqamaNoCol { get; set; }
+        public int HousingNameCol { get; set; }
+    }
+
+    internal class HousingRowData
+    {
+        public int RowNumber { get; set; }
+        public bool IsValid { get; set; }
+        public string? ErrorMessage { get; set; }
+        public long? IqamaNo { get; set; }
+        public string? HousingName { get; set; }
+    }
+    internal class VehicleColumnMapping
+    {
+        public bool IsValid { get; set; }
+        public string? ErrorMessage { get; set; }
+
+        public int VehicleNumberCol { get; set; }
+        public int SerialNumberCol { get; set; }
+        public int PlateNumberACol { get; set; }
+        public int PlateNumberECol { get; set; }
+
+        public int VehicleTypeCol { get; set; }
+        public int ManufacturerCol { get; set; }
+        public int ManufactureYearCol { get; set; }
+        public int LicenseExpiryDateCol { get; set; }
+        public int LocationCol { get; set; }
+        public int StatusCol { get; set; }
+        public int RiderIqamaNoCol { get; set; }
+    }
+
+    internal class VehicleRowData
+    {
+        public int RowNumber { get; set; }
+        public bool IsValid { get; set; }
+        public string? ErrorMessage { get; set; }
+
+        public string? VehicleNumber { get; set; }
+        public int SerialNumber { get; set; }
+        public string? PlateNumberA { get; set; }
+        public string? PlateNumberE { get; set; }
+
+        public string? VehicleType { get; set; }
+        public string? Manufacturer { get; set; }
+        public int ManufactureYear { get; set; }
+        public DateOnly? LicenseExpiryDate { get; set; }
+        public string? Location { get; set; }
+        public string? Status { get; set; }
+        public long? RiderIqamaNo { get; set; }
+
+        public string? OwnerName { get; set; }
+        public long OwnerId { get; set; }
+
+    }
+
+    internal class ColumnMapping
+    {
+        public bool IsValid { get; set; }
+        public string? ErrorMessage { get; set; }
+
+        public int IqamaNoCol { get; set; }
+        public int NameARCol { get; set; }
+        public int NameENCol { get; set; }
+        public int IqamaEndMCol { get; set; }
+        public int IqamaEndHCol { get; set; }
+        public int PassportNoCol { get; set; }
+        public int PassportEndCol { get; set; }
+        public int SponsorCol { get; set; }
+        public int SponsorNoCol { get; set; }
+        public int JobTitleCol { get; set; }
+        public int CountryCol { get; set; }
+        public int PhoneCol { get; set; }
+        public int DateOfBirthCol { get; set; }
+        public int StatusCol { get; set; }
+        public int IBANCol { get; set; }
+        public int INKSACol { get; set; }
+
+        public int WorkingIdCol { get; set; }
+        public int TshirtSizeCol { get; set; }
+        public int LicenseNumberCol { get; set; }
+        public int CompanyNameCol { get; set; }
+    }
+
+    internal class RowData
+    {
+        public int RowNumber { get; set; }
+        public bool IsValid { get; set; }
+        public string? ErrorMessage { get; set; }
+
+        public long IqamaNo { get; set; }
+        public string? NameAR { get; set; }
+        public string? NameEN { get; set; }
+        public DateOnly? IqamaEndM { get; set; }
+        public DateOnly? IqamaEndH { get; set; }
+        public string? PassportNo { get; set; }
+        public DateOnly? PassportEnd { get; set; }
+        public string? Sponsor { get; set; }
+        public long SponsorNo { get; set; }
+        public string? JobTitle { get; set; }
+        public string? Country { get; set; }
+        public string? Phone { get; set; }
+        public DateOnly? DateOfBirth { get; set; }
+        public string? Status { get; set; }
+        public string? IBAN { get; set; }
+        public bool INKSA { get; set; }
+
+        public string? WorkingId { get; set; }
+        public string? TshirtSize { get; set; }
+        public string? LicenseNumber { get; set; }
+        public string? CompanyName { get; set; }
+        public int? CompanyId { get; set; }
+    }
 }
 

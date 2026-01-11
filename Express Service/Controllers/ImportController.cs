@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Timeouts;
 using Microsoft.AspNetCore.Mvc;
+using static Application.Service.ImportService;
 
 namespace Express_Service.Controllers;
 
@@ -14,6 +15,213 @@ public class ImportController(IImportService service , IBackgroundImportService 
 {
     private readonly IImportService service = service;
     private readonly IBackgroundImportService service1 = service1;
+
+    [HttpPost("rider-shifts/start")]
+    [DisableRequestSizeLimit]
+    [RequestFormLimits(MultipartBodyLengthLimit = 524288000)] // 500MB
+    public async Task<IActionResult> StartRiderShiftImport(IFormFile file)
+    {
+        if (file == null || file.Length == 0)
+            return BadRequest(new { error = "No file uploaded" });
+
+        if (!file.FileName.EndsWith(".xlsx") && !file.FileName.EndsWith(".xls"))
+            return BadRequest(new { error = "File must be Excel format (.xlsx or .xls)" });
+
+        var uploadedBy = "omar";
+        var jobId = await service1.StartRiderShiftImportAsync(file, uploadedBy);
+
+        return Ok(new
+        {
+            jobId,
+            message = "Rider shift import started in background",
+            estimatedTime = "Large files (200K+ rows) may take 10-30 minutes",
+            statusUrl = $"/api/import/rider-shifts/status/{jobId}",
+            resultUrl = $"/api/import/rider-shifts/result/{jobId}"
+        });
+    }
+
+    /// <summary>
+    /// Check rider shift import job progress - Poll every 5-10 seconds for large imports
+    /// </summary>
+    [HttpGet("rider-shifts/status/{jobId}")]
+    public IActionResult GetRiderShiftImportStatus(string jobId)
+    {
+        var status = service1.GetJobStatus(jobId);
+
+        if (status == null)
+            return NotFound(new { error = "Job not found or expired" });
+
+        return Ok(new
+        {
+            status.JobId,
+            status.Status,
+            status.Progress,
+            status.ProcessedRows,
+            status.TotalRows,
+            status.StartTime,
+            status.EndTime,
+            status.ElapsedTime,
+            status.ErrorMessage,
+            estimatedTimeRemaining = status.Progress > 0 && status.Progress < 100
+                ? CalculateEstimatedTime(status)
+                : null
+        });
+    }
+
+    /// <summary>
+    /// Get complete rider shift import results after job completion
+    /// </summary>
+    [HttpGet("rider-shifts/result/{jobId}")]
+    public IActionResult GetRiderShiftImportResult(string jobId)
+    {
+        var status = service1.GetJobStatus(jobId);
+
+        if (status == null)
+        {
+            return NotFound(new { error = "Job not found or expired" });
+        }
+
+        if (status.Status != "Completed")
+        {
+            return BadRequest(new
+            {
+                error = $"Job is still {status.Status}",
+                status = status
+            });
+        }
+
+        var result = service1.GetRiderShiftImportResult(jobId);
+
+        if (result == null)
+        {
+            return NotFound(new
+            {
+                error = "Result not available",
+                status = status,
+                message = "Job completed but result file is missing. This may indicate a storage issue."
+            });
+        }
+
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Get summary of rider shift import (lighter response without all details)
+    /// </summary>
+    [HttpGet("rider-shifts/summary/{jobId}")]
+    public IActionResult GetRiderShiftImportSummary(string jobId)
+    {
+        var status = service1.GetJobStatus(jobId);
+
+        if (status == null)
+            return NotFound(new { error = "Job not found or expired" });
+
+        if (status.Status != "Completed")
+            return BadRequest(new { error = $"Job is still {status.Status}", status });
+
+        var result = service1.GetRiderShiftImportResult(jobId);
+
+        if (result == null)
+            return NotFound(new { error = "Result not available" });
+
+        return Ok(new
+        {
+            jobId,
+            status = status.Status,
+            totalRecordsProcessed = result.TotalRecordsProcessed,
+            successfulShifts = result.SuccessfulShifts,
+            updatedShifts = result.UpdatedShifts,
+            skippedDuplicates = result.SkippedDuplicates,
+            workingIdNotFound = result.WorkingIdNotFound,
+            housingNotFound = result.HousingNotFound,
+            validationErrors = result.ValidationErrors,
+            processedAt = result.ProcessedAt,
+            elapsedTime = status.ElapsedTime,
+            successRate = result.TotalRecordsProcessed > 0
+                ? $"{((result.SuccessfulShifts + result.UpdatedShifts) * 100.0 / result.TotalRecordsProcessed):F1}%"
+                : "0%",
+            detailsCount = result.Details.Count,
+            hasDetails = true,
+            detailsUrl = $"/api/import/rider-shifts/result/{jobId}"
+        });
+    }
+
+    /// <summary>
+    /// Get paginated rider shift import details
+    /// </summary>
+    [HttpGet("rider-shifts/details/{jobId}")]
+    public IActionResult GetRiderShiftImportDetails(
+        string jobId,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 100,
+        [FromQuery] string? status = null)
+    {
+        var result = service1.GetRiderShiftImportResult(jobId);
+
+        if (result == null)
+            return NotFound(new { error = "Result not available" });
+
+        var filteredDetails = result.Details.AsEnumerable();
+
+        // Filter by status if provided
+        if (!string.IsNullOrWhiteSpace(status))
+        {
+            if (Enum.TryParse<ImportStatus>(status, true, out var statusEnum))
+            {
+                filteredDetails = filteredDetails.Where(d => d.Status == statusEnum);
+            }
+        }
+
+        var detailsList = filteredDetails.ToList();
+        var totalPages = (int)Math.Ceiling(detailsList.Count / (double)pageSize);
+        var details = detailsList
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToList();
+
+        return Ok(new
+        {
+            page,
+            pageSize,
+            totalPages,
+            totalRecords = detailsList.Count,
+            filter = status,
+            details
+        });
+    }
+
+    /// <summary>
+    /// Cancel a running rider shift import job
+    /// </summary>
+    [HttpPost("rider-shifts/cancel/{jobId}")]
+    public IActionResult CancelRiderShiftImport(string jobId)
+    {
+        var cancelled = service1.CancelJob(jobId);
+
+        if (!cancelled)
+            return NotFound(new { error = "Job not found or already completed" });
+
+        return Ok(new { message = "Rider shift import cancellation requested" });
+    }
+
+
+    // Helper method for estimated time calculation
+    private string? CalculateEstimatedTime(ImportJobStatus status)
+    {
+        if (status.ElapsedTime == null || status.ProcessedRows == 0)
+            return null;
+
+        var rowsRemaining = status.TotalRows - status.ProcessedRows;
+        var timePerRow = status.ElapsedTime.Value.TotalSeconds / status.ProcessedRows;
+        var secondsRemaining = timePerRow * rowsRemaining;
+
+        if (secondsRemaining < 60)
+            return $"{secondsRemaining:F0} seconds";
+        else if (secondsRemaining < 3600)
+            return $"{(secondsRemaining / 60):F0} minutes";
+        else
+            return $"{(secondsRemaining / 3600):F1} hours";
+    }
 
     [HttpPost("riders")]
     public async Task<IActionResult> ImportEmployeesAndRidersAsync(IFormFile file)
