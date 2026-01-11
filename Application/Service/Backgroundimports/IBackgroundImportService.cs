@@ -11,4 +11,7 @@ public interface IBackgroundImportService
     ImportJobStatus? GetJobStatus(string jobId);
     RiderVerificationResponse? GetJobResult(string jobId);
     bool CancelJob(string jobId);
+
+    Task<string> StartWorkingIdSyncAsync(IFormFile file, string uploadedBy);
+    WorkingIdSyncResponse? GetWorkingIdSyncResult(string jobId);
 }

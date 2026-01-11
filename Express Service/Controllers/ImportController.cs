@@ -768,4 +768,169 @@ public class ImportController(IImportService service , IBackgroundImportService 
             details
         });
     }
+
+
+    // Add these endpoints to ImportController.cs
+
+    /// <summary>
+    /// Start WorkingId sync in background - Returns immediately with Job ID
+    /// Syncs WorkingIds from Excel: adds to history if different, creates RiderDetails if missing
+    /// </summary>
+    [HttpPost("sync-working-ids/start")]
+    [DisableRequestSizeLimit]
+    [RequestFormLimits(MultipartBodyLengthLimit = 524288000)]
+    public async Task<IActionResult> StartWorkingIdSync(IFormFile file)
+    {
+        if (file == null || file.Length == 0)
+            return BadRequest(new { error = "No file uploaded" });
+
+        if (!file.FileName.EndsWith(".xlsx") && !file.FileName.EndsWith(".xls"))
+            return BadRequest(new { error = "File must be Excel format (.xlsx or .xls)" });
+
+        var uploadedBy = User?.Identity?.Name ?? "System";
+        var jobId = await service1.StartWorkingIdSyncAsync(file, uploadedBy);
+
+        return Ok(new
+        {
+            jobId,
+            message = "WorkingId sync started in background",
+            statusUrl = $"/api/import/sync-working-ids/status/{jobId}",
+            resultUrl = $"/api/import/sync-working-ids/result/{jobId}"
+        });
+    }
+
+    /// <summary>
+    /// Check WorkingId sync job progress - Poll this endpoint every 2-5 seconds
+    /// </summary>
+    [HttpGet("sync-working-ids/status/{jobId}")]
+    public IActionResult GetWorkingIdSyncStatus(string jobId)
+    {
+        var status = service1.GetJobStatus(jobId);
+
+        if (status == null)
+            return NotFound(new { error = "Job not found or expired" });
+
+        return Ok(status);
+    }
+
+    /// <summary>
+    /// Get complete WorkingId sync results after job completion
+    /// </summary>
+    [HttpGet("sync-working-ids/result/{jobId}")]
+    public IActionResult GetWorkingIdSyncResult(string jobId)
+    {
+        var status = service1.GetJobStatus(jobId);
+
+        if (status == null)
+        {
+            return NotFound(new { error = "Job not found or expired" });
+        }
+
+        if (status.Status != "Completed")
+        {
+            return BadRequest(new
+            {
+                error = $"Job is still {status.Status}",
+                status = status
+            });
+        }
+
+        var result = service1.GetWorkingIdSyncResult(jobId);
+
+        if (result == null)
+        {
+            return NotFound(new
+            {
+                error = "Result not available",
+                status = status,
+                message = "Job completed but result file is missing. This may indicate a storage issue."
+            });
+        }
+
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Get summary of WorkingId sync results (lighter response without all details)
+    /// </summary>
+    [HttpGet("sync-working-ids/summary/{jobId}")]
+    public IActionResult GetWorkingIdSyncSummary(string jobId)
+    {
+        var status = service1.GetJobStatus(jobId);
+
+        if (status == null)
+            return NotFound(new { error = "Job not found or expired" });
+
+        if (status.Status != "Completed")
+            return BadRequest(new { error = $"Job is still {status.Status}", status });
+
+        var result = service1.GetWorkingIdSyncResult(jobId);
+
+        if (result == null)
+            return NotFound(new { error = "Result not available" });
+
+        return Ok(new
+        {
+            jobId,
+            status = status.Status,
+            totalRecordsProcessed = result.TotalRecordsProcessed,
+            workingIdHistoriesAdded = result.WorkingIdHistoriesAdded,
+            riderDetailsCreated = result.RiderDetailsCreated,
+            alreadyCorrect = result.AlreadyCorrect,
+            duplicatesSkipped = result.DuplicatesSkipped,
+            nameNotFound = result.NameNotFound,
+            errorRecords = result.ErrorRecords,
+            processedAt = result.ProcessedAt,
+            elapsedTime = status.ElapsedTime,
+            detailsCount = result.Details.Count,
+            hasDetails = true,
+            detailsUrl = $"/api/import/sync-working-ids/result/{jobId}"
+        });
+    }
+
+    /// <summary>
+    /// Get paginated WorkingId sync details
+    /// </summary>
+    [HttpGet("sync-working-ids/details/{jobId}")]
+    public IActionResult GetWorkingIdSyncDetails(
+        string jobId,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 100)
+    {
+        var result = service1.GetWorkingIdSyncResult(jobId);
+
+        if (result == null)
+            return NotFound(new { error = "Result not available" });
+
+        var totalPages = (int)Math.Ceiling(result.Details.Count / (double)pageSize);
+        var details = result.Details
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToList();
+
+        return Ok(new
+        {
+            page,
+            pageSize,
+            totalPages,
+            totalRecords = result.Details.Count,
+            details
+        });
+    }
+
+    /// <summary>
+    /// Cancel a running WorkingId sync job
+    /// </summary>
+    [HttpPost("sync-working-ids/cancel/{jobId}")]
+    public IActionResult CancelWorkingIdSync(string jobId)
+    {
+        var cancelled = service1.CancelJob(jobId);
+
+        if (!cancelled)
+            return NotFound(new { error = "Job not found or already completed" });
+
+        return Ok(new { message = "WorkingId sync job cancellation requested" });
+    }
+
+  
 }

@@ -1,4 +1,5 @@
 ﻿using Application.Abstraction;
+using Application.Service.Backgroundimports;
 using ClosedXML.Excel;
 using Domain;
 using Domain.Entities;
@@ -302,6 +303,527 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
     }
     // Helper Methods
     // ===========================
+
+    // Add this method to ImportService.cs
+
+    public async Task<Result<WorkingIdSyncResponse>> SyncWorkingIdsFromExcelAsync(
+        IFormFile file,
+        string uploadedBy,
+        Action<int, int>? progressCallback = null)
+    {
+        if (file == null || file.Length == 0)
+            return Result.Failure<WorkingIdSyncResponse>(
+                new Error("InvalidFile", "File is empty or null", 400));
+
+        if (!file.FileName.EndsWith(".xlsx") && !file.FileName.EndsWith(".xls"))
+            return Result.Failure<WorkingIdSyncResponse>(
+                new Error("InvalidFormat", "File must be Excel format (.xlsx or .xls)", 400));
+
+        var details = new List<WorkingIdSyncDetail>();
+        var errors = new List<string>();
+
+        int workingIdHistoriesAdded = 0;
+        int riderDetailsCreated = 0;
+        int alreadyCorrect = 0;
+        int nameNotFound = 0;
+        int duplicatesSkipped = 0;
+        int errorRecords = 0;
+
+        // Track processed WorkingIds to skip duplicates
+        var processedWorkingIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var duplicateSummary = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+        try
+        {
+            Console.WriteLine($"[WorkingIdSync] Starting sync for file: {file.FileName}");
+
+            // Load all employee and rider data
+            Console.WriteLine("[WorkingIdSync] Loading employee lookup...");
+            var employeeLookup = await LoadEmployeeLookupByName();
+            Console.WriteLine($"[WorkingIdSync] Loaded {employeeLookup.Count} employee entries");
+
+            Console.WriteLine("[WorkingIdSync] Loading rider details lookup...");
+            var riderDetailsLookup = await LoadRiderDetailsByIqama();
+            Console.WriteLine($"[WorkingIdSync] Loaded {riderDetailsLookup.Count} rider detail entries");
+
+            // Load default company for creating new RiderDetails
+            var defaultCompany = await _dbcontext.Companies
+                .Where(c=>c.Id == 1)
+                .FirstOrDefaultAsync();
+
+            if (defaultCompany == null)
+            {
+                return Result.Failure<WorkingIdSyncResponse>(
+                    new Error("NoCompany", "No company found in database for creating RiderDetails", 400));
+            }
+
+            using var stream = file.OpenReadStream();
+            Console.WriteLine($"[WorkingIdSync] File stream opened, length: {stream.Length} bytes");
+
+            using var workbook = new XLWorkbook(stream);
+            var worksheet = workbook.Worksheet(1);
+
+            if (worksheet == null)
+            {
+                Console.WriteLine("[WorkingIdSync] ERROR: Could not read worksheet");
+                return Result.Failure<WorkingIdSyncResponse>(
+                    new Error("InvalidWorksheet", "Could not read worksheet", 400));
+            }
+
+            Console.WriteLine($"[WorkingIdSync] Worksheet loaded: {worksheet.Name}");
+
+            var headerRow = FindRiderVerificationHeaderRow(worksheet);
+            if (headerRow == null)
+            {
+                Console.WriteLine("[WorkingIdSync] ERROR: No header row found");
+                return Result.Failure<WorkingIdSyncResponse>(
+                    new Error("EmptyFile", "Excel file has no header row", 400));
+            }
+
+            Console.WriteLine($"[WorkingIdSync] Header row found at row {headerRow.RowNumber()}");
+
+            var columnMap = BuildRiderVerificationColumnMapping(headerRow);
+            if (!columnMap.IsValid)
+            {
+                Console.WriteLine($"[WorkingIdSync] ERROR: Invalid columns - {columnMap.ErrorMessage}");
+                return Result.Failure<WorkingIdSyncResponse>(
+                    new Error("InvalidColumns", columnMap.ErrorMessage!, 400));
+            }
+
+            Console.WriteLine($"[WorkingIdSync] Column mapping successful - WorkingId: Col {columnMap.WorkingIdCol}, NameAR: Col {columnMap.NameARCol}");
+
+            var dataRows = worksheet.RowsUsed()
+                .Where(r => r.RowNumber() > headerRow.RowNumber())
+                .ToList();
+
+            var totalRows = dataRows.Count;
+            Console.WriteLine($"[WorkingIdSync] Total data rows to process: {totalRows}");
+
+            if (totalRows == 0)
+            {
+                Console.WriteLine("[WorkingIdSync] WARNING: No data rows found");
+                return Result.Failure<WorkingIdSyncResponse>(
+                    new Error("EmptyFile", "No data rows found in Excel file", 400));
+            }
+
+            // Report initial total
+            try
+            {
+                progressCallback?.Invoke(0, totalRows);
+                Console.WriteLine($"[WorkingIdSync] Initial progress callback sent: 0/{totalRows}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[WorkingIdSync] ERROR in progress callback: {ex.Message}");
+            }
+
+            var rowNumber = headerRow.RowNumber();
+            int processedCount = 0;
+
+            foreach (var row in dataRows)
+            {
+                rowNumber++;
+                processedCount++;
+
+                try
+                {
+                    var rowData = ParseRiderVerificationRowData(row, columnMap, rowNumber);
+
+                    if (!rowData.IsValid)
+                    {
+                        errorRecords++;
+                        details.Add(new WorkingIdSyncDetail(
+                            rowNumber,
+                            rowData.WorkingId ?? "N/A",
+                            rowData.NameAR ?? "N/A",
+                            SyncStatus.ValidationError,
+                            null,
+                            null,
+                            null,
+                            null,
+                            rowData.ErrorMessage
+                        ));
+                        continue;
+                    }
+
+                    // Check for duplicate WorkingId in this Excel file
+                    var workingIdKey = rowData.WorkingId!.Trim().ToLower();
+
+                    if (processedWorkingIds.Contains(workingIdKey))
+                    {
+                        // This is a duplicate - skip it
+                        duplicatesSkipped++;
+
+                        // Track count for summary
+                        if (!duplicateSummary.ContainsKey(workingIdKey))
+                        {
+                            duplicateSummary[workingIdKey] = 1; // First occurrence was processed
+                        }
+                        duplicateSummary[workingIdKey]++;
+
+                        details.Add(new WorkingIdSyncDetail(
+                            rowNumber,
+                            rowData.WorkingId!,
+                            rowData.NameAR!,
+                            SyncStatus.DuplicateSkipped,
+                            $"Duplicate WorkingId '{rowData.WorkingId}' - only first occurrence processed",
+                            null,
+                            null,
+                            null,
+                            $"WorkingId '{rowData.WorkingId}' appears multiple times in Excel"
+                        ));
+                        continue;
+                    }
+
+                    // Mark this WorkingId as processed
+                    processedWorkingIds.Add(workingIdKey);
+
+                    // Find employee by Arabic name
+                    var nameKey = rowData.NameAR!.Trim().ToLower();
+
+                    if (!employeeLookup.TryGetValue(nameKey, out var employeeInfo))
+                    {
+                        nameNotFound++;
+                        details.Add(new WorkingIdSyncDetail(
+                            rowNumber,
+                            rowData.WorkingId!,
+                            rowData.NameAR!,
+                            SyncStatus.NameNotFound,
+                            null,
+                            null,
+                            null,
+                            null,
+                            "Employee with this Arabic name not found in system"
+                        ));
+                        continue;
+                    }
+
+                    // Check if employee has RiderDetails
+                    if (!riderDetailsLookup.TryGetValue(employeeInfo.IqamaNo, out var riderDetails))
+                    {
+                        // Create RiderDetails for this employee
+                        using var transaction = await _dbcontext.Database.BeginTransactionAsync();
+
+                        try
+                        {
+                            var newRiderDetails = new RiderDetails
+                            {
+                                EmployeeIqamaNo = employeeInfo.IqamaNo,
+                                WorkingId = rowData.WorkingId,
+                                TshirtSize = "M",
+                                LicenseNumber = "N/A",
+                                CompanyId = defaultCompany.Id,
+                                CreatedAt = DateTime.UtcNow.AddHours(3)
+                            };
+
+                            await _dbcontext.RiderDetails.AddAsync(newRiderDetails);
+
+                            // Add to WorkingId history
+                            var historyRecord = new RiderWorkingIdHistory
+                            {
+                                RiderIqamaNo = employeeInfo.IqamaNo,
+                                WorkingId = rowData.WorkingId!,
+                                CompanyId = defaultCompany.Id,
+                                StartDate = DateTime.UtcNow.AddHours(3),
+                                IsActive = false,
+                                Notes = $"Created by WorkingId sync import - {uploadedBy}"
+                            };
+
+                            await _dbcontext.RiderWorkingIdHistories.AddAsync(historyRecord);
+
+                            await _dbcontext.SaveChangesAsync();
+                            await transaction.CommitAsync();
+
+                            riderDetailsCreated++;
+
+                            details.Add(new WorkingIdSyncDetail(
+                                rowNumber,
+                                rowData.WorkingId!,
+                                rowData.NameAR!,
+                                SyncStatus.RiderDetailsCreated,
+                                "Created RiderDetails and added WorkingId to history",
+                                employeeInfo.IqamaNo,
+                                rowData.WorkingId,
+                                defaultCompany.Name,
+                                null
+                            ));
+
+                            // Update local lookup
+                            riderDetailsLookup[employeeInfo.IqamaNo] = new RiderDetailsInfo
+                            {
+                                IqamaNo = employeeInfo.IqamaNo,
+                                WorkingId = rowData.WorkingId,
+                                CompanyId = defaultCompany.Id,
+                                CompanyName = defaultCompany.Name
+                            };
+                        }
+                        catch (Exception ex)
+                        {
+                            await transaction.RollbackAsync();
+                            errorRecords++;
+                            errors.Add($"Row {rowNumber}: Failed to create RiderDetails - {ex.Message}");
+
+                            details.Add(new WorkingIdSyncDetail(
+                                rowNumber,
+                                rowData.WorkingId!,
+                                rowData.NameAR!,
+                                SyncStatus.ValidationError,
+                                null,
+                                employeeInfo.IqamaNo,
+                                null,
+                                null,
+                                $"Failed to create RiderDetails: {ex.Message}"
+                            ));
+                        }
+
+                        continue;
+                    }
+
+                    // RiderDetails exists - check if WorkingId needs update
+                    if (riderDetails.WorkingId == rowData.WorkingId)
+                    {
+                        alreadyCorrect++;
+                        details.Add(new WorkingIdSyncDetail(
+                            rowNumber,
+                            rowData.WorkingId!,
+                            rowData.NameAR!,
+                            SyncStatus.AlreadyCorrect,
+                            "WorkingId already matches",
+                            employeeInfo.IqamaNo,
+                            riderDetails.WorkingId,
+                            riderDetails.CompanyName,
+                            null
+                        ));
+                        continue;
+                    }
+
+                    // WorkingId is different - add to history and update RiderDetails
+                    using var updateTransaction = await _dbcontext.Database.BeginTransactionAsync();
+
+                    try
+                    {
+                        // Deactivate old WorkingId histories
+                        var oldHistories = await _dbcontext.RiderWorkingIdHistories
+                            .Where(h => h.RiderIqamaNo == employeeInfo.IqamaNo && h.IsActive)
+                            .ToListAsync();
+
+                        var now = DateTime.UtcNow.AddHours(3);
+
+                        foreach (var oldHistory in oldHistories)
+                        {
+                            oldHistory.IsActive = false;
+                            oldHistory.EndDate = now;
+                        }
+
+                        // Add new history record
+                        var newHistory = new RiderWorkingIdHistory
+                        {
+                            RiderIqamaNo = employeeInfo.IqamaNo,
+                            WorkingId = rowData.WorkingId!,
+                            CompanyId = riderDetails.CompanyId,
+                            StartDate = now,
+                            IsActive = true,
+                            Notes = $"Updated by WorkingId sync import - {uploadedBy}"
+                        };
+
+                        await _dbcontext.RiderWorkingIdHistories.AddAsync(newHistory);
+
+                        // Update RiderDetails
+                        var riderDetailsEntity = await _dbcontext.RiderDetails
+                            .FirstOrDefaultAsync(rd => rd.EmployeeIqamaNo == employeeInfo.IqamaNo);
+
+                        if (riderDetailsEntity != null)
+                        {
+                            riderDetailsEntity.WorkingId = rowData.WorkingId;
+                        }
+
+                        await _dbcontext.SaveChangesAsync();
+                        await updateTransaction.CommitAsync();
+
+                        workingIdHistoriesAdded++;
+
+                        details.Add(new WorkingIdSyncDetail(
+                            rowNumber,
+                            rowData.WorkingId!,
+                            rowData.NameAR!,
+                            SyncStatus.HistoryAdded,
+                            $"Updated WorkingId from '{riderDetails.WorkingId}' to '{rowData.WorkingId}'",
+                            employeeInfo.IqamaNo,
+                            rowData.WorkingId,
+                            riderDetails.CompanyName,
+                            null
+                        ));
+
+                        // Update local lookup
+                        riderDetailsLookup[employeeInfo.IqamaNo] = riderDetailsLookup[employeeInfo.IqamaNo] with
+                        {
+                            WorkingId = rowData.WorkingId
+                        };
+                    }
+                    catch (Exception ex)
+                    {
+                        await updateTransaction.RollbackAsync();
+                        errorRecords++;
+                        errors.Add($"Row {rowNumber}: Failed to update WorkingId - {ex.Message}");
+
+                        details.Add(new WorkingIdSyncDetail(
+                            rowNumber,
+                            rowData.WorkingId!,
+                            rowData.NameAR!,
+                            SyncStatus.ValidationError,
+                            null,
+                            employeeInfo.IqamaNo,
+                            riderDetails.WorkingId,
+                            riderDetails.CompanyName,
+                            $"Failed to update: {ex.Message}"
+                        ));
+                    }
+                }
+                catch (Exception ex)
+                {
+                    errorRecords++;
+                    errors.Add($"Row {rowNumber}: {ex.Message}");
+                    details.Add(new WorkingIdSyncDetail(
+                        rowNumber,
+                        "N/A", "N/A",
+                        SyncStatus.ValidationError,
+                        null,
+                        null,
+                        null,
+                        null,
+                        $"Processing error: {ex.Message}"
+                    ));
+                }
+
+                // Report progress every 500 rows
+                if (processedCount % 500 == 0)
+                {
+                    try
+                    {
+                        progressCallback?.Invoke(processedCount, totalRows);
+                        Console.WriteLine($"[WorkingIdSync] Progress: {processedCount}/{totalRows} ({(processedCount * 100.0 / totalRows):F1}%)");
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[WorkingIdSync] ERROR in progress callback at row {processedCount}: {ex.Message}");
+                    }
+                }
+            }
+
+            // Final progress update
+            try
+            {
+                progressCallback?.Invoke(totalRows, totalRows);
+                Console.WriteLine($"[WorkingIdSync] Final progress callback sent: {totalRows}/{totalRows}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[WorkingIdSync] ERROR in final progress callback: {ex.Message}");
+            }
+
+            Console.WriteLine($"[WorkingIdSync] Sync complete:");
+            Console.WriteLine($"  - Total: {totalRows}");
+            Console.WriteLine($"  - Already Correct: {alreadyCorrect}");
+            Console.WriteLine($"  - Histories Added: {workingIdHistoriesAdded}");
+            Console.WriteLine($"  - Rider Details Created: {riderDetailsCreated}");
+            Console.WriteLine($"  - Duplicates Skipped: {duplicatesSkipped}");
+            Console.WriteLine($"  - Name Not Found: {nameNotFound}");
+            Console.WriteLine($"  - Errors: {errorRecords}");
+
+            // Add duplicate summary to errors
+            if (duplicateSummary.Any())
+            {
+                errors.Add("=== DUPLICATE WORKING IDS SUMMARY ===");
+                foreach (var kvp in duplicateSummary.OrderByDescending(x => x.Value))
+                {
+                    errors.Add($"WorkingId '{kvp.Key}' appeared {kvp.Value} times (only first processed)");
+                }
+            }
+
+            var response = new WorkingIdSyncResponse(
+                TotalRecordsProcessed: totalRows,
+                WorkingIdHistoriesAdded: workingIdHistoriesAdded,
+                RiderDetailsCreated: riderDetailsCreated,
+                AlreadyCorrect: alreadyCorrect,
+                NameNotFound: nameNotFound,
+                DuplicatesSkipped: duplicatesSkipped,
+                ErrorRecords: errorRecords,
+                Details: details,
+                ProcessingErrors: errors,
+                ProcessedAt: DateTime.UtcNow.AddHours(3)
+            );
+
+            return Result.Success(response);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[WorkingIdSync] FATAL ERROR: {ex}");
+            return Result.Failure<WorkingIdSyncResponse>(
+                new Error("ProcessingError", $"Failed to process Excel file: {ex.Message}", 500));
+        }
+    }
+
+    // Helper method to load employees by Arabic name
+    private async Task<Dictionary<string, EmployeeLookupInfo>> LoadEmployeeLookupByName()
+    {
+        var employees = await _dbcontext.Employees
+            .Where(e => !string.IsNullOrEmpty(e.NameAR))
+            .Select(e => new EmployeeLookupInfo
+            {
+                IqamaNo = e.IqamaNo,
+                NameAR = e.NameAR,
+                NameEN = e.NameEN
+            })
+            .AsNoTracking()
+            .ToListAsync();
+
+        var lookup = new Dictionary<string, EmployeeLookupInfo>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var emp in employees)
+        {
+            var nameKey = emp.NameAR.Trim().ToLower();
+            if (!lookup.ContainsKey(nameKey))
+            {
+                lookup[nameKey] = emp;
+            }
+        }
+
+        return lookup;
+    }
+
+    // Helper method to load rider details by Iqama
+    private async Task<Dictionary<long, RiderDetailsInfo>> LoadRiderDetailsByIqama()
+    {
+        var riders = await _dbcontext.RiderDetails
+            .Include(r => r.Company)
+            .Select(r => new RiderDetailsInfo
+            {
+                IqamaNo = r.EmployeeIqamaNo,
+                WorkingId = r.WorkingId,
+                CompanyId = r.CompanyId,
+                CompanyName = r.Company.Name
+            })
+            .AsNoTracking()
+            .ToListAsync();
+
+        return riders.ToDictionary(r => r.IqamaNo);
+    }
+
+    // Internal helper classes
+    internal record EmployeeLookupInfo
+    {
+        public long IqamaNo { get; init; }
+        public string NameAR { get; init; } = string.Empty;
+        public string NameEN { get; init; } = string.Empty;
+    }
+
+    internal record RiderDetailsInfo
+    {
+        public long IqamaNo { get; init; }
+        public string? WorkingId { get; init; }
+        public int CompanyId { get; init; }
+        public string CompanyName { get; init; } = string.Empty;
+    }
 
     private async Task<Dictionary<string, RiderLookupData>> LoadRiderDetailsLookup()
     {

@@ -41,6 +41,11 @@ public interface IImportService
         string uploadedBy,
         Action<int, int>? progressCallback = null);
 
+    Task<Result<WorkingIdSyncResponse>> SyncWorkingIdsFromExcelAsync(
+    IFormFile file,
+    string uploadedBy,
+    Action<int, int>? progressCallback = null);
+
 }
 // Application/DTOs/VehicleUsageCheckDtos.cs
 // Application/DTOs/VehicleUsageCheckDtos.cs
@@ -276,3 +281,39 @@ public record VehicleAssignmentRowResult(
     List<string> Warnings,
     string? ErrorMessage
 );
+
+
+public record WorkingIdSyncResponse(
+    int TotalRecordsProcessed,
+    int WorkingIdHistoriesAdded,
+    int RiderDetailsCreated,
+    int AlreadyCorrect,
+    int NameNotFound,
+    int DuplicatesSkipped,
+    int ErrorRecords,
+    List<WorkingIdSyncDetail> Details,
+    List<string> ProcessingErrors,
+    DateTime ProcessedAt
+);
+
+public record WorkingIdSyncDetail(
+    int RowNumber,
+    string WorkingIdFromExcel,
+    string NameARFromExcel,
+    SyncStatus Status,
+    string? Action,
+    long? FoundIqamaNo,
+    string? CurrentWorkingId,
+    string? CompanyName,
+    string? ErrorMessage
+);
+
+public enum SyncStatus
+{
+    AlreadyCorrect = 1,           // Already has this WorkingId
+    HistoryAdded = 2,             // Added to WorkingId history
+    RiderDetailsCreated = 3,      // Created missing RiderDetails
+    NameNotFound = 4,             // Name not found in system
+    ValidationError = 5,          // Invalid data
+    DuplicateSkipped = 6          // Duplicate WorkingId in Excel - skipped
+}
