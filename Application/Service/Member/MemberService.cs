@@ -1522,7 +1522,10 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
         }
 
         var total = housing.Employees.Where(e => e.Status.ToLower() != "vacation").ToList().Count;
-        var inca = total - activeRiders;
+
+        var emp = housing.Employees.Where(e => e.IsEmployee).ToList().Count;
+
+        var inca = total - (activeRiders + emp);
 
         var stats = new Statistics(
             total,

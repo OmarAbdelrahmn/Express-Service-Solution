@@ -27,6 +27,15 @@ public class AdminController(IAdminService service,IUserService service1) : Cont
     //}
 
 
+    [HttpGet("move")]
+    public async Task<IActionResult> MoveData()
+    {
+        var result = await service.BackfillHousingIdsAsync();
+        return result.IsSuccess ?
+            Ok(result.Value) :
+            result.ToProblem();
+    }
+
     [HttpGet("users")]
     [Authorize(Roles = "Master")]
     public async Task<IActionResult> GetUsers()

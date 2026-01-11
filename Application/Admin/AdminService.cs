@@ -19,6 +19,38 @@ public class AdminService(
     private readonly UserManager<ApplicationUser> manager = manager;
     private readonly ApplicationDbcontext dbcontext = dbcontext;
 
+    public async Task<Result<int>> BackfillHousingIdsAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            // Get all shifts without HousingId
+            var shiftsWithoutHousing = await dbcontext.RiderShifts
+                .Include(s => s.Rider)
+                    .ThenInclude(r => r.Employee)
+                .Where(s => s.HousingId == null)
+                .ToListAsync(cancellationToken);
+
+            int updatedCount = 0;
+
+            foreach (var shift in shiftsWithoutHousing)
+            {
+                if (shift.Rider?.Employee?.HousingId != null)
+                {
+                    shift.HousingId = shift.Rider.Employee.HousingId;
+                    updatedCount++;
+                }
+            }
+
+            await dbcontext.SaveChangesAsync(cancellationToken);
+
+            return Result.Success(updatedCount);
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<int>(
+                new Error("ServerError", $"Error backfilling housing IDs: {ex.Message}", 500));
+        }
+    }
     public async Task<IEnumerable<UserResponses>> GetAllUsers() =>
         await (from u in dbcontext.Users
                join ur in dbcontext.UserRoles

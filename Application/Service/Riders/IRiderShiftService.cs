@@ -99,7 +99,8 @@ public record RiderShiftResponse(
     decimal PenaltyAmount,
     DateTime CreatedAt,
     bool IsSubstitution,
-    string? OriginalWorkingId
+    string? OriginalWorkingId,
+    int? HousingId
 );
 
 

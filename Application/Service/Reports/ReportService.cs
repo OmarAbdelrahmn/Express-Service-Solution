@@ -29,7 +29,380 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
 
 
     // Add this method to the ReportService class
+    // Replace the following methods in ReportService.cs
 
+    public async Task<Result<List<HousingRiderDailyDetailReport>>> GetAllHousingsRiderDailyDetailReportAsync(
+        DateOnly startDate,
+        DateOnly endDate,
+        CancellationToken cancellationToken = default)
+    {
+        // Get all shifts with rider and housing information
+        var shifts = await _dbcontext.RiderShifts
+            .Include(s => s.Rider)
+                .ThenInclude(r => r.Employee)
+                    .ThenInclude(e => e.Housing)
+            .Where(s => s.ShiftDate >= startDate &&
+                       s.ShiftDate <= endDate &&
+                       !string.IsNullOrWhiteSpace(s.Rider.WorkingId))
+            .ToListAsync(cancellationToken);
+
+        if (!shifts.Any())
+            return Result.Success(new List<HousingRiderDailyDetailReport>());
+
+        // Group by housing (from shift data)
+        var housingGroups = shifts
+            .Where(s => s.Rider?.Employee?.Housing != null)
+            .GroupBy(s => new {
+                HousingId = s.Rider.Employee.Housing.Id,
+                HousingName = s.Rider.Employee.Housing.Name
+            });
+
+        var reports = new List<HousingRiderDailyDetailReport>();
+
+        foreach (var housingGroup in housingGroups)
+        {
+            var riderGroups = housingGroup.GroupBy(s => s.RiderId);
+
+            foreach (var riderGroup in riderGroups)
+            {
+                var rider = riderGroup.First().Rider;
+                if (rider?.WorkingId == null) continue;
+
+                var reportResult = await GetRiderDailyDetailReportAsync(
+                    rider.WorkingId, startDate, endDate, cancellationToken);
+
+                if (reportResult.IsSuccess)
+                {
+                    reports.Add(new HousingRiderDailyDetailReport(
+                        HousingName: housingGroup.Key.HousingName,
+                        RiderReport: reportResult.Value
+                    ));
+                }
+            }
+        }
+
+        return Result.Success(reports);
+    }
+
+    public async Task<Result<List<HousingAllRidersSummaryReport>>> GetAllHousingsSummaryReportAsync(
+        DateOnly startDate,
+        DateOnly endDate,
+        CancellationToken cancellationToken = default)
+    {
+        var totalExpectedDays = endDate.DayNumber - startDate.DayNumber + 1;
+
+        // Get all shifts for company 1 with housing data from shift
+        var shifts = await _dbcontext.RiderShifts
+            .Include(s => s.Rider)
+                .ThenInclude(r => r.Employee)
+                    .ThenInclude(e => e.Housing)
+            .Where(s => s.CompanyId == 1 &&
+                       s.ShiftDate >= startDate &&
+                       s.ShiftDate <= endDate &&
+                       s.Rider.Employee.Housing != null)
+            .ToListAsync(cancellationToken);
+
+        if (!shifts.Any())
+            return Result.Success(new List<HousingAllRidersSummaryReport>());
+
+        // Group by housing from shift data
+        var housingGroups = shifts.GroupBy(s => new {
+            HousingId = s.Rider.Employee.Housing.Id,
+            HousingName = s.Rider.Employee.Housing.Name
+        });
+
+        var reports = new List<HousingAllRidersSummaryReport>();
+
+        foreach (var housingGroup in housingGroups)
+        {
+            var housingShifts = housingGroup.ToList();
+            var riderGroups = housingShifts.GroupBy(s => s.RiderId);
+            var riderSummaries = new List<RiderSummaryDetail>();
+
+            foreach (var group in riderGroups)
+            {
+                var rider = group.First().Rider;
+                if (rider?.Employee == null) continue;
+
+                var riderShifts = group.ToList();
+                var actualWorkingDays = riderShifts.Count;
+                var missingDays = totalExpectedDays - actualWorkingDays;
+
+                var totalWorkingHours = riderShifts.Sum(s => s.WorkingHours);
+                var targetWorkingHours = totalExpectedDays * TARGET_HOURS_PER_DAY;
+                var hoursDifference = totalWorkingHours - targetWorkingHours;
+
+                var totalOrders = riderShifts.Sum(s => s.AcceptedDailyOrders);
+                var targetOrders = totalExpectedDays * TARGET_ORDERS_PER_DAY;
+                var ordersDifference = totalOrders - targetOrders;
+
+                riderSummaries.Add(new RiderSummaryDetail(
+                    RiderId: rider.Id,
+                    IqamaNo: rider.EmployeeIqamaNo,
+                    RiderNameAR: rider.Employee.NameAR,
+                    RiderNameEN: rider.Employee.NameEN,
+                    WorkingId: riderShifts.First().WorkingId,
+                    ActualWorkingDays: actualWorkingDays,
+                    MissingDays: missingDays > 0 ? -missingDays : 0,
+                    TotalWorkingHours: totalWorkingHours,
+                    TargetWorkingHours: targetWorkingHours,
+                    HoursDifference: hoursDifference,
+                    TotalOrders: totalOrders,
+                    TargetOrders: targetOrders,
+                    OrdersDifference: ordersDifference
+                ));
+            }
+
+            riderSummaries = riderSummaries.OrderByDescending(r => r.TotalOrders).ToList();
+
+            var totals = new SummaryTotals(
+                TotalRiders: riderSummaries.Count,
+                TotalWorkingDays: riderSummaries.Sum(r => r.ActualWorkingDays),
+                TotalMissingDays: riderSummaries.Sum(r => Math.Abs(r.MissingDays)),
+                TotalWorkingHours: riderSummaries.Sum(r => r.TotalWorkingHours),
+                TotalTargetHours: riderSummaries.Sum(r => r.TargetWorkingHours),
+                HoursDifference: riderSummaries.Sum(r => r.HoursDifference),
+                TotalOrders: riderSummaries.Sum(r => r.TotalOrders),
+                TotalTargetOrders: riderSummaries.Sum(r => r.TargetOrders),
+                OrdersDifference: riderSummaries.Sum(r => r.OrdersDifference)
+            );
+
+            var summaryReport = new AllRidersSummaryReport(
+                StartDate: startDate,
+                EndDate: endDate,
+                TotalExpectedDays: totalExpectedDays,
+                RiderSummaries: riderSummaries,
+                Totals: totals
+            );
+
+            reports.Add(new HousingAllRidersSummaryReport(
+                HousingName: housingGroup.Key.HousingName,
+                SummaryReport: summaryReport
+            ));
+        }
+
+        return Result.Success(reports);
+    }
+
+    public async Task<Result<List<HousingAllRidersSummaryReport>>> GetAllHousingsSummaryReportAsync2(
+        DateOnly startDate,
+        DateOnly endDate,
+        CancellationToken cancellationToken = default)
+    {
+        var totalExpectedDays = endDate.DayNumber - startDate.DayNumber + 1;
+
+        // Get all shifts for company 2 with housing data from shift
+        var shifts = await _dbcontext.RiderShifts
+            .Include(s => s.Rider)
+                .ThenInclude(r => r.Employee)
+                    .ThenInclude(e => e.Housing)
+            .Where(s => s.CompanyId == 2 &&
+                       s.ShiftDate >= startDate &&
+                       s.ShiftDate <= endDate &&
+                       s.Rider.Employee.Housing != null)
+            .ToListAsync(cancellationToken);
+
+        if (!shifts.Any())
+            return Result.Success(new List<HousingAllRidersSummaryReport>());
+
+        // Group by housing from shift data
+        var housingGroups = shifts.GroupBy(s => new {
+            HousingId = s.Rider.Employee.Housing.Id,
+            HousingName = s.Rider.Employee.Housing.Name
+        });
+
+        var reports = new List<HousingAllRidersSummaryReport>();
+
+        foreach (var housingGroup in housingGroups)
+        {
+            var housingShifts = housingGroup.ToList();
+            var riderGroups = housingShifts.GroupBy(s => s.RiderId);
+            var riderSummaries = new List<RiderSummaryDetail>();
+
+            foreach (var group in riderGroups)
+            {
+                var rider = group.First().Rider;
+                if (rider?.Employee == null) continue;
+
+                var riderShifts = group.ToList();
+                var actualWorkingDays = riderShifts.Count;
+
+                // Count days with less than 10 working hours
+                var daysWithLessThan10Hours = riderShifts.Count(s => s.WorkingHours < 10);
+                var missingDays = (totalExpectedDays - actualWorkingDays) + daysWithLessThan10Hours;
+
+                var totalWorkingHours = riderShifts.Sum(s => s.WorkingHours);
+                var targetWorkingHours = totalExpectedDays * TARGET_HOURS_PER_DAY2;
+                var hoursDifference = totalWorkingHours - targetWorkingHours;
+
+                var totalOrders = riderShifts.Sum(s => s.AcceptedDailyOrders);
+                var targetOrders = totalExpectedDays * TARGET_ORDERS_PER_DAY2;
+                var ordersDifference = totalOrders - targetOrders;
+
+                riderSummaries.Add(new RiderSummaryDetail(
+                    RiderId: rider.Id,
+                    IqamaNo: rider.EmployeeIqamaNo,
+                    RiderNameAR: rider.Employee.NameAR,
+                    RiderNameEN: rider.Employee.NameEN,
+                    WorkingId: riderShifts.First().WorkingId,
+                    ActualWorkingDays: actualWorkingDays,
+                    MissingDays: missingDays > 0 ? -missingDays : 0,
+                    TotalWorkingHours: totalWorkingHours,
+                    TargetWorkingHours: targetWorkingHours,
+                    HoursDifference: hoursDifference,
+                    TotalOrders: totalOrders,
+                    TargetOrders: targetOrders,
+                    OrdersDifference: ordersDifference
+                ));
+            }
+
+            riderSummaries = riderSummaries.OrderByDescending(r => r.TotalOrders).ToList();
+
+            var totals = new SummaryTotals(
+                TotalRiders: riderSummaries.Count,
+                TotalWorkingDays: riderSummaries.Sum(r => r.ActualWorkingDays),
+                TotalMissingDays: riderSummaries.Sum(r => Math.Abs(r.MissingDays)),
+                TotalWorkingHours: riderSummaries.Sum(r => r.TotalWorkingHours),
+                TotalTargetHours: riderSummaries.Sum(r => r.TargetWorkingHours),
+                HoursDifference: riderSummaries.Sum(r => r.HoursDifference),
+                TotalOrders: riderSummaries.Sum(r => r.TotalOrders),
+                TotalTargetOrders: riderSummaries.Sum(r => r.TargetOrders),
+                OrdersDifference: riderSummaries.Sum(r => r.OrdersDifference)
+            );
+
+            var summaryReport = new AllRidersSummaryReport(
+                StartDate: startDate,
+                EndDate: endDate,
+                TotalExpectedDays: totalExpectedDays,
+                RiderSummaries: riderSummaries,
+                Totals: totals
+            );
+
+            reports.Add(new HousingAllRidersSummaryReport(
+                HousingName: housingGroup.Key.HousingName,
+                SummaryReport: summaryReport
+            ));
+        }
+
+        return Result.Success(reports);
+    }
+
+    public async Task<Result<List<HousingRejectionReport>>> GetAllHousingsRejectionReportAsync(
+        DateOnly startDate,
+        DateOnly endDate,
+        CancellationToken cancellationToken = default)
+    {
+        var totalDays = endDate.DayNumber - startDate.DayNumber + 1;
+
+        // Get all shifts with housing data from shift
+        var shifts = await _dbcontext.RiderShifts
+            .Include(s => s.Rider)
+                .ThenInclude(r => r.Employee)
+                    .ThenInclude(e => e.Housing)
+            .Where(s => s.Rider.CompanyId == 1 &&
+                       s.ShiftDate >= startDate &&
+                       s.ShiftDate <= endDate &&
+                       s.Rider.Employee.Housing != null)
+            .ToListAsync(cancellationToken);
+
+        if (!shifts.Any())
+            return Result.Success(new List<HousingRejectionReport>());
+
+        // Group by housing from shift data
+        var housingGroups = shifts.GroupBy(s => new {
+            HousingId = s.Rider.Employee.Housing.Id,
+            HousingName = s.Rider.Employee.Housing.Name
+        });
+
+        var reports = new List<HousingRejectionReport>();
+
+        foreach (var housingGroup in housingGroups)
+        {
+            var housingShifts = housingGroup.ToList();
+            var riderGroups = housingShifts.GroupBy(s => s.RiderId);
+            var riderDetails = new List<RiderRejectionDetail>();
+
+            foreach (var group in riderGroups)
+            {
+                var rider = group.First().Rider;
+                if (rider?.Employee == null) continue;
+
+                var riderShifts = group.ToList();
+                var totalShifts = riderShifts.Count;
+                var totalOrders = riderShifts.Sum(s => s.AcceptedDailyOrders + s.RejectedDailyOrders);
+                var targetOrders = totalDays * TARGET_ORDERS_PER_DAY;
+                var totalRejections = riderShifts.Sum(s => s.RejectedDailyOrders);
+                var totalRealRejections = riderShifts.Sum(s => s.RealRejectedDailyOrders);
+
+                var rejectionRate = totalOrders > 0
+                    ? Math.Round((decimal)totalRejections / totalOrders * 100, 2)
+                    : 0;
+
+                var realRejectionRate = totalOrders > 0
+                    ? Math.Round((decimal)totalRealRejections / totalOrders * 100, 2)
+                    : 0;
+
+                riderDetails.Add(new RiderRejectionDetail(
+                    RiderId: rider.Id,
+                    IqamaNo: rider.EmployeeIqamaNo,
+                    RiderNameAR: rider.Employee.NameAR,
+                    RiderNameEN: rider.Employee.NameEN,
+                    WorkingId: riderShifts.First().WorkingId,
+                    TotalShifts: totalShifts,
+                    TotalOrders: totalOrders,
+                    TargetOrders: targetOrders,
+                    TotalRejections: totalRejections,
+                    TotalRealRejections: totalRealRejections,
+                    RejectionRate: rejectionRate,
+                    RealRejectionRate: realRejectionRate
+                ));
+            }
+
+            riderDetails = riderDetails.OrderByDescending(r => r.TotalRealRejections).ToList();
+
+            var totalAllOrders = riderDetails.Sum(r => r.TotalOrders);
+            var totalAllRejections = riderDetails.Sum(r => r.TotalRejections);
+            var totalAllRealRejections = riderDetails.Sum(r => r.TotalRealRejections);
+
+            var overallRejectionRate = totalAllOrders > 0
+                ? Math.Round((decimal)totalAllRejections / totalAllOrders * 100, 2)
+                : 0;
+
+            var overallRealRejectionRate = totalAllOrders > 0
+                ? Math.Round((decimal)totalAllRealRejections / totalAllOrders * 100, 2)
+                : 0;
+
+            var totals = new RejectionTotals(
+                TotalRiders: riderDetails.Count,
+                TotalShifts: riderDetails.Sum(r => r.TotalShifts),
+                TotalOrders: totalAllOrders,
+                TotalTargetOrders: riderDetails.Sum(r => r.TargetOrders),
+                TotalRejections: totalAllRejections,
+                TotalRealRejections: totalAllRealRejections,
+                OverallRejectionRate: overallRejectionRate,
+                OverallRealRejectionRate: overallRealRejectionRate
+            );
+
+            var rejectionReport = new RejectionReport(
+                StartDate: startDate,
+                EndDate: endDate,
+                TotalDays: totalDays,
+                RiderDetails: riderDetails,
+                Totals: totals
+            );
+
+            reports.Add(new HousingRejectionReport(
+                HousingName: housingGroup.Key.HousingName,
+                RejectionReport: rejectionReport
+            ));
+        }
+
+        return Result.Success(reports);
+    }
+
+    // Note: GetComprehensiveDashboardAsync already uses housing from shift data
+    // via the GetHousingStatistics method which correctly filters shifts where
+    // s.Rider?.Employee?.Housing != null
     public async Task<Result<RiderMonthlyHistory>> GetRiderMonthlyHistoryAsync(
         long riderIqamaNo,
         CancellationToken cancellationToken = default)
@@ -161,363 +534,363 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
         return monthlyData;
     }
 
-    public async Task<Result<List<HousingRiderDailyDetailReport>>> GetAllHousingsRiderDailyDetailReportAsync(
-    DateOnly startDate,
-    DateOnly endDate,
-    CancellationToken cancellationToken = default)
-    {
-        var housings = await _dbcontext.Housings
-            .Include(h => h.Employees)
-            .ToListAsync(cancellationToken);
+    //public async Task<Result<List<HousingRiderDailyDetailReport>>> GetAllHousingsRiderDailyDetailReportAsync(
+    //DateOnly startDate,
+    //DateOnly endDate,
+    //CancellationToken cancellationToken = default)
+    //{
+    //    var housings = await _dbcontext.Housings
+    //        .Include(h => h.Employees)
+    //        .ToListAsync(cancellationToken);
 
-        var reports = new List<HousingRiderDailyDetailReport>();
+    //    var reports = new List<HousingRiderDailyDetailReport>();
 
-        foreach (var housing in housings)
-        {
-            var employeeIqamas = housing.Employees.Select(e => e.IqamaNo).ToList();
-            var riders = await _dbcontext.RiderDetails
-                .Include(r => r.Employee)
-                .Where(r => employeeIqamas.Contains(r.EmployeeIqamaNo) &&
-                           !string.IsNullOrWhiteSpace(r.WorkingId))
-                .ToListAsync(cancellationToken);
+    //    foreach (var housing in housings)
+    //    {
+    //        var employeeIqamas = housing.Employees.Select(e => e.IqamaNo).ToList();
+    //        var riders = await _dbcontext.RiderDetails
+    //            .Include(r => r.Employee)
+    //            .Where(r => employeeIqamas.Contains(r.EmployeeIqamaNo) &&
+    //                       !string.IsNullOrWhiteSpace(r.WorkingId))
+    //            .ToListAsync(cancellationToken);
 
-            foreach (var rider in riders)
-            {
-                var reportResult = await GetRiderDailyDetailReportAsync(
-                    rider.WorkingId!, startDate, endDate, cancellationToken);
+    //        foreach (var rider in riders)
+    //        {
+    //            var reportResult = await GetRiderDailyDetailReportAsync(
+    //                rider.WorkingId!, startDate, endDate, cancellationToken);
 
-                if (reportResult.IsSuccess)
-                {
-                    reports.Add(new HousingRiderDailyDetailReport(
-                        HousingName: housing.Name,
-                        RiderReport: reportResult.Value
-                    ));
-                }
-            }
-        }
+    //            if (reportResult.IsSuccess)
+    //            {
+    //                reports.Add(new HousingRiderDailyDetailReport(
+    //                    HousingName: housing.Name,
+    //                    RiderReport: reportResult.Value
+    //                ));
+    //            }
+    //        }
+    //    }
 
-        return Result.Success(reports);
-    }
+    //    return Result.Success(reports);
+    //}
 
-    public async Task<Result<List<HousingAllRidersSummaryReport>>> GetAllHousingsSummaryReportAsync(
-        DateOnly startDate,
-        DateOnly endDate,
-        CancellationToken cancellationToken = default)
-    {
-        var housings = await _dbcontext.Housings
-            .Include(h => h.Employees)
-            .ToListAsync(cancellationToken);
+    //public async Task<Result<List<HousingAllRidersSummaryReport>>> GetAllHousingsSummaryReportAsync(
+    //    DateOnly startDate,
+    //    DateOnly endDate,
+    //    CancellationToken cancellationToken = default)
+    //{
+    //    var housings = await _dbcontext.Housings
+    //        .Include(h => h.Employees)
+    //        .ToListAsync(cancellationToken);
 
-        var reports = new List<HousingAllRidersSummaryReport>();
+    //    var reports = new List<HousingAllRidersSummaryReport>();
 
-        foreach (var housing in housings)
-        {
-            var employeeIqamas = housing.Employees.Select(e => e.IqamaNo).ToList();
-            var riderIds = await _dbcontext.RiderDetails
-                .Where(r => employeeIqamas.Contains(r.EmployeeIqamaNo))
-                .Select(r => r.Id)
-                .ToListAsync(cancellationToken);
+    //    foreach (var housing in housings)
+    //    {
+    //        var employeeIqamas = housing.Employees.Select(e => e.IqamaNo).ToList();
+    //        var riderIds = await _dbcontext.RiderDetails
+    //            .Where(r => employeeIqamas.Contains(r.EmployeeIqamaNo))
+    //            .Select(r => r.Id)
+    //            .ToListAsync(cancellationToken);
 
-            if (!riderIds.Any()) continue;
+    //        if (!riderIds.Any()) continue;
 
-            var totalExpectedDays = endDate.DayNumber - startDate.DayNumber + 1;
+    //        var totalExpectedDays = endDate.DayNumber - startDate.DayNumber + 1;
 
-            var shifts = await _dbcontext.RiderShifts
-                .Include(s => s.Rider)
-                    .ThenInclude(r => r.Employee)
-                .Where(s => riderIds.Contains(s.RiderId) &&
-                           s.CompanyId == 1 &&
-                           s.ShiftDate >= startDate &&
-                           s.ShiftDate <= endDate)
-                .ToListAsync(cancellationToken);
+    //        var shifts = await _dbcontext.RiderShifts
+    //            .Include(s => s.Rider)
+    //                .ThenInclude(r => r.Employee)
+    //            .Where(s => riderIds.Contains(s.RiderId) &&
+    //                       s.CompanyId == 1 &&
+    //                       s.ShiftDate >= startDate &&
+    //                       s.ShiftDate <= endDate)
+    //            .ToListAsync(cancellationToken);
 
-            if (!shifts.Any()) continue;
+    //        if (!shifts.Any()) continue;
 
-            var riderGroups = shifts.GroupBy(s => s.RiderId);
-            var riderSummaries = new List<RiderSummaryDetail>();
+    //        var riderGroups = shifts.GroupBy(s => s.RiderId);
+    //        var riderSummaries = new List<RiderSummaryDetail>();
 
-            foreach (var group in riderGroups)
-            {
-                var rider = group.First().Rider;
-                if (rider?.Employee == null) continue;
+    //        foreach (var group in riderGroups)
+    //        {
+    //            var rider = group.First().Rider;
+    //            if (rider?.Employee == null) continue;
 
-                var riderShifts = group.ToList();
-                var actualWorkingDays = riderShifts.Count;
-                var missingDays = totalExpectedDays - actualWorkingDays;
+    //            var riderShifts = group.ToList();
+    //            var actualWorkingDays = riderShifts.Count;
+    //            var missingDays = totalExpectedDays - actualWorkingDays;
 
-                var totalWorkingHours = riderShifts.Sum(s => s.WorkingHours);
-                var targetWorkingHours = totalExpectedDays * TARGET_HOURS_PER_DAY;
-                var hoursDifference = totalWorkingHours - targetWorkingHours;
+    //            var totalWorkingHours = riderShifts.Sum(s => s.WorkingHours);
+    //            var targetWorkingHours = totalExpectedDays * TARGET_HOURS_PER_DAY;
+    //            var hoursDifference = totalWorkingHours - targetWorkingHours;
 
-                var totalOrders = riderShifts.Sum(s => s.AcceptedDailyOrders);
-                var targetOrders = totalExpectedDays * TARGET_ORDERS_PER_DAY;
-                var ordersDifference = totalOrders - targetOrders;
+    //            var totalOrders = riderShifts.Sum(s => s.AcceptedDailyOrders);
+    //            var targetOrders = totalExpectedDays * TARGET_ORDERS_PER_DAY;
+    //            var ordersDifference = totalOrders - targetOrders;
 
-                riderSummaries.Add(new RiderSummaryDetail(
-                    RiderId: rider.Id,
-                    IqamaNo: rider.EmployeeIqamaNo,
-                    RiderNameAR: rider.Employee.NameAR,
-                    RiderNameEN: rider.Employee.NameEN,
-                    WorkingId: riderShifts.First().WorkingId,
-                    ActualWorkingDays: actualWorkingDays,
-                    MissingDays: missingDays > 0 ? -missingDays : 0,
-                    TotalWorkingHours: totalWorkingHours,
-                    TargetWorkingHours: targetWorkingHours,
-                    HoursDifference: hoursDifference,
-                    TotalOrders: totalOrders,
-                    TargetOrders: targetOrders,
-                    OrdersDifference: ordersDifference
-                ));
-            }
+    //            riderSummaries.Add(new RiderSummaryDetail(
+    //                RiderId: rider.Id,
+    //                IqamaNo: rider.EmployeeIqamaNo,
+    //                RiderNameAR: rider.Employee.NameAR,
+    //                RiderNameEN: rider.Employee.NameEN,
+    //                WorkingId: riderShifts.First().WorkingId,
+    //                ActualWorkingDays: actualWorkingDays,
+    //                MissingDays: missingDays > 0 ? -missingDays : 0,
+    //                TotalWorkingHours: totalWorkingHours,
+    //                TargetWorkingHours: targetWorkingHours,
+    //                HoursDifference: hoursDifference,
+    //                TotalOrders: totalOrders,
+    //                TargetOrders: targetOrders,
+    //                OrdersDifference: ordersDifference
+    //            ));
+    //        }
 
-            riderSummaries = riderSummaries.OrderByDescending(r => r.TotalOrders).ToList();
+    //        riderSummaries = riderSummaries.OrderByDescending(r => r.TotalOrders).ToList();
 
-            var totals = new SummaryTotals(
-                TotalRiders: riderSummaries.Count,
-                TotalWorkingDays: riderSummaries.Sum(r => r.ActualWorkingDays),
-                TotalMissingDays: riderSummaries.Sum(r => Math.Abs(r.MissingDays)),
-                TotalWorkingHours: riderSummaries.Sum(r => r.TotalWorkingHours),
-                TotalTargetHours: riderSummaries.Sum(r => r.TargetWorkingHours),
-                HoursDifference: riderSummaries.Sum(r => r.HoursDifference),
-                TotalOrders: riderSummaries.Sum(r => r.TotalOrders),
-                TotalTargetOrders: riderSummaries.Sum(r => r.TargetOrders),
-                OrdersDifference: riderSummaries.Sum(r => r.OrdersDifference)
-            );
+    //        var totals = new SummaryTotals(
+    //            TotalRiders: riderSummaries.Count,
+    //            TotalWorkingDays: riderSummaries.Sum(r => r.ActualWorkingDays),
+    //            TotalMissingDays: riderSummaries.Sum(r => Math.Abs(r.MissingDays)),
+    //            TotalWorkingHours: riderSummaries.Sum(r => r.TotalWorkingHours),
+    //            TotalTargetHours: riderSummaries.Sum(r => r.TargetWorkingHours),
+    //            HoursDifference: riderSummaries.Sum(r => r.HoursDifference),
+    //            TotalOrders: riderSummaries.Sum(r => r.TotalOrders),
+    //            TotalTargetOrders: riderSummaries.Sum(r => r.TargetOrders),
+    //            OrdersDifference: riderSummaries.Sum(r => r.OrdersDifference)
+    //        );
 
-            var summaryReport = new AllRidersSummaryReport(
-                StartDate: startDate,
-                EndDate: endDate,
-                TotalExpectedDays: totalExpectedDays,
-                RiderSummaries: riderSummaries,
-                Totals: totals
-            );
+    //        var summaryReport = new AllRidersSummaryReport(
+    //            StartDate: startDate,
+    //            EndDate: endDate,
+    //            TotalExpectedDays: totalExpectedDays,
+    //            RiderSummaries: riderSummaries,
+    //            Totals: totals
+    //        );
 
-            reports.Add(new HousingAllRidersSummaryReport(
-                HousingName: housing.Name,
-                SummaryReport: summaryReport
-            ));
-        }
+    //        reports.Add(new HousingAllRidersSummaryReport(
+    //            HousingName: housing.Name,
+    //            SummaryReport: summaryReport
+    //        ));
+    //    }
 
-        return Result.Success(reports);
-    }
-    public async Task<Result<List<HousingAllRidersSummaryReport>>> GetAllHousingsSummaryReportAsync2(
-        DateOnly startDate,
-        DateOnly endDate,
-        CancellationToken cancellationToken = default)
-    {
-        var housings = await _dbcontext.Housings
-            .Include(h => h.Employees)
-            .ToListAsync(cancellationToken);
+    //    return Result.Success(reports);
+    //}
+    //public async Task<Result<List<HousingAllRidersSummaryReport>>> GetAllHousingsSummaryReportAsync2(
+    //    DateOnly startDate,
+    //    DateOnly endDate,
+    //    CancellationToken cancellationToken = default)
+    //{
+    //    var housings = await _dbcontext.Housings
+    //        .Include(h => h.Employees)
+    //        .ToListAsync(cancellationToken);
 
-        var reports = new List<HousingAllRidersSummaryReport>();
+    //    var reports = new List<HousingAllRidersSummaryReport>();
 
-        foreach (var housing in housings)
-        {
-            var employeeIqamas = housing.Employees.Select(e => e.IqamaNo).ToList();
-            var riderIds = await _dbcontext.RiderDetails
-                .Where(r => employeeIqamas.Contains(r.EmployeeIqamaNo))
-                .Select(r => r.Id)
-                .ToListAsync(cancellationToken);
+    //    foreach (var housing in housings)
+    //    {
+    //        var employeeIqamas = housing.Employees.Select(e => e.IqamaNo).ToList();
+    //        var riderIds = await _dbcontext.RiderDetails
+    //            .Where(r => employeeIqamas.Contains(r.EmployeeIqamaNo))
+    //            .Select(r => r.Id)
+    //            .ToListAsync(cancellationToken);
 
-            if (!riderIds.Any()) continue;
+    //        if (!riderIds.Any()) continue;
 
-            var totalExpectedDays = endDate.DayNumber - startDate.DayNumber + 1;
+    //        var totalExpectedDays = endDate.DayNumber - startDate.DayNumber + 1;
 
-            var shifts = await _dbcontext.RiderShifts
-                .Include(s => s.Rider)
-                    .ThenInclude(r => r.Employee)
-                .Where(s => riderIds.Contains(s.RiderId) &&
-                           s.CompanyId == 2 &&
-                           s.ShiftDate >= startDate &&
-                           s.ShiftDate <= endDate)
-                .ToListAsync(cancellationToken);
+    //        var shifts = await _dbcontext.RiderShifts
+    //            .Include(s => s.Rider)
+    //                .ThenInclude(r => r.Employee)
+    //            .Where(s => riderIds.Contains(s.RiderId) &&
+    //                       s.CompanyId == 2 &&
+    //                       s.ShiftDate >= startDate &&
+    //                       s.ShiftDate <= endDate)
+    //            .ToListAsync(cancellationToken);
 
-            if (!shifts.Any()) continue;
+    //        if (!shifts.Any()) continue;
 
-            var riderGroups = shifts.GroupBy(s => s.RiderId);
-            var riderSummaries = new List<RiderSummaryDetail>();
+    //        var riderGroups = shifts.GroupBy(s => s.RiderId);
+    //        var riderSummaries = new List<RiderSummaryDetail>();
 
-            foreach (var group in riderGroups)
-            {
-                var rider = group.First().Rider;
-                if (rider?.Employee == null) continue;
+    //        foreach (var group in riderGroups)
+    //        {
+    //            var rider = group.First().Rider;
+    //            if (rider?.Employee == null) continue;
 
-                var riderShifts = group.ToList();
-                var actualWorkingDays = riderShifts.Count;
+    //            var riderShifts = group.ToList();
+    //            var actualWorkingDays = riderShifts.Count;
 
-                // Count days with less than 10 working hours
-                var daysWithLessThan10Hours = riderShifts.Count(s => s.WorkingHours < 10);
+    //            // Count days with less than 10 working hours
+    //            var daysWithLessThan10Hours = riderShifts.Count(s => s.WorkingHours < 10);
 
-                // Calculate missing days: days with no shifts + days with less than 10 hours
-                var missingDays = (totalExpectedDays - actualWorkingDays) + daysWithLessThan10Hours;
+    //            // Calculate missing days: days with no shifts + days with less than 10 hours
+    //            var missingDays = (totalExpectedDays - actualWorkingDays) + daysWithLessThan10Hours;
 
-                var totalWorkingHours = riderShifts.Sum(s => s.WorkingHours);
-                var targetWorkingHours = totalExpectedDays * TARGET_HOURS_PER_DAY2;
-                var hoursDifference = totalWorkingHours - targetWorkingHours;
+    //            var totalWorkingHours = riderShifts.Sum(s => s.WorkingHours);
+    //            var targetWorkingHours = totalExpectedDays * TARGET_HOURS_PER_DAY2;
+    //            var hoursDifference = totalWorkingHours - targetWorkingHours;
 
-                var totalOrders = riderShifts.Sum(s => s.AcceptedDailyOrders);
-                var targetOrders = totalExpectedDays * TARGET_ORDERS_PER_DAY2;
-                var ordersDifference = totalOrders - targetOrders;
+    //            var totalOrders = riderShifts.Sum(s => s.AcceptedDailyOrders);
+    //            var targetOrders = totalExpectedDays * TARGET_ORDERS_PER_DAY2;
+    //            var ordersDifference = totalOrders - targetOrders;
 
-                riderSummaries.Add(new RiderSummaryDetail(
-                    RiderId: rider.Id,
-                    IqamaNo: rider.EmployeeIqamaNo,
-                    RiderNameAR: rider.Employee.NameAR,
-                    RiderNameEN: rider.Employee.NameEN,
-                    WorkingId: riderShifts.First().WorkingId,
-                    ActualWorkingDays: actualWorkingDays,
-                    MissingDays: missingDays > 0 ? -missingDays : 0,
-                    TotalWorkingHours: totalWorkingHours,
-                    TargetWorkingHours: targetWorkingHours,
-                    HoursDifference: hoursDifference,
-                    TotalOrders: totalOrders,
-                    TargetOrders: targetOrders,
-                    OrdersDifference: ordersDifference
-                ));
-            }
+    //            riderSummaries.Add(new RiderSummaryDetail(
+    //                RiderId: rider.Id,
+    //                IqamaNo: rider.EmployeeIqamaNo,
+    //                RiderNameAR: rider.Employee.NameAR,
+    //                RiderNameEN: rider.Employee.NameEN,
+    //                WorkingId: riderShifts.First().WorkingId,
+    //                ActualWorkingDays: actualWorkingDays,
+    //                MissingDays: missingDays > 0 ? -missingDays : 0,
+    //                TotalWorkingHours: totalWorkingHours,
+    //                TargetWorkingHours: targetWorkingHours,
+    //                HoursDifference: hoursDifference,
+    //                TotalOrders: totalOrders,
+    //                TargetOrders: targetOrders,
+    //                OrdersDifference: ordersDifference
+    //            ));
+    //        }
 
-            riderSummaries = riderSummaries.OrderByDescending(r => r.TotalOrders).ToList();
+    //        riderSummaries = riderSummaries.OrderByDescending(r => r.TotalOrders).ToList();
 
-            var totals = new SummaryTotals(
-                TotalRiders: riderSummaries.Count,
-                TotalWorkingDays: riderSummaries.Sum(r => r.ActualWorkingDays),
-                TotalMissingDays: riderSummaries.Sum(r => Math.Abs(r.MissingDays)),
-                TotalWorkingHours: riderSummaries.Sum(r => r.TotalWorkingHours),
-                TotalTargetHours: riderSummaries.Sum(r => r.TargetWorkingHours),
-                HoursDifference: riderSummaries.Sum(r => r.HoursDifference),
-                TotalOrders: riderSummaries.Sum(r => r.TotalOrders),
-                TotalTargetOrders: riderSummaries.Sum(r => r.TargetOrders),
-                OrdersDifference: riderSummaries.Sum(r => r.OrdersDifference)
-            );
+    //        var totals = new SummaryTotals(
+    //            TotalRiders: riderSummaries.Count,
+    //            TotalWorkingDays: riderSummaries.Sum(r => r.ActualWorkingDays),
+    //            TotalMissingDays: riderSummaries.Sum(r => Math.Abs(r.MissingDays)),
+    //            TotalWorkingHours: riderSummaries.Sum(r => r.TotalWorkingHours),
+    //            TotalTargetHours: riderSummaries.Sum(r => r.TargetWorkingHours),
+    //            HoursDifference: riderSummaries.Sum(r => r.HoursDifference),
+    //            TotalOrders: riderSummaries.Sum(r => r.TotalOrders),
+    //            TotalTargetOrders: riderSummaries.Sum(r => r.TargetOrders),
+    //            OrdersDifference: riderSummaries.Sum(r => r.OrdersDifference)
+    //        );
 
-            var summaryReport = new AllRidersSummaryReport(
-                StartDate: startDate,
-                EndDate: endDate,
-                TotalExpectedDays: totalExpectedDays,
-                RiderSummaries: riderSummaries,
-                Totals: totals
-            );
+    //        var summaryReport = new AllRidersSummaryReport(
+    //            StartDate: startDate,
+    //            EndDate: endDate,
+    //            TotalExpectedDays: totalExpectedDays,
+    //            RiderSummaries: riderSummaries,
+    //            Totals: totals
+    //        );
 
-            reports.Add(new HousingAllRidersSummaryReport(
-                HousingName: housing.Name,
-                SummaryReport: summaryReport
-            ));
-        }
+    //        reports.Add(new HousingAllRidersSummaryReport(
+    //            HousingName: housing.Name,
+    //            SummaryReport: summaryReport
+    //        ));
+    //    }
 
-        return Result.Success(reports);
-    }
-    public async Task<Result<List<HousingRejectionReport>>> GetAllHousingsRejectionReportAsync(
-        DateOnly startDate,
-        DateOnly endDate,
-        CancellationToken cancellationToken = default)
-    {
-        var housings = await _dbcontext.Housings
-            .Include(h => h.Employees)
-            .ToListAsync(cancellationToken);
+    //    return Result.Success(reports);
+    //}
+    //public async Task<Result<List<HousingRejectionReport>>> GetAllHousingsRejectionReportAsync(
+    //    DateOnly startDate,
+    //    DateOnly endDate,
+    //    CancellationToken cancellationToken = default)
+    //{
+    //    var housings = await _dbcontext.Housings
+    //        .Include(h => h.Employees)
+    //        .ToListAsync(cancellationToken);
 
-        var reports = new List<HousingRejectionReport>();
-        var totalDays = endDate.DayNumber - startDate.DayNumber + 1;
+    //    var reports = new List<HousingRejectionReport>();
+    //    var totalDays = endDate.DayNumber - startDate.DayNumber + 1;
 
-        foreach (var housing in housings)
-        {
-            var employeeIqamas = housing.Employees.Select(e => e.IqamaNo).ToList();
-            var riderIds = await _dbcontext.RiderDetails
-                .Where(r => employeeIqamas.Contains(r.EmployeeIqamaNo) && r.CompanyId == 1)
-                .Select(r => r.Id)
-                .ToListAsync(cancellationToken);
+    //    foreach (var housing in housings)
+    //    {
+    //        var employeeIqamas = housing.Employees.Select(e => e.IqamaNo).ToList();
+    //        var riderIds = await _dbcontext.RiderDetails
+    //            .Where(r => employeeIqamas.Contains(r.EmployeeIqamaNo) && r.CompanyId == 1)
+    //            .Select(r => r.Id)
+    //            .ToListAsync(cancellationToken);
 
-            if (!riderIds.Any()) continue;
+    //        if (!riderIds.Any()) continue;
 
-            var shifts = await _dbcontext.RiderShifts
-                .Include(s => s.Rider)
-                    .ThenInclude(r => r.Employee)
-                .Where(s => riderIds.Contains(s.RiderId) &&
-                           s.ShiftDate >= startDate &&
-                           s.ShiftDate <= endDate)
-                .ToListAsync(cancellationToken);
+    //        var shifts = await _dbcontext.RiderShifts
+    //            .Include(s => s.Rider)
+    //                .ThenInclude(r => r.Employee)
+    //            .Where(s => riderIds.Contains(s.RiderId) &&
+    //                       s.ShiftDate >= startDate &&
+    //                       s.ShiftDate <= endDate)
+    //            .ToListAsync(cancellationToken);
 
-            if (!shifts.Any()) continue;
+    //        if (!shifts.Any()) continue;
 
-            var riderGroups = shifts.GroupBy(s => s.RiderId);
-            var riderDetails = new List<RiderRejectionDetail>();
+    //        var riderGroups = shifts.GroupBy(s => s.RiderId);
+    //        var riderDetails = new List<RiderRejectionDetail>();
 
-            foreach (var group in riderGroups)
-            {
-                var rider = group.First().Rider;
-                if (rider?.Employee == null) continue;
+    //        foreach (var group in riderGroups)
+    //        {
+    //            var rider = group.First().Rider;
+    //            if (rider?.Employee == null) continue;
 
-                var riderShifts = group.ToList();
-                var totalShifts = riderShifts.Count;
-                var totalOrders = riderShifts.Sum(s => s.AcceptedDailyOrders + s.RejectedDailyOrders);
-                var targetOrders = totalDays * TARGET_ORDERS_PER_DAY;
-                var totalRejections = riderShifts.Sum(s => s.RejectedDailyOrders);
-                var totalRealRejections = riderShifts.Sum(s => s.RealRejectedDailyOrders);
+    //            var riderShifts = group.ToList();
+    //            var totalShifts = riderShifts.Count;
+    //            var totalOrders = riderShifts.Sum(s => s.AcceptedDailyOrders + s.RejectedDailyOrders);
+    //            var targetOrders = totalDays * TARGET_ORDERS_PER_DAY;
+    //            var totalRejections = riderShifts.Sum(s => s.RejectedDailyOrders);
+    //            var totalRealRejections = riderShifts.Sum(s => s.RealRejectedDailyOrders);
 
-                var rejectionRate = totalOrders > 0
-                    ? Math.Round((decimal)totalRejections / totalOrders * 100, 2)
-                    : 0;
+    //            var rejectionRate = totalOrders > 0
+    //                ? Math.Round((decimal)totalRejections / totalOrders * 100, 2)
+    //                : 0;
 
-                var realRejectionRate = totalOrders > 0
-                    ? Math.Round((decimal)totalRealRejections / totalOrders * 100, 2)
-                    : 0;
+    //            var realRejectionRate = totalOrders > 0
+    //                ? Math.Round((decimal)totalRealRejections / totalOrders * 100, 2)
+    //                : 0;
 
-                riderDetails.Add(new RiderRejectionDetail(
-                    RiderId: rider.Id,
-                    IqamaNo: rider.EmployeeIqamaNo,
-                    RiderNameAR: rider.Employee.NameAR,
-                    RiderNameEN: rider.Employee.NameEN,
-                    WorkingId: riderShifts.First().WorkingId,
-                    TotalShifts: totalShifts,
-                    TotalOrders: totalOrders,
-                    TargetOrders: targetOrders,
-                    TotalRejections: totalRejections,
-                    TotalRealRejections: totalRealRejections,
-                    RejectionRate: rejectionRate,
-                    RealRejectionRate: realRejectionRate
-                ));
-            }
+    //            riderDetails.Add(new RiderRejectionDetail(
+    //                RiderId: rider.Id,
+    //                IqamaNo: rider.EmployeeIqamaNo,
+    //                RiderNameAR: rider.Employee.NameAR,
+    //                RiderNameEN: rider.Employee.NameEN,
+    //                WorkingId: riderShifts.First().WorkingId,
+    //                TotalShifts: totalShifts,
+    //                TotalOrders: totalOrders,
+    //                TargetOrders: targetOrders,
+    //                TotalRejections: totalRejections,
+    //                TotalRealRejections: totalRealRejections,
+    //                RejectionRate: rejectionRate,
+    //                RealRejectionRate: realRejectionRate
+    //            ));
+    //        }
 
-            riderDetails = riderDetails.OrderByDescending(r => r.TotalRealRejections).ToList();
+    //        riderDetails = riderDetails.OrderByDescending(r => r.TotalRealRejections).ToList();
 
-            var totalAllOrders = riderDetails.Sum(r => r.TotalOrders);
-            var totalAllRejections = riderDetails.Sum(r => r.TotalRejections);
-            var totalAllRealRejections = riderDetails.Sum(r => r.TotalRealRejections);
+    //        var totalAllOrders = riderDetails.Sum(r => r.TotalOrders);
+    //        var totalAllRejections = riderDetails.Sum(r => r.TotalRejections);
+    //        var totalAllRealRejections = riderDetails.Sum(r => r.TotalRealRejections);
 
-            var overallRejectionRate = totalAllOrders > 0
-                ? Math.Round((decimal)totalAllRejections / totalAllOrders * 100, 2)
-                : 0;
+    //        var overallRejectionRate = totalAllOrders > 0
+    //            ? Math.Round((decimal)totalAllRejections / totalAllOrders * 100, 2)
+    //            : 0;
 
-            var overallRealRejectionRate = totalAllOrders > 0
-                ? Math.Round((decimal)totalAllRealRejections / totalAllOrders * 100, 2)
-                : 0;
+    //        var overallRealRejectionRate = totalAllOrders > 0
+    //            ? Math.Round((decimal)totalAllRealRejections / totalAllOrders * 100, 2)
+    //            : 0;
 
-            var totals = new RejectionTotals(
-                TotalRiders: riderDetails.Count,
-                TotalShifts: riderDetails.Sum(r => r.TotalShifts),
-                TotalOrders: totalAllOrders,
-                TotalTargetOrders: riderDetails.Sum(r => r.TargetOrders),
-                TotalRejections: totalAllRejections,
-                TotalRealRejections: totalAllRealRejections,
-                OverallRejectionRate: overallRejectionRate,
-                OverallRealRejectionRate: overallRealRejectionRate
-            );
+    //        var totals = new RejectionTotals(
+    //            TotalRiders: riderDetails.Count,
+    //            TotalShifts: riderDetails.Sum(r => r.TotalShifts),
+    //            TotalOrders: totalAllOrders,
+    //            TotalTargetOrders: riderDetails.Sum(r => r.TargetOrders),
+    //            TotalRejections: totalAllRejections,
+    //            TotalRealRejections: totalAllRealRejections,
+    //            OverallRejectionRate: overallRejectionRate,
+    //            OverallRealRejectionRate: overallRealRejectionRate
+    //        );
 
-            var rejectionReport = new RejectionReport(
-                StartDate: startDate,
-                EndDate: endDate,
-                TotalDays: totalDays,
-                RiderDetails: riderDetails,
-                Totals: totals
-            );
+    //        var rejectionReport = new RejectionReport(
+    //            StartDate: startDate,
+    //            EndDate: endDate,
+    //            TotalDays: totalDays,
+    //            RiderDetails: riderDetails,
+    //            Totals: totals
+    //        );
 
-            reports.Add(new HousingRejectionReport(
-                HousingName: housing.Name,
-                RejectionReport: rejectionReport
-            ));
-        }
+    //        reports.Add(new HousingRejectionReport(
+    //            HousingName: housing.Name,
+    //            RejectionReport: rejectionReport
+    //        ));
+    //    }
 
-        return Result.Success(reports);
-    }
+    //    return Result.Success(reports);
+    //}
     public async Task<Result<RiderDailyDetailReport>> GetRiderDailyDetailReportAsync(
     string workingId,
     DateOnly startDate,
@@ -975,13 +1348,13 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
         {
             // Get shifts for period 1
             var period1Shifts = await _dbcontext.RiderShifts
-                .Where(s => s.ShiftDate >= period1Start && s.ShiftDate <= period1End)
+                .Where(s => s.ShiftDate >= period1Start && s.ShiftDate <= period1End && s.CompanyId == 1)
                 .AsNoTracking()
                 .ToListAsync(cancellationToken);
 
             // Get shifts for period 2
             var period2Shifts = await _dbcontext.RiderShifts
-                .Where(s => s.ShiftDate >= period2Start && s.ShiftDate <= period2End)
+                .Where(s => s.ShiftDate >= period2Start && s.ShiftDate <= period2End && s.CompanyId == 1)
                 .AsNoTracking()
                 .ToListAsync(cancellationToken);
 
@@ -1034,7 +1407,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                 .Include(s => s.Rider)
                     .ThenInclude(r => r.Employee)
                     .ThenInclude(e => e.Housing)
-                .Where(s => s.ShiftDate == reportDate)
+                .Where(s => s.ShiftDate == reportDate && s.CompanyId == 1)
                 .AsNoTracking()
                 .ToListAsync(cancellationToken);
 
@@ -1130,7 +1503,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                 .Include(s => s.Rider)
                     .ThenInclude(r => r.Employee)
                     .ThenInclude(e => e.Housing)
-                .Where(s => s.ShiftDate == reportDate)
+                .Where(s => s.ShiftDate == reportDate && s.CompanyId == 1)
                 .AsNoTracking()
                 .ToListAsync(cancellationToken);
 

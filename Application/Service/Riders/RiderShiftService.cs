@@ -222,6 +222,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext , IRiderWorkingIdH
                         RejectedDailyOrders = shiftData.RejectedDailyOrders!.Value,
                         RealRejectedDailyOrders = realRejectedOrders,
                         StackedDeliveries = shiftData.StackedDeliveries.GetValueOrDefault(),
+                        HousingId = riderWhoWorked.Employee.HousingId,
                         WorkingHours = shiftData.WorkingHours!.Value,
                         CompanyId = riderWhoWorked.CompanyId,
                         ShiftStatus = shiftStatus,
@@ -481,7 +482,8 @@ public class RiderShiftService(ApplicationDbcontext dbcontext , IRiderWorkingIdH
                         CompanyId = riderWhoWorked.CompanyId,
 
                         IsSubstitution = isSubstitution,
-                        OriginalRiderWorkingId = originalWorkingId, 
+                        OriginalRiderWorkingId = originalWorkingId,
+                        HousingId = riderWhoWorked.Employee.HousingId,
 
                         OldAcceptedDailyOrders = existingShift?.AcceptedDailyOrders,
                         OldRejectedDailyOrders = existingShift?.RejectedDailyOrders,
@@ -578,6 +580,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext , IRiderWorkingIdH
                         temp.Rider.Employee.NameEN,
                         temp.Rider.Employee.NameAR,
                         temp.Company.Name,
+                        temp.HousingId ?? 0,
                         CompanyShiftConfiguration.GetDailyOrderTarget(temp.Company.Name),
                         temp.IsSubstitution,
                         temp.OriginalRiderWorkingId,
@@ -681,6 +684,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext , IRiderWorkingIdH
                     temp.Rider.Employee.NameEN,
                     temp.Rider.Employee.NameAR,
                     temp.Company.Name,
+                    temp.HousingId ?? 0,
                     CompanyShiftConfiguration.GetDailyOrderTarget(temp.Company.Name),
                     temp.IsSubstitution,  
                     temp.OriginalRiderWorkingId,  
@@ -798,6 +802,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext , IRiderWorkingIdH
                             RiderId = temp.RiderId,  
                             WorkingId = temp.WorkingId,  
                             ShiftDate = temp.ShiftDate,
+                            HousingId = temp.HousingId,
                             AcceptedDailyOrders = temp.NewAcceptedDailyOrders,
                             RejectedDailyOrders = temp.NewRejectedDailyOrders,
                             RealRejectedDailyOrders = temp.NewRealRejectedDailyOrders,
@@ -1104,6 +1109,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext , IRiderWorkingIdH
                 AcceptedDailyOrders = request.AcceptedDailyOrders,
                 RejectedDailyOrders = request.RejectedDailyOrders,
                 WorkingHours = request.WorkingHours,
+                HousingId = riderDetails.Employee.HousingId,
                 CompanyId = riderDetails.CompanyId,
                 ShiftStatus = shiftStatus.ToString(),
                 RealRejectedDailyOrders = realRejectedOrders,  
@@ -1132,7 +1138,8 @@ public class RiderShiftService(ApplicationDbcontext dbcontext , IRiderWorkingIdH
                 penaltyAmount,
                 shift.CreatedAt,
                 isSubstitution,
-                originalWorkingId
+                originalWorkingId,
+                shift.HousingId
             );
 
             return Result.Success(response);
@@ -1153,6 +1160,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext , IRiderWorkingIdH
         try
         {
             var shift = await dbcontext.RiderShifts
+                .Include(c=>c.Housing)
                 .Include(s => s.Rider)
                     .ThenInclude(r => r.Employee)
                 .Include(s => s.Rider)
@@ -1436,7 +1444,8 @@ public class RiderShiftService(ApplicationDbcontext dbcontext , IRiderWorkingIdH
             penaltyAmount,
             shift.CreatedAt,
             false,
-            null
+            null,
+            shift.HousingId
         );
     }
 

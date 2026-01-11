@@ -10,6 +10,7 @@ public class TempRiderShiftComparison
     public string WorkingId { get; set; } 
     public DateOnly ShiftDate { get; set; }
     public int CompanyId { get; set; }
+    public int? HousingId { get; set; }
 
     public bool IsSubstitution { get; set; }  
     public string? OriginalRiderWorkingId { get; set; }  
@@ -34,6 +35,8 @@ public class TempRiderShiftComparison
 
     public RiderDetails? Rider { get; set; } = null!;
     public Company? Company { get; set; } = null!;
+    public Housing? Housing { get; set; }
+
 }
 
 
@@ -44,6 +47,7 @@ public record ShiftComparisonResponse(
     string RiderNameEN,
     string RiderNameAR,
     string CompanyName,
+    int HousingId,
     int DailyOrderTarget,
     bool IsSubstitution,
     string? OriginalRiderWorkingId,  

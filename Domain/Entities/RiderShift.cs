@@ -13,10 +13,13 @@ public class RiderShift
     public int RejectedDailyOrders { get; set; }
     public int StackedDeliveries{ get; set; }
     public int RealRejectedDailyOrders { get; set; }
+    public int? HousingId { get; set; }
     public float WorkingHours { get; set; }
     public int CompanyId { get; set; }
     public string ShiftStatus { get; set; } = string.Empty;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow.AddHours(3);
     public RiderDetails Rider { get; set; } = default!;
     public Company Company { get; set; } = default!;
+    public Housing? Housing { get; set; }
+
 }
