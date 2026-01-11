@@ -5,6 +5,7 @@ using Domain.Entities;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -33,64 +34,95 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
         var errors = new List<string>();
 
         int fullyMatched = 0;
-        int workingIdFoundNameMismatch = 0;
+        int workingIdFoundNameMismatch = 0; // Count but don't add to details
         int nameFoundWorkingIdMismatch = 0;
         int completelyNotFound = 0;
         int errorRecords = 0;
 
-        var startTime = DateTime.UtcNow;
+        // Track unique WorkingId errors to avoid duplicates
+        var reportedWorkingIdErrors = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var workingIdErrorSummary = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
         try
         {
+            Console.WriteLine($"[VerifyRiders] Starting verification for file: {file.FileName}");
+
             // Load all rider data into memory
+            Console.WriteLine("[VerifyRiders] Loading rider details lookup...");
             var riderDetailsLookup = await LoadRiderDetailsLookup();
+            Console.WriteLine($"[VerifyRiders] Loaded {riderDetailsLookup.Count} rider detail entries");
+
+            Console.WriteLine("[VerifyRiders] Loading working ID history lookup...");
             var workingIdHistoryLookup = await LoadWorkingIdHistoryLookup();
+            Console.WriteLine($"[VerifyRiders] Loaded {workingIdHistoryLookup.Count} working ID history entries");
 
             using var stream = file.OpenReadStream();
+            Console.WriteLine($"[VerifyRiders] File stream opened, length: {stream.Length} bytes");
+
             using var workbook = new XLWorkbook(stream);
             var worksheet = workbook.Worksheet(1);
 
             if (worksheet == null)
             {
+                Console.WriteLine("[VerifyRiders] ERROR: Could not read worksheet");
                 return Result.Failure<RiderVerificationResponse>(
                     new Error("InvalidWorksheet", "Could not read worksheet", 400));
             }
 
+            Console.WriteLine($"[VerifyRiders] Worksheet loaded: {worksheet.Name}");
+
             var headerRow = FindRiderVerificationHeaderRow(worksheet);
             if (headerRow == null)
             {
+                Console.WriteLine("[VerifyRiders] ERROR: No header row found");
                 return Result.Failure<RiderVerificationResponse>(
                     new Error("EmptyFile", "Excel file has no header row", 400));
             }
 
+            Console.WriteLine($"[VerifyRiders] Header row found at row {headerRow.RowNumber()}");
+
             var columnMap = BuildRiderVerificationColumnMapping(headerRow);
             if (!columnMap.IsValid)
             {
+                Console.WriteLine($"[VerifyRiders] ERROR: Invalid columns - {columnMap.ErrorMessage}");
                 return Result.Failure<RiderVerificationResponse>(
                     new Error("InvalidColumns", columnMap.ErrorMessage!, 400));
             }
+
+            Console.WriteLine($"[VerifyRiders] Column mapping successful - WorkingId: Col {columnMap.WorkingIdCol}, NameAR: Col {columnMap.NameARCol}");
 
             var dataRows = worksheet.RowsUsed()
                 .Where(r => r.RowNumber() > headerRow.RowNumber())
                 .ToList();
 
             var totalRows = dataRows.Count;
-            var rowNumber = headerRow.RowNumber();
-            var processedCount = 0;
+            Console.WriteLine($"[VerifyRiders] Total data rows to process: {totalRows}");
+
+            if (totalRows == 0)
+            {
+                Console.WriteLine("[VerifyRiders] WARNING: No data rows found");
+                return Result.Failure<RiderVerificationResponse>(
+                    new Error("EmptyFile", "No data rows found in Excel file", 400));
+            }
 
             // Report initial total
-            progressCallback?.Invoke(0, totalRows);
+            try
+            {
+                progressCallback?.Invoke(0, totalRows);
+                Console.WriteLine($"[VerifyRiders] Initial progress callback sent: 0/{totalRows}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[VerifyRiders] ERROR in progress callback: {ex.Message}");
+            }
+
+            var rowNumber = headerRow.RowNumber();
+            int processedCount = 0;
 
             foreach (var row in dataRows)
             {
                 rowNumber++;
                 processedCount++;
-
-                // Report progress every 1000 rows
-                if (processedCount % 1000 == 0)
-                {
-                    progressCallback?.Invoke(processedCount, totalRows);
-                }
 
                 try
                 {
@@ -124,45 +156,67 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
                             break;
 
                         case VerificationStatus.WorkingIdFoundNameMismatch:
+                            // COUNT IT but DON'T add to details (ignore name mismatches)
                             workingIdFoundNameMismatch++;
-                            details.Add(new RiderVerificationDetail(
-                                rowNumber,
-                                rowData.WorkingId!,
-                                rowData.NameAR!,
-                                verification.Status,
-                                verification.FoundInTable,
-                                verification.ActualWorkingId,
-                                verification.ActualNameAR,
-                                verification.FoundIqamaNo,
-                                $"WorkingId exists but name mismatch: Expected '{rowData.NameAR}', Found '{verification.ActualNameAR}'"
-                            ));
                             break;
 
                         case VerificationStatus.NameFoundWorkingIdMismatch:
                             nameFoundWorkingIdMismatch++;
-                            details.Add(new RiderVerificationDetail(
-                                rowNumber,
-                                rowData.WorkingId!,
-                                rowData.NameAR!,
-                                verification.Status,
-                                verification.FoundInTable,
-                                verification.ActualWorkingId,
-                                verification.ActualNameAR,
-                                verification.FoundIqamaNo,
-                                $"Name exists but WorkingId mismatch: Expected '{rowData.WorkingId}', Found '{verification.ActualWorkingId}'"
-                            ));
+
+                            // Only report this WorkingId error ONCE
+                            var workingId = rowData.WorkingId!.Trim().ToLower();
+
+                            if (!reportedWorkingIdErrors.Contains(workingId))
+                            {
+                                reportedWorkingIdErrors.Add(workingId);
+
+                                details.Add(new RiderVerificationDetail(
+                                    rowNumber,
+                                    rowData.WorkingId!,
+                                    rowData.NameAR!,
+                                    verification.Status,
+                                    verification.FoundInTable,
+                                    verification.ActualWorkingId,
+                                    verification.ActualNameAR,
+                                    verification.FoundIqamaNo,
+                                    $"Name exists but WorkingId mismatch: Expected '{rowData.WorkingId}', Found '{verification.ActualWorkingId}'"
+                                ));
+                            }
+
+                            // Track count for summary
+                            if (!workingIdErrorSummary.ContainsKey(workingId))
+                            {
+                                workingIdErrorSummary[workingId] = 0;
+                            }
+                            workingIdErrorSummary[workingId]++;
                             break;
 
                         case VerificationStatus.CompletelyNotFound:
                             completelyNotFound++;
-                            details.Add(new RiderVerificationDetail(
-                                rowNumber,
-                                rowData.WorkingId!,
-                                rowData.NameAR!,
-                                verification.Status,
-                                null, null, null, null,
-                                "Neither WorkingId nor NameAR found in system"
-                            ));
+
+                            // Only report this WorkingId error ONCE
+                            var notFoundWorkingId = rowData.WorkingId!.Trim().ToLower();
+
+                            if (!reportedWorkingIdErrors.Contains(notFoundWorkingId))
+                            {
+                                reportedWorkingIdErrors.Add(notFoundWorkingId);
+
+                                details.Add(new RiderVerificationDetail(
+                                    rowNumber,
+                                    rowData.WorkingId!,
+                                    rowData.NameAR!,
+                                    verification.Status,
+                                    null, null, null, null,
+                                    "Neither WorkingId nor NameAR found in system"
+                                ));
+                            }
+
+                            // Track count for summary
+                            if (!workingIdErrorSummary.ContainsKey(notFoundWorkingId))
+                            {
+                                workingIdErrorSummary[notFoundWorkingId] = 0;
+                            }
+                            workingIdErrorSummary[notFoundWorkingId]++;
                             break;
                     }
                 }
@@ -170,7 +224,6 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
                 {
                     errorRecords++;
                     errors.Add($"Row {rowNumber}: {ex.Message}");
-
                     details.Add(new RiderVerificationDetail(
                         rowNumber,
                         "N/A", "N/A",
@@ -179,19 +232,61 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
                         $"Processing error: {ex.Message}"
                     ));
                 }
+
+                // Report progress every 500 rows
+                if (processedCount % 500 == 0)
+                {
+                    try
+                    {
+                        progressCallback?.Invoke(processedCount, totalRows);
+                        Console.WriteLine($"[VerifyRiders] Progress: {processedCount}/{totalRows} ({(processedCount * 100.0 / totalRows):F1}%)");
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[VerifyRiders] ERROR in progress callback at row {processedCount}: {ex.Message}");
+                    }
+                }
             }
 
             // Final progress update
-            progressCallback?.Invoke(totalRows, totalRows);
+            try
+            {
+                progressCallback?.Invoke(totalRows, totalRows);
+                Console.WriteLine($"[VerifyRiders] Final progress callback sent: {totalRows}/{totalRows}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[VerifyRiders] ERROR in final progress callback: {ex.Message}");
+            }
+
+            // Add summary of duplicate errors to processing errors
+            if (workingIdErrorSummary.Any())
+            {
+                errors.Add("=== DUPLICATE ERROR SUMMARY ===");
+                foreach (var kvp in workingIdErrorSummary.OrderByDescending(x => x.Value))
+                {
+                    errors.Add($"WorkingId '{kvp.Key}' appeared {kvp.Value} times with errors");
+                }
+            }
+
+            Console.WriteLine($"[VerifyRiders] Verification complete:");
+            Console.WriteLine($"  - Total: {totalRows}");
+            Console.WriteLine($"  - Fully Matched: {fullyMatched}");
+            Console.WriteLine($"  - Name Mismatch (Ignored): {workingIdFoundNameMismatch}");
+            Console.WriteLine($"  - WorkingId Mismatch: {nameFoundWorkingIdMismatch}");
+            Console.WriteLine($"  - Not Found: {completelyNotFound}");
+            Console.WriteLine($"  - Errors: {errorRecords}");
+            Console.WriteLine($"  - Unique WorkingId Errors Reported: {reportedWorkingIdErrors.Count}");
+            Console.WriteLine($"  - Total WorkingId Issues (including duplicates): {workingIdErrorSummary.Values.Sum()}");
 
             var response = new RiderVerificationResponse(
-                TotalRecordsProcessed: dataRows.Count,
+                TotalRecordsProcessed: totalRows,
                 FullyMatched: fullyMatched,
-                WorkingIdFoundNameMismatch: workingIdFoundNameMismatch,
+                WorkingIdFoundNameMismatch: workingIdFoundNameMismatch, // Count but not in details
                 NameFoundWorkingIdMismatch: nameFoundWorkingIdMismatch,
                 CompletelyNotFound: completelyNotFound,
                 ErrorRecords: errorRecords,
-                Details: details,
+                Details: details, // Only unique WorkingId errors
                 ProcessingErrors: errors,
                 ProcessedAt: DateTime.UtcNow.AddHours(3)
             );
@@ -200,12 +295,11 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
         }
         catch (Exception ex)
         {
+            Console.WriteLine($"[VerifyRiders] FATAL ERROR: {ex}");
             return Result.Failure<RiderVerificationResponse>(
                 new Error("ProcessingError", $"Failed to process Excel file: {ex.Message}", 500));
         }
     }
-
-    // ===========================
     // Helper Methods
     // ===========================
 

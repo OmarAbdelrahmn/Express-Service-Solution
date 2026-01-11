@@ -47,13 +47,13 @@ public interface IImportService
 
 public record RiderVerificationResponse(
     int TotalRecordsProcessed,
-    int FullyMatched,              // Both WorkingId and NameAR exist
-    int WorkingIdFoundNameMismatch, // WorkingId exists but different name
-    int NameFoundWorkingIdMismatch, // NameAR exists but different WorkingId
-    int CompletelyNotFound,         // Neither WorkingId nor NameAR found
+    int FullyMatched,
+    int WorkingIdFoundNameMismatch,  // Counted but NOT included in Details (name changes ignored)
+    int NameFoundWorkingIdMismatch,  // Counted AND unique ones in Details
+    int CompletelyNotFound,          // Counted AND unique ones in Details
     int ErrorRecords,
-    List<RiderVerificationDetail> Details,
-    List<string> ProcessingErrors,
+    List<RiderVerificationDetail> Details,  // Now contains ONLY unique WorkingId errors + validation errors
+    List<string> ProcessingErrors,          // Includes duplicate summary at the end
     DateTime ProcessedAt
 );
 

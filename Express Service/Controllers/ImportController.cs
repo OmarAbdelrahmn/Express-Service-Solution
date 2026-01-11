@@ -641,27 +641,6 @@ public class ImportController(IImportService service , IBackgroundImportService 
         return Ok(status);
     }
 
-    /// <summary>
-    /// Get final results - Only available when status is "Completed"
-    /// </summary>
-    [HttpGet("verify-riders/result/{jobId}")]
-    public IActionResult GetVerificationResult(string jobId)
-    {
-        var status = service1.GetJobStatus(jobId);
-
-        if (status == null)
-            return NotFound(new { error = "Job not found or expired" });
-
-        if (status.Status != "Completed")
-            return BadRequest(new { error = $"Job is still {status.Status}" });
-
-        var result = service1.GetJobResult(jobId);
-
-        if (result == null)
-            return NotFound(new { error = "Result not available" });
-
-        return Ok(result);
-    }
 
     /// <summary>
     /// OLD SYNCHRONOUS METHOD - Will timeout on large files!
@@ -676,5 +655,117 @@ public class ImportController(IImportService service , IBackgroundImportService 
         var uploadedBy = User.Identity?.Name ?? "Unknown";
         var result = await service.VerifyRidersFromExcelAsync(file, uploadedBy);
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    [HttpPost("verify-riders/cancel/{jobId}")]
+    public IActionResult CancelVerification(string jobId)
+    {
+        var cancelled = service1.CancelJob(jobId);
+
+        if (!cancelled)
+            return NotFound(new { error = "Job not found or already completed" });
+
+        return Ok(new { message = "Job cancellation requested" });
+    }
+
+    [HttpGet("verify-riders/result/{jobId}")]
+    public IActionResult GetVerificationResult(string jobId)
+    {
+
+        var status = service1.GetJobStatus(jobId);
+
+        if (status == null)
+        {
+            return NotFound(new { error = "Job not found or expired" });
+        }
+
+
+        if (status.Status != "Completed")
+        {
+            return BadRequest(new
+            {
+                error = $"Job is still {status.Status}",
+                status = status
+            });
+        }
+
+        var result = service1.GetJobResult(jobId);
+
+        if (result == null)
+        {
+            return NotFound(new
+            {
+                error = "Result not available",
+                status = status,
+                message = "Job completed but result file is missing. This may indicate a storage issue."
+            });
+        }
+
+
+
+        return Ok(result);
+    }
+
+    [HttpGet("verify-riders/summary/{jobId}")]
+    public IActionResult GetVerificationSummary(string jobId)
+    {
+        var status = service1.GetJobStatus(jobId);
+
+        if (status == null)
+            return NotFound(new { error = "Job not found or expired" });
+
+        if (status.Status != "Completed")
+            return BadRequest(new { error = $"Job is still {status.Status}", status });
+
+        var result = service1.GetJobResult(jobId);
+
+        if (result == null)
+            return NotFound(new { error = "Result not available" });
+
+        // Return summary without all details (lighter response)
+        return Ok(new
+        {
+            jobId,
+            status = status.Status,
+            totalRecordsProcessed = result.TotalRecordsProcessed,
+            fullyMatched = result.FullyMatched,
+            workingIdFoundNameMismatch = result.WorkingIdFoundNameMismatch,
+            nameFoundWorkingIdMismatch = result.NameFoundWorkingIdMismatch,
+            completelyNotFound = result.CompletelyNotFound,
+            errorRecords = result.ErrorRecords,
+            processedAt = result.ProcessedAt,
+            elapsedTime = status.ElapsedTime,
+            // Only include error details, not all matching details
+            detailsCount = result.Details.Count,
+            hasDetails = true,
+            detailsUrl = $"/api/import/verify-riders/result/{jobId}"
+        });
+    }
+
+    [HttpGet("verify-riders/details/{jobId}")]
+    public IActionResult GetVerificationDetails(
+        string jobId,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 100)
+    {
+        var result = service1.GetJobResult(jobId);
+
+        if (result == null)
+            return NotFound(new { error = "Result not available" });
+
+        var totalPages = (int)Math.Ceiling(result.Details.Count / (double)pageSize);
+        var details = result.Details
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToList();
+
+        return Ok(new
+        {
+            page,
+            pageSize,
+            totalPages,
+            totalRecords = result.Details.Count,
+            details
+        });
     }
 }

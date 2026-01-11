@@ -1,140 +1,366 @@
 ﻿using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Concurrent;
-using System.Collections.Generic;
-using System.Text;
+using System.IO;
+using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace Application.Service.Backgroundimports;
 
 public class BackgroundImportService : IBackgroundImportService
 {
-    private readonly IImportService _importService;
-    private static readonly ConcurrentDictionary<string, ImportJobStatus> _jobs = new();
-    private static readonly ConcurrentDictionary<string, RiderVerificationResponse> _results = new();
+    private readonly IServiceScopeFactory _serviceScopeFactory;
+    private readonly ILogger<BackgroundImportService> _logger;
 
-    public BackgroundImportService(IImportService importService)
+    // Static dictionaries to persist across requests
+    private static readonly ConcurrentDictionary<string, ImportJobStatus> _jobs = new();
+    private static readonly ConcurrentDictionary<string, string> _resultPaths = new(); // Store file paths instead
+    private static readonly ConcurrentDictionary<string, CancellationTokenSource> _activeCancellations = new();
+
+    public BackgroundImportService(
+        IServiceScopeFactory serviceScopeFactory,
+        ILogger<BackgroundImportService> logger)
     {
-        _importService = importService;
+        _serviceScopeFactory = serviceScopeFactory;
+        _logger = logger;
     }
 
     public async Task<string> StartRiderVerificationAsync(IFormFile file, string uploadedBy)
     {
         var jobId = Guid.NewGuid().ToString();
+        var cts = new CancellationTokenSource();
 
-        // Save file to temp location
-        var tempPath = Path.Combine(Path.GetTempPath(), $"{jobId}.xlsx");
-        using (var stream = new FileStream(tempPath, FileMode.Create))
+        _logger.LogInformation("Starting verification job {JobId} for file {FileName} ({FileSize} bytes)",
+            jobId, file.FileName, file.Length);
+
+        // Create a dedicated folder for this job
+        var jobFolder = Path.Combine(Path.GetTempPath(), "RiderVerification", jobId);
+        Directory.CreateDirectory(jobFolder);
+
+        var inputPath = Path.Combine(jobFolder, "input.xlsx");
+        var resultPath = Path.Combine(jobFolder, "result.json");
+
+        try
         {
-            await file.CopyToAsync(stream);
+            using (var stream = new FileStream(inputPath, FileMode.Create))
+            {
+                await file.CopyToAsync(stream);
+            }
+            _logger.LogInformation("File saved to: {InputPath}", inputPath);
         }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to save file for job {JobId}", jobId);
+            throw;
+        }
+
+        // Store result path
+        _resultPaths[jobId] = resultPath;
 
         // Initialize job status
         _jobs[jobId] = new ImportJobStatus
         {
             JobId = jobId,
-            Status = "Processing",
+            Status = "Initializing",
             StartTime = DateTime.UtcNow.AddHours(3),
             TotalRows = 0,
             ProcessedRows = 0,
             Progress = 0
         };
 
+        _activeCancellations[jobId] = cts;
+
         // Start background task
         _ = Task.Run(async () =>
         {
             try
             {
-                await ProcessVerificationJob(jobId, tempPath, uploadedBy);
+                _logger.LogInformation("Background processing started for job {JobId}", jobId);
+
+                _jobs[jobId] = _jobs[jobId] with { Status = "Processing" };
+
+                using (var scope = _serviceScopeFactory.CreateScope())
+                {
+                    var importService = scope.ServiceProvider.GetRequiredService<IImportService>();
+
+                    await ProcessVerificationJob(
+                        jobId,
+                        inputPath,
+                        resultPath,
+                        uploadedBy,
+                        importService,
+                        cts.Token);
+                }
+
+                _logger.LogInformation("Background processing completed for job {JobId}", jobId);
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogWarning("Job {JobId} was cancelled", jobId);
+                _jobs[jobId] = _jobs[jobId] with
+                {
+                    Status = "Cancelled",
+                    ErrorMessage = "Job was cancelled",
+                    EndTime = DateTime.UtcNow.AddHours(3)
+                };
             }
             catch (Exception ex)
             {
+                _logger.LogError(ex, "Job {JobId} failed with error: {Error}", jobId, ex.Message);
                 _jobs[jobId] = _jobs[jobId] with
                 {
                     Status = "Failed",
-                    ErrorMessage = ex.Message,
+                    ErrorMessage = $"{ex.GetType().Name}: {ex.Message}",
                     EndTime = DateTime.UtcNow.AddHours(3)
                 };
             }
             finally
             {
-                // Cleanup temp file
-                if (File.Exists(tempPath))
-                    File.Delete(tempPath);
+                _activeCancellations.TryRemove(jobId, out _);
+
+                // Clean up input file immediately
+                if (File.Exists(inputPath))
+                {
+                    try
+                    {
+                        File.Delete(inputPath);
+                        _logger.LogInformation("Input file deleted: {InputPath}", inputPath);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to delete input file: {InputPath}", inputPath);
+                    }
+                }
+
+                // Schedule cleanup after 2 hours (keep results longer)
+                _ = Task.Run(async () =>
+                {
+                    await Task.Delay(TimeSpan.FromHours(2));
+
+                    _jobs.TryRemove(jobId, out _);
+                    _resultPaths.TryRemove(jobId, out _);
+
+                    // Delete result file and folder
+                    try
+                    {
+                        if (Directory.Exists(jobFolder))
+                        {
+                            Directory.Delete(jobFolder, true);
+                            _logger.LogInformation("Job {JobId} folder cleaned up after 2 hours", jobId);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to delete job folder: {JobFolder}", jobFolder);
+                    }
+                });
             }
-        });
+        }, cts.Token);
 
         return jobId;
     }
 
-    private async Task ProcessVerificationJob(string jobId, string filePath, string uploadedBy)
+    private async Task ProcessVerificationJob(
+        string jobId,
+        string inputPath,
+        string resultPath,
+        string uploadedBy,
+        IImportService importService,
+        CancellationToken cancellationToken)
     {
-        using var stream = new FileStream(filePath, FileMode.Open);
-        var formFile = new FormFile(stream, 0, stream.Length, "file", Path.GetFileName(filePath));
+        _logger.LogInformation("Processing verification job {JobId} from file {FilePath}", jobId, inputPath);
 
-        // Create custom import service with progress callback
-        var result = await _importService.VerifyRidersFromExcelAsync(
-            formFile,
-            uploadedBy,
-            (processed, total) =>
+        if (!File.Exists(inputPath))
+        {
+            throw new FileNotFoundException($"Input file not found: {inputPath}");
+        }
+
+        using var stream = new FileStream(inputPath, FileMode.Open, FileAccess.Read);
+        _logger.LogInformation("File stream opened, length: {Length} bytes", stream.Length);
+
+        var formFile = new FormFile(stream, 0, stream.Length, "file", Path.GetFileName(inputPath))
+        {
+            Headers = new HeaderDictionary(),
+            ContentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        };
+
+        int lastReportedProgress = 0;
+        object lockObject = new object();
+
+        void ProgressCallback(int processed, int total)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            lock (lockObject)
             {
-                // Update progress
+                if (processed == 0 ||
+                    processed - lastReportedProgress >= 500 ||
+                    processed == total)
+                {
+                    var progress = total > 0 ? (int)((processed / (double)total) * 100) : 0;
+
+                    _jobs[jobId] = _jobs[jobId] with
+                    {
+                        TotalRows = total,
+                        ProcessedRows = processed,
+                        Progress = progress
+                    };
+
+                    lastReportedProgress = processed;
+
+                    if (processed % 5000 == 0 || processed == 0 || processed == total)
+                    {
+                        _logger.LogInformation(
+                            "Job {JobId} progress: {Processed}/{Total} ({Progress}%)",
+                            jobId, processed, total, progress);
+                    }
+                }
+            }
+        }
+
+        try
+        {
+            _logger.LogInformation("Calling VerifyRidersFromExcelAsync for job {JobId}", jobId);
+
+            var result = await importService.VerifyRidersFromExcelAsync(
+                formFile,
+                uploadedBy,
+                ProgressCallback);
+
+            _logger.LogInformation(
+                "VerifyRidersFromExcelAsync completed for job {JobId}. Success: {IsSuccess}",
+                jobId, result.IsSuccess);
+
+            if (result.IsSuccess)
+            {
+                // Save result to file to avoid memory issues
+                var jsonOptions = new JsonSerializerOptions
+                {
+                    WriteIndented = false,
+                    DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.Never
+                };
+
+                var jsonString = JsonSerializer.Serialize(result.Value, jsonOptions);
+                await File.WriteAllTextAsync(resultPath, jsonString);
+
+                _logger.LogInformation(
+                    "Result saved to file: {ResultPath} ({Size} bytes)",
+                    resultPath,
+                    new FileInfo(resultPath).Length);
+
                 _jobs[jobId] = _jobs[jobId] with
                 {
-                    TotalRows = total,
-                    ProcessedRows = processed,
-                    Progress = (int)((processed / (double)total) * 100)
+                    Status = "Completed",
+                    EndTime = DateTime.UtcNow.AddHours(3),
+                    Progress = 100,
+                    ProcessedRows = result.Value.TotalRecordsProcessed,
+                    TotalRows = result.Value.TotalRecordsProcessed
                 };
-            });
 
-        if (result.IsSuccess)
-        {
-            _results[jobId] = result.Value;
-            _jobs[jobId] = _jobs[jobId] with
+                _logger.LogInformation(
+                    "Job {JobId} completed. Processed: {Total}, Matched: {Matched}, " +
+                    "WorkingIdMismatch: {WIM}, NameMismatch: {NM}, NotFound: {NF}, Errors: {Err}",
+                    jobId,
+                    result.Value.TotalRecordsProcessed,
+                    result.Value.FullyMatched,
+                    result.Value.WorkingIdFoundNameMismatch,
+                    result.Value.NameFoundWorkingIdMismatch,
+                    result.Value.CompletelyNotFound,
+                    result.Value.ErrorRecords);
+            }
+            else
             {
-                Status = "Completed",
-                EndTime = DateTime.UtcNow.AddHours(3),
-                Progress = 100
-            };
-        }
-        else
-        {
-            _jobs[jobId] = _jobs[jobId] with
-            {
-                Status = "Failed",
-                ErrorMessage = result.Error.Description,
-                EndTime = DateTime.UtcNow.AddHours(3)
-            };
-        }
+                _logger.LogError(
+                    "Job {JobId} failed: {ErrorCode} - {ErrorMessage}",
+                    jobId, result.Error.Code, result.Error.Description);
 
-        // Clean up old jobs (keep for 1 hour)
-        _ = Task.Run(async () =>
+                _jobs[jobId] = _jobs[jobId] with
+                {
+                    Status = "Failed",
+                    ErrorMessage = result.Error.Description,
+                    EndTime = DateTime.UtcNow.AddHours(3)
+                };
+            }
+        }
+        catch (Exception ex)
         {
-            await Task.Delay(TimeSpan.FromHours(1));
-            _jobs.TryRemove(jobId, out _);
-            _results.TryRemove(jobId, out _);
-        });
+            _logger.LogError(ex, "Exception in ProcessVerificationJob for {JobId}", jobId);
+            throw;
+        }
     }
 
     public ImportJobStatus? GetJobStatus(string jobId)
     {
-        return _jobs.TryGetValue(jobId, out var status) ? status : null;
+        _jobs.TryGetValue(jobId, out var status);
+
+        if (status != null)
+        {
+            _logger.LogDebug("Status retrieved for job {JobId}: {Status}", jobId, status.Status);
+        }
+        else
+        {
+            _logger.LogWarning("Job {JobId} not found in status dictionary", jobId);
+        }
+
+        return status;
     }
 
     public RiderVerificationResponse? GetJobResult(string jobId)
     {
-        return _results.TryGetValue(jobId, out var result) ? result : null;
+        try
+        {
+            if (!_resultPaths.TryGetValue(jobId, out var resultPath))
+            {
+                _logger.LogWarning("Result path not found for job {JobId}", jobId);
+                return null;
+            }
+
+            if (!File.Exists(resultPath))
+            {
+                _logger.LogWarning("Result file does not exist: {ResultPath}", resultPath);
+                return null;
+            }
+
+            _logger.LogInformation("Reading result from: {ResultPath}", resultPath);
+
+            var jsonString = File.ReadAllText(resultPath);
+            var result = JsonSerializer.Deserialize<RiderVerificationResponse>(jsonString);
+
+            _logger.LogInformation("Result deserialized successfully for job {JobId}", jobId);
+
+            return result;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to retrieve result for job {JobId}", jobId);
+            return null;
+        }
+    }
+
+    public bool CancelJob(string jobId)
+    {
+        if (_activeCancellations.TryGetValue(jobId, out var cts))
+        {
+            _logger.LogInformation("Cancelling job {JobId}", jobId);
+            cts.Cancel();
+            return true;
+        }
+        return false;
     }
 }
 
 public record ImportJobStatus
 {
     public string JobId { get; init; } = string.Empty;
-    public string Status { get; init; } = string.Empty; // Processing, Completed, Failed
+    public string Status { get; init; } = string.Empty;
     public DateTime StartTime { get; init; }
     public DateTime? EndTime { get; init; }
     public int TotalRows { get; init; }
     public int ProcessedRows { get; init; }
-    public int Progress { get; init; } // 0-100
+    public int Progress { get; init; }
     public string? ErrorMessage { get; init; }
     public TimeSpan? ElapsedTime => EndTime.HasValue
         ? EndTime.Value - StartTime
