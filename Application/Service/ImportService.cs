@@ -4242,7 +4242,7 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
                             rowNumber, false,
                             rowData.IqamaNo?.ToString() ?? "N/A",
                             "N/A", "N/A",
-                            rowData.PlateNumberA ?? "N/A", "N/A",
+                            rowData.VehicleNumber ?? "N/A", VehicleNumber: "N/A",  // ✅ Changed
                             false, false,
                             null, null,
                             rowData.Permission,
@@ -4255,12 +4255,12 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
                     }
 
                     // Normalize plate number
-                    var cleanPlateNumber = rowData.PlateNumberA!.Replace(" ", "").Trim().ToLower();
+                    var cleanVehicleNumber = rowData.VehicleNumber!.Replace(" ", "").Trim().ToLower();  // ✅ Changed
 
                     // Store assignment (plate -> iqama mapping)
-                    if (!excelAssignments.ContainsKey(cleanPlateNumber))
+                    if (!excelAssignments.ContainsKey(cleanVehicleNumber))
                     {
-                        excelAssignments[cleanPlateNumber] = (rowData.IqamaNo!.Value, rowData);
+                        excelAssignments[cleanVehicleNumber] = (rowData.IqamaNo!.Value, rowData);
                     }
                 }
                 catch (Exception ex)
@@ -4371,7 +4371,7 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
                 {
                     var warnings = new List<string>();
                     var cleanIqamaNo = rowData.IqamaNo!.Value;
-                    var cleanPlateNumber = rowData.PlateNumberA!.Replace(" ", "").Trim();
+                    var cleanVehicleNumber = rowData.VehicleNumber!.Replace(" ", "").Trim().ToLower();  // ✅ Changed
 
                     // Find employee
                     var employee = await _dbcontext.Employees
@@ -4388,7 +4388,7 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
                             rowNumber, false,
                             cleanIqamaNo.ToString(),
                             "N/A", "N/A",
-                            cleanPlateNumber, "N/A",
+                            rowData.VehicleNumber ?? "N/A", VehicleNumber: "N/A",  // ✅ Changed
                             false, false,
                             null, null,
                             rowData.Permission,
@@ -4417,7 +4417,7 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
                                 rowNumber, false,
                                 cleanIqamaNo.ToString(),
                                 employee.NameEN, employee.NameAR,
-                                cleanPlateNumber, "N/A",
+                                 rowData.VehicleNumber ?? "N/A", VehicleNumber: "N/A",  // ✅ Changed
                                 false, false,
                                 null, null,
                                 rowData.Permission,
@@ -4451,7 +4451,8 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
 
                     // Find vehicle
                     var vehicle = await _dbcontext.Vehicles
-                        .FirstOrDefaultAsync(v => v.PlateNumberA.Replace(" ", "") == cleanPlateNumber);
+                        .FirstOrDefaultAsync(v => v.VehicleNumber.Replace(" ", "") == cleanVehicleNumber);  // ✅ Changed from PlateNumberA
+
 
                     if (vehicle == null)
                     {
@@ -4461,14 +4462,14 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
                             rowNumber, false,
                             cleanIqamaNo.ToString(),
                             employee.NameEN, employee.NameAR,
-                            cleanPlateNumber, "N/A",
+                            rowData.VehicleNumber ?? "N/A", VehicleNumber: "N/A",  // ✅ Changed
                             wasConvertedToRider, false,
                             null, null,
                             rowData.Permission,
                             rowData.PermissionStartDate,
                             rowData.PermissionEndDate,
                             warnings,
-                            $"Vehicle with plate '{cleanPlateNumber}' not found"
+                            $"Vehicle with plate '{cleanVehicleNumber}' not found"
                         ));
                         await transaction.RollbackAsync();
                         continue;
@@ -4604,7 +4605,7 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
                         rowNumber, true,
                         cleanIqamaNo.ToString(),
                         employee.NameEN, employee.NameAR,
-                        cleanPlateNumber,
+                        cleanVehicleNumber,
                         vehicle.VehicleNumber,
                         wasConvertedToRider,
                         true,
@@ -4680,7 +4681,7 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
         var knownColumns = new[]
         {
         "IqamaNumber", "Iqama Number", "رقم الاقامة", "رقم الإقامة",
-        "PlateNumberA", "Plate Number A", "رقم اللوحة", "اللوحة العربية",
+        "VehicleNumber", "Vehicle Number", "رقم المركبة", "رقم الهيكل",  // ✅ Changed
         "Permission", "التصريح", "الصلاحية",
         "PermissionStartDate", "تاريخ بداية التصريح",
         "PermissionEndDate", "تاريخ نهاية التصريح"
@@ -4716,8 +4717,8 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
         mapping.IqamaNoCol = FindColumn(cells,
             "IqamaNumber", "Iqama Number", "IqamaNo", "رقم الاقامة", "رقم الإقامة");
 
-        mapping.PlateNumberACol = FindColumn(cells,
-            "PlateNumberA", "Plate Number A", "PlateA", "رقم اللوحة", "اللوحة العربية", "اللوحة");
+        mapping.VehicleNumberCol = FindColumn(cells,  // ✅ Changed
+                  "VehicleNumber", "Vehicle Number", "رقم المركبة", "رقم الهيكل");
 
         mapping.PermissionCol = FindColumn(cells,
             "Permission", "التصريح", "الصلاحية", "نوع التصريح");
@@ -4730,7 +4731,7 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
 
         var missing = new List<string>();
         if (mapping.IqamaNoCol == 0) missing.Add("Iqama Number");
-        if (mapping.PlateNumberACol == 0) missing.Add("Plate Number A");
+        if (mapping.VehicleNumberCol == 0) missing.Add("Vehicle Number");  // ✅ Changed
 
         if (missing.Any())
         {
@@ -4772,11 +4773,11 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
             data.IqamaNo = iqamaNo;
 
             // Parse and trim PlateNumberA
-            data.PlateNumberA = GetCellValue(row, map.PlateNumberACol)?.Replace(" ", "").Trim();
-            if (string.IsNullOrWhiteSpace(data.PlateNumberA))
+            data.VehicleNumber = GetCellValue(row, map.VehicleNumberCol)?.Replace(" ", "").Trim();
+            if (string.IsNullOrWhiteSpace(data.VehicleNumber))
             {
                 data.IsValid = false;
-                data.ErrorMessage = "Plate Number A is required";
+                data.ErrorMessage = "Vehicle Number is required";
                 return data;
             }
 
@@ -4818,7 +4819,7 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
         public bool IsValid { get; set; }
         public string? ErrorMessage { get; set; }
         public int IqamaNoCol { get; set; }
-        public int PlateNumberACol { get; set; }
+        public int VehicleNumberCol { get; set; }
         public int PermissionCol { get; set; }
         public int PermissionStartDateCol { get; set; }
         public int PermissionEndDateCol { get; set; }
@@ -4830,7 +4831,7 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
         public bool IsValid { get; set; }
         public string? ErrorMessage { get; set; }
         public long? IqamaNo { get; set; }
-        public string? PlateNumberA { get; set; }
+        public string? VehicleNumber { get; set; }
         public string? Permission { get; set; }
         public DateTime? PermissionStartDate { get; set; }
         public DateTime? PermissionEndDate { get; set; }
