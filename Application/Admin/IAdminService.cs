@@ -13,4 +13,6 @@ public interface IAdminService
     Task<Result> DeletaUserAsync(string UserName);
     Task<Result<int>> BackfillHousingIdsAsync(CancellationToken cancellationToken = default);
 
+
+    Task<Result> ResetPasswordAsync(string userName);
 }

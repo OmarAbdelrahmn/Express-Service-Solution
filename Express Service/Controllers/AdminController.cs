@@ -26,15 +26,25 @@ public class AdminController(IAdminService service,IUserService service1) : Cont
     //        deletedEmployees.ToProblem();
     //}
 
-
-    [HttpGet("move")]
-    public async Task<IActionResult> MoveData()
+    [HttpGet("adminreset")]
+    [Authorize(Roles = "Master")]
+    public async Task<IActionResult> AdminReset(string UserName)
     {
-        var result = await service.BackfillHousingIdsAsync();
+        var result = await service.ResetPasswordAsync(UserName);
         return result.IsSuccess ?
-            Ok(result.Value) :
+            Ok() :
             result.ToProblem();
     }
+
+
+    //[HttpGet("move")]
+    //public async Task<IActionResult> MoveData()
+    //{
+    //    var result = await service.BackfillHousingIdsAsync();
+    //    return result.IsSuccess ?
+    //        Ok(result.Value) :
+    //        result.ToProblem();
+    //}
 
     [HttpGet("users")]
     [Authorize(Roles = "Master")]

@@ -19,6 +19,34 @@ public class AdminService(
     private readonly UserManager<ApplicationUser> manager = manager;
     private readonly ApplicationDbcontext dbcontext = dbcontext;
 
+
+    public async Task<Result> ResetPasswordAsync(string userName)
+    {
+        string tempPassword = "P@ssword1234"; 
+
+        var user = await manager.FindByNameAsync(userName);
+
+        if (user == null)
+        {
+            return Result.Failure(UserErrors.UserNotFound);
+        }
+        var result = await manager.RemovePasswordAsync(user);
+
+        if (!result.Succeeded)
+        {
+            var error = result.Errors.First();
+            return Result.Failure(new Error(error.Code, error.Description, StatusCodes.Status400BadRequest));
+        }
+
+        result = await manager.AddPasswordAsync(user, tempPassword);
+        if (!result.Succeeded)
+        {
+            var error = result.Errors.First();
+            return Result.Failure(new Error(error.Code, error.Description, StatusCodes.Status400BadRequest));
+        }
+
+        return Result.Success();
+    }
     public async Task<Result<int>> BackfillHousingIdsAsync(CancellationToken cancellationToken = default)
     {
         try
