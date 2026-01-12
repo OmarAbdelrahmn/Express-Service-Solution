@@ -2334,8 +2334,40 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
 
     #endregion
 
-}
 
+
+}
+// Add these DTOs to Application/Service/IImportService.cs (at the end with other DTOs)
+
+public record VehicleRelocationImportResponse(
+    int TotalRecords,
+    int SuccessfulRelocations,
+    int LocationUpdated,
+    int StatusUpdated,
+    int FailedRecords,
+    int VehicleNotFound,
+    int HousingNotFound,
+    List<VehicleRelocationRowResult> Results,
+    List<string> Errors,
+    DateTime ProcessedAt
+);
+
+public record VehicleRelocationRowResult(
+    int RowNumber,
+    bool Success,
+    string PlateNumber,
+    string VehicleNumber,
+    string VehicleType,
+    bool LocationUpdated,
+    bool StatusUpdated,
+    string? OldLocation,
+    string? NewLocation,
+    string? OldStatus,
+    string? NewStatus,
+    string? Reason,
+    List<string> Warnings,
+    string? ErrorMessage
+);
 public record TempVehicleOperationResponse(
     int Id,
     long RiderIqamaNo,

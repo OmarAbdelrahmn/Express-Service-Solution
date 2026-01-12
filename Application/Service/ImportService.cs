@@ -1,5 +1,6 @@
 ﻿using Application.Abstraction;
 using Application.Service.Backgroundimports;
+using Application.Service.Empolyee;
 using ClosedXML.Excel;
 using Domain;
 using Domain.Entities;
@@ -18,6 +19,530 @@ namespace Application.Service;
 public class ImportService(ApplicationDbcontext dbcontext) : IImportService
 {
     private readonly ApplicationDbcontext _dbcontext = dbcontext;
+
+
+    // Add this method to ImportService.cs class
+
+    public async Task<Result<VehicleRelocationImportResponse>> ImportVehicleRelocationsAsync(
+        IFormFile file,
+        string uploadedBy)
+    {
+        if (file == null || file.Length == 0)
+            return Result.Failure<VehicleRelocationImportResponse>(
+                new Error("InvalidFile", "File is empty or null", 400));
+
+        if (!file.FileName.EndsWith(".xlsx") && !file.FileName.EndsWith(".xls"))
+            return Result.Failure<VehicleRelocationImportResponse>(
+                new Error("InvalidFormat", "File must be Excel format (.xlsx or .xls)", 400));
+
+        var results = new List<VehicleRelocationRowResult>();
+        var errors = new List<string>();
+        int successfulRelocations = 0;
+        int locationUpdated = 0;
+        int statusUpdated = 0;
+        int failedRecords = 0;
+        int vehicleNotFound = 0;
+        int housingNotFound = 0;
+
+        try
+        {
+            Console.WriteLine($"[VehicleRelocation] Starting import for file: {file.FileName}");
+
+            using var stream = file.OpenReadStream();
+            using var workbook = new XLWorkbook(stream);
+            var worksheet = workbook.Worksheet(1);
+
+            if (worksheet == null)
+            {
+                Console.WriteLine("[VehicleRelocation] ERROR: Could not read worksheet");
+                return Result.Failure<VehicleRelocationImportResponse>(
+                    new Error("InvalidWorksheet", "Could not read worksheet", 400));
+            }
+
+            Console.WriteLine($"[VehicleRelocation] Worksheet loaded: {worksheet.Name}");
+
+            var headerRow = FindVehicleRelocationHeaderRow(worksheet);
+            if (headerRow == null)
+            {
+                Console.WriteLine("[VehicleRelocation] ERROR: No header row found");
+                return Result.Failure<VehicleRelocationImportResponse>(
+                    new Error("EmptyFile", "Excel file has no header row", 400));
+            }
+
+            Console.WriteLine($"[VehicleRelocation] Header row found at row {headerRow.RowNumber()}");
+
+            var columnMap = BuildVehicleRelocationColumnMapping(headerRow);
+            if (!columnMap.IsValid)
+            {
+                Console.WriteLine($"[VehicleRelocation] ERROR: Invalid columns - {columnMap.ErrorMessage}");
+                return Result.Failure<VehicleRelocationImportResponse>(
+                    new Error("InvalidColumns", columnMap.ErrorMessage!, 400));
+            }
+
+            Console.WriteLine("[VehicleRelocation] Column mapping successful");
+
+            // Load housing lookup dictionary
+            var housings = await _dbcontext.Housings
+                .AsNoTracking()
+                .ToDictionaryAsync(h => h.Id, h => h.Name);
+
+            Console.WriteLine($"[VehicleRelocation] Loaded {housings.Count} housing entries");
+
+            var dataRows = worksheet.RowsUsed()
+                .Where(r => r.RowNumber() > headerRow.RowNumber())
+                .ToList();
+
+            var totalRows = dataRows.Count;
+            Console.WriteLine($"[VehicleRelocation] Total data rows to process: {totalRows}");
+
+            if (totalRows == 0)
+            {
+                Console.WriteLine("[VehicleRelocation] WARNING: No data rows found");
+                return Result.Failure<VehicleRelocationImportResponse>(
+                    new Error("EmptyFile", "No data rows found in Excel file", 400));
+            }
+
+            var rowNumber = headerRow.RowNumber();
+
+            foreach (var row in dataRows)
+            {
+                rowNumber++;
+
+                using var transaction = await _dbcontext.Database.BeginTransactionAsync();
+                try
+                {
+                    var rowData = ParseVehicleRelocationRowData(row, columnMap, rowNumber);
+
+                    if (!rowData.IsValid)
+                    {
+                        failedRecords++;
+                        results.Add(new VehicleRelocationRowResult(
+                            rowNumber,
+                            false,
+                            rowData.PlateNumber ?? "N/A",
+                            "N/A",
+                            "N/A",
+                            false,
+                            false,
+                            null,
+                            null,
+                            null,
+                            null,
+                            rowData.Reason,
+                            new List<string>(),
+                            rowData.ErrorMessage
+                        ));
+                        await transaction.RollbackAsync();
+                        continue;
+                    }
+
+                    var warnings = new List<string>();
+
+                    // Normalize plate number
+                    var normalizedPlate = rowData.PlateNumber!.Replace(" ", "").Trim();
+
+                    // Find vehicle
+                    var vehicle = await _dbcontext.Vehicles
+                        .FirstOrDefaultAsync(v => v.PlateNumberA.Replace(" ", "") == normalizedPlate);
+
+                    if (vehicle == null)
+                    {
+                        vehicleNotFound++;
+                        failedRecords++;
+                        results.Add(new VehicleRelocationRowResult(
+                            rowNumber,
+                            false,
+                            rowData.PlateNumber!,
+                            "N/A",
+                            "N/A",
+                            false,
+                            false,
+                            null,
+                            null,
+                            null,
+                            null,
+                            rowData.Reason,
+                            warnings,
+                            $"Vehicle with plate '{rowData.PlateNumber}' not found"
+                        ));
+                        await transaction.RollbackAsync();
+                        continue;
+                    }
+
+                    bool locationChanged = false;
+                    bool statusChanged = false;
+                    string? oldLocation = vehicle.Location;
+                    string? newLocation = null;
+                    string? oldStatus = null;
+                    string? newStatus = null;
+
+                    // Get current status
+                    var currentActiveStatus = await _dbcontext.RiderVehicleStatus
+                        .Where(s => s.VehicleNumber == vehicle.VehicleNumber && s.IsActive)
+                        .OrderByDescending(s => s.Timestamp)
+                        .FirstOrDefaultAsync();
+
+                    oldStatus = currentActiveStatus?.StatusType.ToString() ?? "Returned";
+
+                    // 1. Update Location if HousingId provided
+                    if (rowData.HousingId.HasValue)
+                    {
+                        if (!housings.TryGetValue(rowData.HousingId.Value, out string? housingName))
+                        {
+                            housingNotFound++;
+                            failedRecords++;
+                            results.Add(new VehicleRelocationRowResult(
+                                rowNumber,
+                                false,
+                                rowData.PlateNumber!,
+                                vehicle.VehicleNumber,
+                                vehicle.VehicleType,
+                                false,
+                                false,
+                                oldLocation,
+                                null,
+                                oldStatus,
+                                null,
+                                rowData.Reason,
+                                warnings,
+                                $"Housing with ID {rowData.HousingId.Value} not found"
+                            ));
+                            await transaction.RollbackAsync();
+                            continue;
+                        }
+
+                        newLocation = housingName;
+
+                        if (vehicle.Location != newLocation)
+                        {
+                            vehicle.Location = newLocation;
+                            locationChanged = true;
+                            warnings.Add($"Location changed from '{oldLocation}' to '{newLocation}'");
+                        }
+                    }
+                    else
+                    {
+                        // No housing specified - set to company
+                        newLocation = "الشركة";
+
+                        if (vehicle.Location != newLocation)
+                        {
+                            vehicle.Location = newLocation;
+                            locationChanged = true;
+                            warnings.Add($"Location changed from '{oldLocation}' to '{newLocation}'");
+                        }
+                    }
+
+                    // 2. Update Status if provided
+                    if (!string.IsNullOrWhiteSpace(rowData.NewStatus))
+                    {
+                        newStatus = rowData.NewStatus;
+
+                        // Validate status value
+                        var validStatuses = new[] { "Available", "Problem", "Stolen", "BreakUp", "Returned" };
+                        if (!validStatuses.Contains(newStatus, StringComparer.OrdinalIgnoreCase))
+                        {
+                            warnings.Add($"Invalid status '{newStatus}' - using 'Available'");
+                            newStatus = "Available";
+                        }
+
+                        if (!oldStatus.Equals(newStatus, StringComparison.OrdinalIgnoreCase))
+                        {
+                            // Map status string to enum
+                            VehicleStatusType newStatusType = newStatus.ToLower() switch
+                            {
+                                "2" => VehicleStatusType.Returned,
+                                "3" => VehicleStatusType.Problem,
+                                "stolen" => VehicleStatusType.Stolen,
+                                "breakup" => VehicleStatusType.BreakUp,
+                                _ => VehicleStatusType.Returned
+                            };
+
+                            // Deactivate old status
+                            if (currentActiveStatus != null)
+                            {
+                                currentActiveStatus.IsActive = false;
+                                currentActiveStatus.PermissionEndDate = DateTime.UtcNow.AddHours(3);
+                            }
+
+                            // Create new status record
+                            var isActive = newStatusType != VehicleStatusType.Returned;
+
+                            _dbcontext.RiderVehicleStatus.Add(new RiderVehicleStatus
+                            {
+                                VehicleNumber = vehicle.VehicleNumber,
+                                EmployeeIqamaNo = null,
+                                StatusType = newStatusType,
+                                Reason = rowData.Reason ?? $"Status updated via bulk import by {uploadedBy}",
+                                IsActive = isActive,
+                                Timestamp = DateTime.UtcNow.AddHours(3),
+                                PermissionEndDate = DateTime.UtcNow.AddHours(3)
+                            });
+
+                            statusChanged = true;
+                            warnings.Add($"Status changed from '{oldStatus}' to '{newStatus}'");
+
+                            // If status is Available/Returned, clear any rider assignment
+                            if (newStatusType == VehicleStatusType.Returned)
+                            {
+                                var rider = await _dbcontext.RiderDetails
+                                    .FirstOrDefaultAsync(r => r.VehicleNumber == vehicle.VehicleNumber);
+
+                                if (rider != null)
+                                {
+                                    rider.VehicleNumber = null;
+                                    warnings.Add("Vehicle assignment cleared from rider");
+                                }
+                            }
+                        }
+                    }
+
+                    // Check if any changes were made
+                    if (!locationChanged && !statusChanged)
+                    {
+                        warnings.Add("No changes detected - location and status are already correct");
+                    }
+
+                    await _dbcontext.SaveChangesAsync();
+                    await transaction.CommitAsync();
+
+                    if (locationChanged || statusChanged)
+                    {
+                        successfulRelocations++;
+                        if (locationChanged) locationUpdated++;
+                        if (statusChanged) statusUpdated++;
+                    }
+
+                    results.Add(new VehicleRelocationRowResult(
+                        rowNumber,
+                        true,
+                        rowData.PlateNumber!,
+                        vehicle.VehicleNumber,
+                        vehicle.VehicleType,
+                        locationChanged,
+                        statusChanged,
+                        oldLocation,
+                        newLocation,
+                        oldStatus,
+                        newStatus,
+                        rowData.Reason,
+                        warnings,
+                        null
+                    ));
+
+                    Console.WriteLine($"[VehicleRelocation] ✓ Processed {vehicle.VehicleNumber} - Location: {locationChanged}, Status: {statusChanged}");
+                }
+                catch (Exception ex)
+                {
+                    await transaction.RollbackAsync();
+                    failedRecords++;
+                    errors.Add($"Row {rowNumber}: {ex.Message}");
+
+                    results.Add(new VehicleRelocationRowResult(
+                        rowNumber,
+                        false,
+                        "N/A",
+                        "N/A",
+                        "N/A",
+                        false,
+                        false,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        new List<string>(),
+                        $"Exception: {ex.Message}"
+                    ));
+                }
+            }
+
+            Console.WriteLine($"[VehicleRelocation] Import complete:");
+            Console.WriteLine($"  - Total: {totalRows}");
+            Console.WriteLine($"  - Successful: {successfulRelocations}");
+            Console.WriteLine($"  - Location Updated: {locationUpdated}");
+            Console.WriteLine($"  - Status Updated: {statusUpdated}");
+            Console.WriteLine($"  - Failed: {failedRecords}");
+
+            var response = new VehicleRelocationImportResponse(
+                TotalRecords: totalRows,
+                SuccessfulRelocations: successfulRelocations,
+                LocationUpdated: locationUpdated,
+                StatusUpdated: statusUpdated,
+                FailedRecords: failedRecords,
+                VehicleNotFound: vehicleNotFound,
+                HousingNotFound: housingNotFound,
+                Results: results,
+                Errors: errors,
+                ProcessedAt: DateTime.UtcNow.AddHours(3)
+            );
+
+            return Result.Success(response);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[VehicleRelocation] FATAL ERROR: {ex}");
+            return Result.Failure<VehicleRelocationImportResponse>(
+                new Error("ProcessingError", $"Failed to process Excel file: {ex.Message}", 500));
+        }
+    }
+
+    // ============================================
+    // HELPER METHODS FOR VEHICLE RELOCATION
+    // ============================================
+
+    private IXLRow? FindVehicleRelocationHeaderRow(IXLWorksheet worksheet)
+    {
+        var knownColumns = new[]
+        {
+        "plateNo", "Plate Number", "PlateNumberA", "رقم اللوحة",
+        "HousingId", "Housing ID", "رقم السكن",
+        "NewStatus", "Status", "الحالة",
+        "Reason", "السبب", "ملاحظات"
+    };
+
+        for (int i = 1; i <= Math.Min(10, worksheet.RowsUsed().Count()); i++)
+        {
+            var row = worksheet.Row(i);
+            var cellValues = row.CellsUsed()
+                .Select(c => c.IsMerged()
+                    ? c.MergedRange().FirstCell().GetString().Trim()
+                    : c.GetString().Trim())
+                .Where(v => !string.IsNullOrWhiteSpace(v))
+                .ToList();
+
+            int matchCount = cellValues.Count(cv =>
+                knownColumns.Any(kc =>
+                    cv.Equals(kc, StringComparison.OrdinalIgnoreCase) ||
+                    cv.Replace(" ", "").Equals(kc.Replace(" ", ""), StringComparison.OrdinalIgnoreCase)));
+
+            if (matchCount >= 1) // At least PlateNumber must be found
+                return row;
+        }
+
+        return worksheet.Row(1);
+    }
+
+    private VehicleRelocationColumnMapping BuildVehicleRelocationColumnMapping(IXLRow headerRow)
+    {
+        var mapping = new VehicleRelocationColumnMapping();
+        var cells = headerRow.CellsUsed().ToList();
+
+        var actualHeaders = new List<string>();
+        foreach (var cell in cells)
+        {
+            try
+            {
+                string val = cell.IsMerged()
+                    ? cell.MergedRange().FirstCell().GetString()
+                    : cell.GetString();
+                actualHeaders.Add($"Col{cell.Address.ColumnNumber}({cell.Address.ColumnLetter})='{val}'");
+            }
+            catch { }
+        }
+
+        mapping.PlateNumberCol = FindColumn(cells,
+            "plateNo", "Plate Number", "PlateNumberA", "Plate Number A",
+            "رقم اللوحة", "اللوحة", "اللوحة العربية");
+
+        mapping.HousingIdCol = FindColumn(cells,
+            "housingId", "Housing ID", "Housing Id", "HousingID",
+            "رقم السكن", "السكن", "معرف السكن");
+
+        mapping.NewStatusCol = FindColumn(cells,
+            "NewStatus", "status", "New Status", "CurrentStatus",
+            "الحالة", "الحالة الجديدة", "حالة المركبة");
+
+        mapping.ReasonCol = FindColumn(cells,
+            "Reason", "السبب", "ملاحظات", "Notes", "الملاحظات");
+
+        var missing = new List<string>();
+        if (mapping.PlateNumberCol == 0) missing.Add("PlateNumber");
+
+        if (missing.Any())
+        {
+            mapping.IsValid = false;
+            mapping.ErrorMessage = $"Required column missing: {string.Join(", ", missing)}\n" +
+                                  $"Columns found:\n{string.Join("\n", actualHeaders)}";
+        }
+        else
+        {
+            mapping.IsValid = true;
+        }
+
+        return mapping;
+    }
+
+    private VehicleRelocationRowData ParseVehicleRelocationRowData(
+        IXLRow row,
+        VehicleRelocationColumnMapping map,
+        int rowNumber)
+    {
+        var data = new VehicleRelocationRowData { RowNumber = rowNumber };
+
+        try
+        {
+            // Parse PlateNumber (REQUIRED)
+            data.PlateNumber = GetCellValue(row, map.PlateNumberCol)?.Trim();
+            if (string.IsNullOrWhiteSpace(data.PlateNumber))
+            {
+                data.IsValid = false;
+                data.ErrorMessage = "PlateNumber is required";
+                return data;
+            }
+
+            // Parse HousingId (OPTIONAL)
+            var housingIdStr = GetCellValue(row, map.HousingIdCol);
+            if (!string.IsNullOrWhiteSpace(housingIdStr) && TryParseInt(housingIdStr, out int housingId))
+            {
+                data.HousingId = housingId;
+            }
+
+            // Parse NewStatus (OPTIONAL)
+            data.NewStatus = GetCellValue(row, map.NewStatusCol)?.Trim();
+
+            // Parse Reason (OPTIONAL)
+            data.Reason = GetCellValue(row, map.ReasonCol)?.Trim();
+            if (string.IsNullOrWhiteSpace(data.Reason))
+            {
+                data.Reason = "Bulk relocation from Excel import";
+            }
+
+            data.IsValid = true;
+        }
+        catch (Exception ex)
+        {
+            data.IsValid = false;
+            data.ErrorMessage = $"Error parsing row: {ex.Message}";
+        }
+
+        return data;
+    }
+
+    // ============================================
+    // INTERNAL CLASSES FOR VEHICLE RELOCATION
+    // ============================================
+
+    internal class VehicleRelocationColumnMapping
+    {
+        public bool IsValid { get; set; }
+        public string? ErrorMessage { get; set; }
+        public int PlateNumberCol { get; set; }
+        public int HousingIdCol { get; set; }
+        public int NewStatusCol { get; set; }
+        public int ReasonCol { get; set; }
+    }
+
+    internal class VehicleRelocationRowData
+    {
+        public int RowNumber { get; set; }
+        public bool IsValid { get; set; }
+        public string? ErrorMessage { get; set; }
+        public string? PlateNumber { get; set; }
+        public int? HousingId { get; set; }
+        public string? NewStatus { get; set; }
+        public string? Reason { get; set; }
+    }
 
     public async Task<Result<RiderVerificationResponse>> VerifyRidersFromExcelAsync(
         IFormFile file,

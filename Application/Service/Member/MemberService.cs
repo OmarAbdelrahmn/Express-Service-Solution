@@ -1982,28 +1982,34 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
                 .Where(r => employeeIqamas.Contains(r.EmployeeIqamaNo))
                 .ToListAsync();
 
-            // Step 3: Get vehicle numbers (excluding null/empty)
-            var vehicleNumbers = riders
+            // Step 3: Get vehicle numbers from riders (excluding null/empty)
+            var vehicleNumbersFromRiders = riders
                 .Where(r => !string.IsNullOrWhiteSpace(r.VehicleNumber))
                 .Select(r => r.VehicleNumber!)
                 .Distinct()
                 .ToList();
 
-            if (!vehicleNumbers.Any())
-                return Result.Success(new List<HousingVehicleResponse>());
-
-            // Step 4: Get vehicles
+            // Step 4: Get ALL vehicles that match EITHER:
+            // - Assigned to riders in this housing, OR
+            // - Location contains the housing name
             var vehicles = await context.Vehicles
-                .Where(v => vehicleNumbers.Contains(v.VehicleNumber))
+                .Where(v => vehicleNumbersFromRiders.Contains(v.VehicleNumber) ||
+                            v.Location.Contains(housing.Name))
                 .ToListAsync();
 
-            // Step 5: Get all active statuses for these vehicles and process in memory
+            if (!vehicles.Any())
+                return Result.Success(new List<HousingVehicleResponse>());
+
+            // Step 5: Get all vehicle numbers for status lookup
+            var allVehicleNumbers = vehicles.Select(v => v.VehicleNumber).Distinct().ToList();
+
+            // Step 6: Get all active statuses for these vehicles
             var allStatuses = await context.RiderVehicleStatus
-                .Where(rvs => vehicleNumbers.Contains(rvs.VehicleNumber) && rvs.IsActive)
+                .Where(rvs => allVehicleNumbers.Contains(rvs.VehicleNumber) && rvs.IsActive)
                 .OrderByDescending(rvs => rvs.Timestamp)
                 .ToListAsync();
 
-            // Step 6: Get the latest status for each vehicle (in memory)
+            // Step 7: Get the latest status for each vehicle (in memory)
             var statusDict = allStatuses
                 .GroupBy(s => s.VehicleNumber)
                 .ToDictionary(
@@ -2011,13 +2017,13 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
                     g => g.OrderByDescending(s => s.Timestamp).First()
                 );
 
-            // Step 7: Handle duplicate vehicle numbers in riders
+            // Step 8: Handle duplicate vehicle numbers in riders
             var riderDict = riders
                 .Where(r => !string.IsNullOrWhiteSpace(r.VehicleNumber))
                 .GroupBy(r => r.VehicleNumber!)
                 .ToDictionary(g => g.Key, g => g.First());
 
-            // Step 8: Build response
+            // Step 9: Build response
             var response = vehicles.Select(v =>
             {
                 statusDict.TryGetValue(v.VehicleNumber, out var status);
@@ -2032,11 +2038,11 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
                     v.Manufacturer,
                     v.LicenseExpiryDate,
                     v.Location,
-                    status?.StatusType.ToString(), // This should now work correctly
+                    status?.StatusType.ToString(),
                     rider?.EmployeeIqamaNo,
                     rider?.Employee?.NameAR,
                     rider?.Employee?.NameEN,
-                    status?.Timestamp // This should now have the correct timestamp
+                    status?.Timestamp
                 );
             }).ToList();
 
@@ -2049,7 +2055,6 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
             );
         }
     }
-
     public async Task<Result<List<VehicleStatusHistoryResponse>>> GetVehicleStatusHistory(
         long managerIqamaNo,
         string vehicleNumber)

@@ -40,6 +40,47 @@ public class ImportController(IImportService service , IBackgroundImportService 
         });
     }
 
+    [HttpPost("vehicle-relocations")]
+    public async Task<IActionResult> ImportVehicleRelocations(IFormFile file)
+    {
+        if (file == null || file.Length == 0)
+            return BadRequest(new { error = "No file uploaded" });
+
+        if (!file.FileName.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase) &&
+            !file.FileName.EndsWith(".xls", StringComparison.OrdinalIgnoreCase))
+            return BadRequest(new { error = "Only Excel files (.xlsx, .xls) are supported" });
+
+        try
+        {
+            // Get username from claims
+            var username = "omar";
+
+            Console.WriteLine($"[ImportController] Vehicle relocation import started by: {username}");
+            Console.WriteLine($"[ImportController] File: {file.FileName}, Size: {file.Length} bytes");
+
+            var result = await service.ImportVehicleRelocationsAsync(file, username);
+
+            if (result.IsSuccess)
+            {
+                Console.WriteLine($"[ImportController] Import successful:");
+                Console.WriteLine($"  Total: {result.Value.TotalRecords}");
+                Console.WriteLine($"  Successful: {result.Value.SuccessfulRelocations}");
+                Console.WriteLine($"  Failed: {result.Value.FailedRecords}");
+
+                return Ok(result.Value);
+            }
+
+            Console.WriteLine($"[ImportController] Import failed: {result.Error.Description}");
+            return result.ToProblem();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[ImportController] Exception: {ex.Message}");
+            Console.WriteLine($"[ImportController] Stack trace: {ex.StackTrace}");
+            return StatusCode(500, new { error = $"Import failed: {ex.Message}" });
+        }
+    }
+
     /// <summary>
     /// Check rider shift import job progress - Poll every 5-10 seconds for large imports
     /// </summary>

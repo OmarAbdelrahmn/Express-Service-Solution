@@ -1,4 +1,5 @@
 ﻿using Application.Abstraction;
+using Application.Service.Empolyee;
 using Microsoft.AspNetCore.Http;
 using System;
 using System.Collections.Generic;
@@ -9,6 +10,11 @@ namespace Application.Service;
 
 public interface IImportService
 {
+    Task<Result<VehicleRelocationImportResponse>> ImportVehicleRelocationsAsync(
+    IFormFile file,
+    string uploadedBy);
+
+
     Task<Result<DirectImportResponse>> ImportEmployeesAndRidersAsync(
         IFormFile file,
         string uploadedBy);

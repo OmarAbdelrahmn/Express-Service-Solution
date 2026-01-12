@@ -1,9 +1,11 @@
 ﻿using Application.Contracts.Employees;
+using Application.Service;
 using Application.Service.Empolyee;
 using Domain;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Security.Claims;
 using System.Threading.Tasks;
 
 namespace Express_Service.Controllers;
@@ -15,15 +17,15 @@ public class VehicleController(IVehicleService service) : ControllerBase
     private readonly IVehicleService _service = service;
 
 
-    [HttpPost("sync-locations")]
-    //[Authorize(Roles = "Master,Admin")]
-    public async Task<IActionResult> SyncAllVehicleLocations()
-    {
-        var result = await _service.SyncAllVehicleLocationsAsync();
-        return result.IsSuccess
-            ? Ok(result.Value)
-            : result.ToProblem();
-    }
+    //[HttpPost("sync-locations")]
+    ////[Authorize(Roles = "Master,Admin")]
+    //public async Task<IActionResult> SyncAllVehicleLocations()
+    //{
+    //    var result = await _service.SyncAllVehicleLocationsAsync();
+    //    return result.IsSuccess
+    //        ? Ok(result.Value)
+    //        : result.ToProblem();
+    //}
 
 
     [HttpPost("switch")]
