@@ -2029,6 +2029,9 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
                 statusDict.TryGetValue(v.VehicleNumber, out var status);
                 riderDict.TryGetValue(v.VehicleNumber, out var rider);
 
+                var statusType = status?.StatusType.ToString() ?? "Returned"; // or "Available", "Unassigned", etc.
+                var statusTimestamp = status?.Timestamp;
+
                 return new HousingVehicleResponse(
                     v.VehicleNumber,
                     v.VehicleType,
@@ -2038,11 +2041,11 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
                     v.Manufacturer,
                     v.LicenseExpiryDate,
                     v.Location,
-                    status?.StatusType.ToString(),
+                    statusType,
                     rider?.EmployeeIqamaNo,
                     rider?.Employee?.NameAR,
                     rider?.Employee?.NameEN,
-                    status?.Timestamp
+                    statusTimestamp
                 );
             }).ToList();
 

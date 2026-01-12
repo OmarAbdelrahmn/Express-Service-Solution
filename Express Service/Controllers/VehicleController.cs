@@ -203,7 +203,7 @@ public class VehicleController(IVehicleService service) : ControllerBase
     [HttpPost("report-problem")]
     [Authorize(Roles = "Master,Admin,Member")]
     public async Task<IActionResult> ReportProblem(
-        [FromQuery] long riderIqamaNo,
+        [FromQuery] long? riderIqamaNo,
         [FromQuery] string plate,
         [FromQuery] string reason)
     {
