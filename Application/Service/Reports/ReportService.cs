@@ -31,6 +31,296 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
     // Add this method to the ReportService class
     // Replace the following methods in ReportService.cs
 
+
+    public async Task<Result<HousingDetailedDailyPerformanceReport>> GetHousingDetailedDailyPerformanceAsync(
+    DateOnly startDate,
+    DateOnly endDate,
+    CancellationToken cancellationToken = default)
+    {
+        if (endDate < startDate)
+            return Result.Failure<HousingDetailedDailyPerformanceReport>(
+                new Error("End date must be after start date", "invalid_input", 400));
+
+        try
+        {
+            var totalExpectedDays = endDate.DayNumber - startDate.DayNumber + 1;
+
+            // Get all shifts for company 1 with housing data
+            var shifts = await _dbcontext.RiderShifts
+                .Include(s => s.Rider)
+                    .ThenInclude(r => r.Employee)
+                        .ThenInclude(e => e.Housing)
+                .Where(s => s.CompanyId == 1 &&
+                           s.ShiftDate >= startDate &&
+                           s.ShiftDate <= endDate &&
+                           s.Rider.Employee.Housing != null)
+                .AsNoTracking()
+                .ToListAsync(cancellationToken);
+
+            if (!shifts.Any())
+            {
+                return Result.Failure<HousingDetailedDailyPerformanceReport>(
+                    new Error("No shifts found for the specified period", "no_data", 404));
+            }
+
+            // Group by housing
+            var housingGroups = shifts
+                .GroupBy(s => new {
+                    HousingId = s.Rider.Employee.Housing.Id,
+                    HousingName = s.Rider.Employee.Housing.Name
+                });
+
+            var housingDetails = new List<HousingPerformanceDetail>();
+
+            // Track global metrics
+            int globalTotalWorkingDays = 0;
+            int globalTotalAbsentDays = 0;
+            float globalTotalHours = 0;
+            float globalTotalTargetHours = 0;
+            int globalTotalOrders = 0;
+            int globalTotalTargetOrders = 0;
+
+            foreach (var housingGroup in housingGroups)
+            {
+                var housingShifts = housingGroup.ToList();
+                var riderGroups = housingShifts.GroupBy(s => s.RiderId);
+                var riderDetails = new List<RiderDailyPerformanceDetail>();
+
+                // Housing-level metrics
+                int housingTotalWorkingDays = 0;
+                int housingTotalAbsentDays = 0;
+                float housingTotalHours = 0;
+                float housingTotalTargetHours = 0;
+                int housingTotalOrders = 0;
+                int housingTotalTargetOrders = 0;
+                var attendanceRates = new List<decimal>();
+                var hoursCompletionRates = new List<decimal>();
+                var ordersCompletionRates = new List<decimal>();
+
+                foreach (var riderGroup in riderGroups)
+                {
+                    var rider = riderGroup.First().Rider;
+                    if (rider?.Employee == null) continue;
+
+                    var riderShifts = riderGroup.ToList();
+                    var shiftDictionary = riderShifts.ToDictionary(s => s.ShiftDate);
+
+                    // Build daily entries
+                    var dailyEntries = new List<DailyPerformanceEntry>();
+                    var currentDate = startDate;
+                    int workingDays = 0;
+                    int absentDays = 0;
+                    float totalHours = 0;
+                    int totalOrders = 0;
+                    int totalRejected = 0;
+
+                    while (currentDate <= endDate)
+                    {
+                        if (shiftDictionary.TryGetValue(currentDate, out var shift))
+                        {
+                            workingDays++;
+                            totalHours += shift.WorkingHours;
+                            totalOrders += shift.AcceptedDailyOrders;
+                            totalRejected += shift.RejectedDailyOrders;
+
+                            var hoursDiff = shift.WorkingHours - TARGET_HOURS_PER_DAY;
+                            var ordersDiff = shift.AcceptedDailyOrders - TARGET_ORDERS_PER_DAY;
+
+                            dailyEntries.Add(new DailyPerformanceEntry(
+                                Date: currentDate,
+                                IsPresent: true,
+                                WorkingHours: shift.WorkingHours,
+                                TargetHours: TARGET_HOURS_PER_DAY,
+                                HoursDifference: hoursDiff,
+                                AcceptedOrders: shift.AcceptedDailyOrders,
+                                RejectedOrders: shift.RejectedDailyOrders,
+                                TargetOrders: TARGET_ORDERS_PER_DAY,
+                                OrdersDifference: ordersDiff,
+                                ShiftStatus: shift.ShiftStatus,
+                                PerformanceLevel: DeterminePerformanceLevel(
+                                    shift.WorkingHours,
+                                    shift.AcceptedDailyOrders,
+                                    TARGET_HOURS_PER_DAY,
+                                    TARGET_ORDERS_PER_DAY)
+                            ));
+                        }
+                        else
+                        {
+                            absentDays++;
+                            dailyEntries.Add(new DailyPerformanceEntry(
+                                Date: currentDate,
+                                IsPresent: false,
+                                WorkingHours: 0,
+                                TargetHours: TARGET_HOURS_PER_DAY,
+                                HoursDifference: -TARGET_HOURS_PER_DAY,
+                                AcceptedOrders: 0,
+                                RejectedOrders: 0,
+                                TargetOrders: TARGET_ORDERS_PER_DAY,
+                                OrdersDifference: -TARGET_ORDERS_PER_DAY,
+                                ShiftStatus: "Absent",
+                                PerformanceLevel: "Absent"
+                            ));
+                        }
+                        currentDate = currentDate.AddDays(1);
+                    }
+
+                    // Calculate rider summary metrics
+                    var targetHours = totalExpectedDays * TARGET_HOURS_PER_DAY;
+                    var targetOrders = totalExpectedDays * TARGET_ORDERS_PER_DAY;
+                    var attendanceRate = (decimal)workingDays / totalExpectedDays * 100;
+                    var hoursCompletionRate = targetHours > 0 ? (decimal)totalHours / (decimal)targetHours * 100 : 0;
+                    var ordersCompletionRate = targetOrders > 0 ? (decimal)totalOrders / targetOrders * 100 : 0;
+                    var overallScore = (attendanceRate + hoursCompletionRate + ordersCompletionRate) / 3;
+
+                    var periodSummary = new RiderPeriodSummary(
+                        TotalWorkingDays: workingDays,
+                        TotalAbsentDays: absentDays,
+                        TotalWorkingHours: totalHours,
+                        TotalTargetHours: targetHours,
+                        TotalHoursDifference: totalHours - targetHours,
+                        TotalAcceptedOrders: totalOrders,
+                        TotalRejectedOrders: totalRejected,
+                        TotalTargetOrders: targetOrders,
+                        TotalOrdersDifference: totalOrders - targetOrders,
+                        AverageHoursPerDay: workingDays > 0 ? totalHours / workingDays : 0,
+                        AverageOrdersPerDay: workingDays > 0 ? (decimal)totalOrders / workingDays : 0,
+                        AttendanceRate: attendanceRate,
+                        HoursCompletionRate: hoursCompletionRate,
+                        OrdersCompletionRate: ordersCompletionRate,
+                        OverallPerformanceScore: overallScore
+                    );
+
+                    riderDetails.Add(new RiderDailyPerformanceDetail(
+                        RiderId: rider.Id,
+                        IqamaNo: rider.EmployeeIqamaNo,
+                        RiderNameAR: rider.Employee.NameAR,
+                        RiderNameEN: rider.Employee.NameEN,
+                        WorkingId: rider.WorkingId ?? "0",
+                        DailyEntries: dailyEntries,
+                        PeriodSummary: periodSummary
+                    ));
+
+                    // Accumulate housing metrics
+                    housingTotalWorkingDays += workingDays;
+                    housingTotalAbsentDays += absentDays;
+                    housingTotalHours += totalHours;
+                    housingTotalTargetHours += targetHours;
+                    housingTotalOrders += totalOrders;
+                    housingTotalTargetOrders += targetOrders;
+                    attendanceRates.Add(attendanceRate);
+                    hoursCompletionRates.Add(hoursCompletionRate);
+                    ordersCompletionRates.Add(ordersCompletionRate);
+                }
+
+                // Sort riders by overall performance score
+                riderDetails = riderDetails
+                    .OrderByDescending(r => r.PeriodSummary.OverallPerformanceScore)
+                    .ToList();
+
+                // Calculate housing summary
+                var housingSummary = new HousingSummaryMetrics(
+                    TotalRiders: riderDetails.Count,
+                    TotalWorkingDays: housingTotalWorkingDays,
+                    TotalAbsentDays: housingTotalAbsentDays,
+                    TotalWorkingHours: housingTotalHours,
+                    TotalTargetHours: housingTotalTargetHours,
+                    TotalHoursDifference: housingTotalHours - housingTotalTargetHours,
+                    TotalAcceptedOrders: housingTotalOrders,
+                    TotalTargetOrders: housingTotalTargetOrders,
+                    TotalOrdersDifference: housingTotalOrders - housingTotalTargetOrders,
+                    AverageAttendanceRate: attendanceRates.Any() ? attendanceRates.Average() : 0,
+                    AverageHoursCompletionRate: hoursCompletionRates.Any() ? hoursCompletionRates.Average() : 0,
+                    AverageOrdersCompletionRate: ordersCompletionRates.Any() ? ordersCompletionRates.Average() : 0,
+                    OverallHousingScore: attendanceRates.Any()
+                        ? (attendanceRates.Average() + hoursCompletionRates.Average() + ordersCompletionRates.Average()) / 3
+                        : 0
+                );
+
+                housingDetails.Add(new HousingPerformanceDetail(
+                    HousingId: housingGroup.Key.HousingId,
+                    HousingName: housingGroup.Key.HousingName,
+                    Riders: riderDetails,
+                    HousingSummary: housingSummary
+                ));
+
+                // Accumulate global metrics
+                globalTotalWorkingDays += housingTotalWorkingDays;
+                globalTotalAbsentDays += housingTotalAbsentDays;
+                globalTotalHours += housingTotalHours;
+                globalTotalTargetHours += housingTotalTargetHours;
+                globalTotalOrders += housingTotalOrders;
+                globalTotalTargetOrders += housingTotalTargetOrders;
+            }
+
+            // Sort housings by overall score
+            housingDetails = housingDetails
+                .OrderByDescending(h => h.HousingSummary.OverallHousingScore)
+                .ToList();
+
+            // Calculate report summary
+            var totalRiders = housingDetails.Sum(h => h.Riders.Count);
+            var companyAttendanceRate = globalTotalTargetHours > 0
+                ? (decimal)(globalTotalWorkingDays) / (totalRiders * totalExpectedDays) * 100
+                : 0;
+            var companyHoursRate = globalTotalTargetHours > 0
+                ? (decimal)globalTotalHours / (decimal)globalTotalTargetHours * 100
+                : 0;
+            var companyOrdersRate = globalTotalTargetOrders > 0
+                ? (decimal)globalTotalOrders / globalTotalTargetOrders * 100
+                : 0;
+
+            var summary = new ReportSummary(
+                TotalHousings: housingDetails.Count,
+                TotalRiders: totalRiders,
+                TotalWorkingDays: globalTotalWorkingDays,
+                TotalAbsentDays: globalTotalAbsentDays,
+                GrandTotalHours: globalTotalHours,
+                GrandTotalTargetHours: globalTotalTargetHours,
+                GrandTotalOrders: globalTotalOrders,
+                GrandTotalTargetOrders: globalTotalTargetOrders,
+                CompanyWideAttendanceRate: companyAttendanceRate,
+                CompanyWideHoursCompletionRate: companyHoursRate,
+                CompanyWideOrdersCompletionRate: companyOrdersRate
+            );
+
+            var report = new HousingDetailedDailyPerformanceReport(
+                StartDate: startDate,
+                EndDate: endDate,
+                TotalExpectedDays: totalExpectedDays,
+                HousingDetails: housingDetails,
+                Summary: summary
+            );
+
+            return Result.Success(report);
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<HousingDetailedDailyPerformanceReport>(
+                new Error($"Error generating detailed performance report: {ex.Message}", "server_error", 500));
+        }
+    }
+
+    // Helper method to determine performance level
+    private string DeterminePerformanceLevel(
+        float actualHours,
+        int actualOrders,
+        float targetHours,
+        int targetOrders)
+    {
+        var hoursPercentage = actualHours / targetHours * 100;
+        var ordersPercentage = (decimal)actualOrders / targetOrders * 100;
+        var averagePercentage = (decimal)(hoursPercentage + (float)ordersPercentage) / 2;
+
+        return averagePercentage switch
+        {
+            >= 110m => "Excellent",
+            >= 90m => "Good",
+            >= 70m => "Average",
+            >= 50m => "Below Average",
+            _ => "Poor"
+        };
+    }
+
     public async Task<Result<List<HousingRiderDailyDetailReport>>> GetAllHousingsRiderDailyDetailReportAsync(
         DateOnly startDate,
         DateOnly endDate,

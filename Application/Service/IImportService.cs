@@ -52,6 +52,8 @@ public interface IImportService
         string uploadedBy,
         Action<int, int>? progressCallback = null);
 
+
+
 }
 // Application/DTOs/VehicleUsageCheckDtos.cs
 // Application/DTOs/VehicleUsageCheckDtos.cs

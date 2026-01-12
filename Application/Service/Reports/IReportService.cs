@@ -8,6 +8,13 @@ namespace Application.Service.Reports;
 
 public interface IReportService
 {
+
+    Task<Result<HousingDetailedDailyPerformanceReport>> GetHousingDetailedDailyPerformanceAsync(
+    DateOnly startDate,
+    DateOnly endDate,
+    CancellationToken cancellationToken = default);
+
+
     Task<Result<List<HousingRiderDailyDetailReport>>> GetAllHousingsRiderDailyDetailReportAsync(
     DateOnly startDate,
     DateOnly endDate,
@@ -246,7 +253,92 @@ public interface IReportService
     long riderIqamaNo,
     CancellationToken cancellationToken = default);
 }
+public record HousingDetailedDailyPerformanceReport(
+    DateOnly StartDate,
+    DateOnly EndDate,
+    int TotalExpectedDays,
+    List<HousingPerformanceDetail> HousingDetails,
+    ReportSummary Summary
+);
 
+public record HousingPerformanceDetail(
+    int HousingId,
+    string HousingName,
+    List<RiderDailyPerformanceDetail> Riders,
+    HousingSummaryMetrics HousingSummary
+);
+
+public record RiderDailyPerformanceDetail(
+    int RiderId,
+    long IqamaNo,
+    string RiderNameAR,
+    string RiderNameEN,
+    string WorkingId,
+    List<DailyPerformanceEntry> DailyEntries,
+    RiderPeriodSummary PeriodSummary
+);
+
+public record DailyPerformanceEntry(
+    DateOnly Date,
+    bool IsPresent,
+    float WorkingHours,
+    float TargetHours,
+    float HoursDifference,
+    int AcceptedOrders,
+    int RejectedOrders,
+    int TargetOrders,
+    int OrdersDifference,
+    string ShiftStatus,
+    string PerformanceLevel  // Excellent, Good, Average, Poor, Absent
+);
+
+public record RiderPeriodSummary(
+    int TotalWorkingDays,
+    int TotalAbsentDays,
+    float TotalWorkingHours,
+    float TotalTargetHours,
+    float TotalHoursDifference,
+    int TotalAcceptedOrders,
+    int TotalRejectedOrders,
+    int TotalTargetOrders,
+    int TotalOrdersDifference,
+    float AverageHoursPerDay,
+    decimal AverageOrdersPerDay,
+    decimal AttendanceRate,
+    decimal HoursCompletionRate,
+    decimal OrdersCompletionRate,
+    decimal OverallPerformanceScore
+);
+
+public record HousingSummaryMetrics(
+    int TotalRiders,
+    int TotalWorkingDays,
+    int TotalAbsentDays,
+    float TotalWorkingHours,
+    float TotalTargetHours,
+    float TotalHoursDifference,
+    int TotalAcceptedOrders,
+    int TotalTargetOrders,
+    int TotalOrdersDifference,
+    decimal AverageAttendanceRate,
+    decimal AverageHoursCompletionRate,
+    decimal AverageOrdersCompletionRate,
+    decimal OverallHousingScore
+);
+
+public record ReportSummary(
+    int TotalHousings,
+    int TotalRiders,
+    int TotalWorkingDays,
+    int TotalAbsentDays,
+    float GrandTotalHours,
+    float GrandTotalTargetHours,
+    int GrandTotalOrders,
+    int GrandTotalTargetOrders,
+    decimal CompanyWideAttendanceRate,
+    decimal CompanyWideHoursCompletionRate,
+    decimal CompanyWideOrdersCompletionRate
+);
 public record PeriodOrdersComparison(
     DateOnly Period1Start,
     DateOnly Period1End,
