@@ -89,6 +89,23 @@ public class RiderService(ApplicationDbcontext dbcontext,IRiderWorkingIdHistoryS
         var response = employees.Select(MapToResponse).ToList();
         return Result.Success<IEnumerable<RiderResponse>>(response);
     }
+    public async Task<Result<IEnumerable<RiderResponse>>> GetAllEmployee2()
+    {
+        var employees = await dbcontext.Employees
+                    .Where(e => !e.IsDeleted && !e.IsEmployee)
+            .AsNoTracking()
+            .Include(e => e.Housing)
+            .Include(e => e.RiderDetails)
+                .ThenInclude(rd => rd.Company)
+            .ToListAsync();
+
+        if (!employees.Any())
+            return Result.Failure<IEnumerable<RiderResponse>>(
+                new Error("NotFound", "No employees or riders found", 404));
+
+        var response = employees.Select(MapToResponse).ToList();
+        return Result.Success<IEnumerable<RiderResponse>>(response);
+    }
     public async Task<Result> CreateAsync(RiderRequest Request)
     {
         using var transaction = await dbcontext.Database.BeginTransactionAsync();

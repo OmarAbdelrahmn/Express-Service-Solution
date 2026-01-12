@@ -11,6 +11,7 @@ namespace Application.Service.Riders;
 public interface IRiderService
 {
     Task<Result<IEnumerable<RiderResponse>>> GetAllEmployee();
+    Task<Result<IEnumerable<RiderResponse>>> GetAllEmployee2();
     Task<Result<IEnumerable<RiderResponse>>> GetAllEmployeeNO();
     Task<Result<IEnumerable<RiderResponse>>> Get(long IqamaNo);
     Task<Result<RiderResponse>> Getbyid(long Id);
