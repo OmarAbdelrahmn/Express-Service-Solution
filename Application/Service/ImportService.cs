@@ -4167,9 +4167,11 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
         public string? LicenseNumber { get; set; }
     }
 
+    // Add this method to ImportService.cs - Replace the existing ImportVehicleAssignmentsAsync method
+
     public async Task<Result<VehicleAssignmentImportResponse>> ImportVehicleAssignmentsAsync(
-    IFormFile file,
-    string uploadedBy)
+        IFormFile file,
+        string uploadedBy)
     {
         if (file == null || file.Length == 0)
             return Result.Failure<VehicleAssignmentImportResponse>(
@@ -4186,7 +4188,8 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
         int failedRecords = 0;
         int employeeNotFound = 0;
         int vehicleNotFound = 0;
-        int vehicleUnavailable = 0;
+        int vehicleReassigned = 0;
+        int vehiclesReturned = 0;
 
         try
         {
@@ -4218,13 +4221,16 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
                 .Where(r => r.RowNumber() > headerRow.RowNumber())
                 .ToList();
 
+            Console.WriteLine($"[VehicleAssignment] Total rows to process: {dataRows.Count}");
+
+            // STEP 1: Parse all valid rows and collect vehicle assignments from Excel
+            var excelAssignments = new Dictionary<string, (long IqamaNo, VehicleAssignmentRowData RowData)>();
             var rowNumber = headerRow.RowNumber();
 
             foreach (var row in dataRows)
             {
                 rowNumber++;
 
-                using var transaction = await _dbcontext.Database.BeginTransactionAsync();
                 try
                 {
                     var rowData = ParseVehicleAssignmentRowData(row, columnMap, rowNumber);
@@ -4233,12 +4239,10 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
                     {
                         failedRecords++;
                         results.Add(new VehicleAssignmentRowResult(
-                            rowNumber,
-                            false,
+                            rowNumber, false,
                             rowData.IqamaNo?.ToString() ?? "N/A",
                             "N/A", "N/A",
-                            rowData.PlateNumberA ?? "N/A",
-                            "N/A",
+                            rowData.PlateNumberA ?? "N/A", "N/A",
                             false, false,
                             null, null,
                             rowData.Permission,
@@ -4250,9 +4254,122 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
                         continue;
                     }
 
-                    var warnings = new List<string>();
+                    // Normalize plate number
+                    var cleanPlateNumber = rowData.PlateNumberA!.Replace(" ", "").Trim().ToLower();
 
-                    // Trim spaces from identifiers
+                    // Store assignment (plate -> iqama mapping)
+                    if (!excelAssignments.ContainsKey(cleanPlateNumber))
+                    {
+                        excelAssignments[cleanPlateNumber] = (rowData.IqamaNo!.Value, rowData);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    errors.Add($"Row {rowNumber} parsing error: {ex.Message}");
+                }
+            }
+
+            Console.WriteLine($"[VehicleAssignment] Valid assignments in Excel: {excelAssignments.Count}");
+
+            // STEP 2: Get all vehicles currently assigned to riders in the database
+            var currentAssignments = await _dbcontext.RiderDetails
+                .Where(r => !string.IsNullOrEmpty(r.VehicleNumber))
+                .Include(r => r.Employee)
+                .Include(r => r.Vehicle)
+                .Select(r => new
+                {
+                    r.EmployeeIqamaNo,
+                    r.VehicleNumber,
+                    PlateNumberA = r.Vehicle!.PlateNumberA,
+                    EmployeeNameEN = r.Employee.NameEN,
+                    EmployeeNameAR = r.Employee.NameAR
+                })
+                .AsNoTracking()
+                .ToListAsync();
+
+            Console.WriteLine($"[VehicleAssignment] Current vehicle assignments in DB: {currentAssignments.Count}");
+
+            // STEP 3: Return vehicles that are NOT in the Excel (system cleanup)
+            foreach (var current in currentAssignments)
+            {
+                var cleanPlateNumber = current.PlateNumberA.Replace(" ", "").Trim().ToLower();
+
+                // If this vehicle is NOT in Excel, it should be returned
+                if (!excelAssignments.ContainsKey(cleanPlateNumber))
+                {
+                    using var transaction = await _dbcontext.Database.BeginTransactionAsync();
+
+                    try
+                    {
+                        Console.WriteLine($"[VehicleAssignment] Returning vehicle {current.VehicleNumber} from rider {current.EmployeeIqamaNo} (not in Excel)");
+
+                        // Find rider details
+                        var rider = await _dbcontext.RiderDetails
+                            .FirstOrDefaultAsync(r => r.EmployeeIqamaNo == current.EmployeeIqamaNo);
+
+                        if (rider != null)
+                        {
+                            // Deactivate current "Taken" status
+                            var takenStatus = await _dbcontext.RiderVehicleStatus
+                                .FirstOrDefaultAsync(s =>
+                                    s.VehicleNumber == current.VehicleNumber &&
+                                    s.EmployeeIqamaNo == current.EmployeeIqamaNo &&
+                                    s.IsActive &&
+                                    s.StatusType == VehicleStatusType.Taken);
+
+                            if (takenStatus != null)
+                            {
+                                takenStatus.IsActive = false;
+                                takenStatus.PermissionEndDate = DateTime.UtcNow.AddHours(3);
+                            }
+
+                            // Add "Returned" status
+                            _dbcontext.RiderVehicleStatus.Add(new RiderVehicleStatus
+                            {
+                                VehicleNumber = current.VehicleNumber,
+                                EmployeeIqamaNo = current.EmployeeIqamaNo,
+                                StatusType = VehicleStatusType.Returned,
+                                Reason = $"Auto-returned by system sync - Not in import sheet (by {uploadedBy})",
+                                IsActive = false,
+                                Timestamp = DateTime.UtcNow.AddHours(3)
+                            });
+
+                            // Remove vehicle from rider
+                            rider.VehicleNumber = null;
+
+                            await _dbcontext.SaveChangesAsync();
+                            await transaction.CommitAsync();
+
+                            vehiclesReturned++;
+
+                            Console.WriteLine($"[VehicleAssignment] ✓ Returned vehicle {current.VehicleNumber} from {current.EmployeeNameEN}");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        await transaction.RollbackAsync();
+                        errors.Add($"Failed to return vehicle {current.VehicleNumber} from {current.EmployeeIqamaNo}: {ex.Message}");
+                    }
+                }
+            }
+
+            // STEP 4: Process each assignment from Excel
+            rowNumber = headerRow.RowNumber();
+
+            foreach (var row in dataRows)
+            {
+                rowNumber++;
+
+                var rowData = ParseVehicleAssignmentRowData(row, columnMap, rowNumber);
+
+                if (!rowData.IsValid)
+                    continue; // Already handled in STEP 1
+
+                using var transaction = await _dbcontext.Database.BeginTransactionAsync();
+
+                try
+                {
+                    var warnings = new List<string>();
                     var cleanIqamaNo = rowData.IqamaNo!.Value;
                     var cleanPlateNumber = rowData.PlateNumberA!.Replace(" ", "").Trim();
 
@@ -4268,12 +4385,10 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
                         employeeNotFound++;
                         failedRecords++;
                         results.Add(new VehicleAssignmentRowResult(
-                            rowNumber,
-                            false,
+                            rowNumber, false,
                             cleanIqamaNo.ToString(),
                             "N/A", "N/A",
-                            cleanPlateNumber,
-                            "N/A",
+                            cleanPlateNumber, "N/A",
                             false, false,
                             null, null,
                             rowData.Permission,
@@ -4291,7 +4406,6 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
                     // Convert employee to rider if needed
                     if (employee.RiderDetails == null)
                     {
-                        // Get a default company (or use the first one, or make nullable)
                         var defaultCompany = await _dbcontext.Companies
                             .OrderBy(c => c.Id)
                             .FirstOrDefaultAsync();
@@ -4300,20 +4414,17 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
                         {
                             failedRecords++;
                             results.Add(new VehicleAssignmentRowResult(
-                                rowNumber,
-                                false,
+                                rowNumber, false,
                                 cleanIqamaNo.ToString(),
-                                employee.NameEN,
-                                employee.NameAR,
-                                cleanPlateNumber,
-                                "N/A",
+                                employee.NameEN, employee.NameAR,
+                                cleanPlateNumber, "N/A",
                                 false, false,
                                 null, null,
                                 rowData.Permission,
                                 rowData.PermissionStartDate,
                                 rowData.PermissionEndDate,
                                 warnings,
-                                "No company found in database - cannot create rider"
+                                "No company found - cannot create rider"
                             ));
                             await transaction.RollbackAsync();
                             continue;
@@ -4335,7 +4446,7 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
                         employee.RiderDetails = newRider;
                         wasConvertedToRider = true;
                         employeesConvertedToRiders++;
-                        warnings.Add($"Employee auto-converted to rider with WorkingId: {newRider.WorkingId}");
+                        warnings.Add($"Auto-converted to rider with WorkingId: {newRider.WorkingId}");
                     }
 
                     // Find vehicle
@@ -4347,111 +4458,123 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
                         vehicleNotFound++;
                         failedRecords++;
                         results.Add(new VehicleAssignmentRowResult(
-                            rowNumber,
-                            false,
+                            rowNumber, false,
                             cleanIqamaNo.ToString(),
-                            employee.NameEN,
-                            employee.NameAR,
-                            cleanPlateNumber,
-                            "N/A",
+                            employee.NameEN, employee.NameAR,
+                            cleanPlateNumber, "N/A",
                             wasConvertedToRider, false,
                             null, null,
                             rowData.Permission,
                             rowData.PermissionStartDate,
                             rowData.PermissionEndDate,
                             warnings,
-                            $"Vehicle with plate number '{cleanPlateNumber}' not found"
+                            $"Vehicle with plate '{cleanPlateNumber}' not found"
                         ));
                         await transaction.RollbackAsync();
                         continue;
                     }
 
-                    var isUnavailable = await _dbcontext.RiderVehicleStatus
-                        .AnyAsync(s => s.VehicleNumber == vehicle.VehicleNumber &&
-                                      s.IsActive &&
-                                      (s.StatusType == VehicleStatusType.Taken ||
-                                       s.StatusType == VehicleStatusType.Problem ||
-                                       s.StatusType == VehicleStatusType.Stolen ||
-                                       s.StatusType == VehicleStatusType.BreakUp));
+                    // CRITICAL: Check if vehicle is currently with ANOTHER rider
+                    var currentRider = await _dbcontext.RiderDetails
+                        .Include(r => r.Employee)
+                        .FirstOrDefaultAsync(r => r.VehicleNumber == vehicle.VehicleNumber);
 
-                    if (isUnavailable)
+                    if (currentRider != null && currentRider.EmployeeIqamaNo != cleanIqamaNo)
                     {
-                        vehicleUnavailable++;
-                        failedRecords++;
+                        // REASSIGNMENT: Vehicle is with different rider - return it first
+                        warnings.Add($"Vehicle reassigned from {currentRider.Employee.NameEN} to {employee.NameEN}");
+                        vehicleReassigned++;
 
-                        var currentStatus = await _dbcontext.RiderVehicleStatus
-                            .Where(s => s.VehicleNumber == vehicle.VehicleNumber && s.IsActive)
-                            .Select(s => s.StatusType.ToString())
-                            .FirstOrDefaultAsync();
+                        // Deactivate old rider's "Taken" status
+                        var oldTakenStatus = await _dbcontext.RiderVehicleStatus
+                            .FirstOrDefaultAsync(s =>
+                                s.VehicleNumber == vehicle.VehicleNumber &&
+                                s.EmployeeIqamaNo == currentRider.EmployeeIqamaNo &&
+                                s.IsActive &&
+                                s.StatusType == VehicleStatusType.Taken);
 
-                        results.Add(new VehicleAssignmentRowResult(
-                            rowNumber,
-                            false,
-                            cleanIqamaNo.ToString(),
-                            employee.NameEN,
-                            employee.NameAR,
-                            cleanPlateNumber,
-                            vehicle.VehicleNumber,
-                            wasConvertedToRider, false,
-                            null, null,
-                            rowData.Permission,
-                            rowData.PermissionStartDate,
-                            rowData.PermissionEndDate,
-                            warnings,
-                            $"Vehicle is not available (Status: {currentStatus})"
-                        ));
-                        await transaction.RollbackAsync();
-                        continue;
+                        if (oldTakenStatus != null)
+                        {
+                            oldTakenStatus.IsActive = false;
+                            oldTakenStatus.PermissionEndDate = DateTime.UtcNow.AddHours(3);
+                        }
+
+                        // Add "Returned" status for old rider
+                        _dbcontext.RiderVehicleStatus.Add(new RiderVehicleStatus
+                        {
+                            VehicleNumber = vehicle.VehicleNumber,
+                            EmployeeIqamaNo = currentRider.EmployeeIqamaNo,
+                            StatusType = VehicleStatusType.Returned,
+                            Reason = $"Reassigned to another rider (by {uploadedBy})",
+                            IsActive = false,
+                            Timestamp = DateTime.UtcNow.AddHours(3)
+                        });
+
+                        // Remove vehicle from old rider
+                        currentRider.VehicleNumber = null;
+
+                        Console.WriteLine($"[VehicleAssignment] Reassigned vehicle {vehicle.VehicleNumber} from {currentRider.Employee.NameEN} to {employee.NameEN}");
                     }
 
-                    if (!string.IsNullOrEmpty(employee.RiderDetails.VehicleNumber))
+                    // Handle if new employee/rider already has a different vehicle
+                    if (!string.IsNullOrEmpty(employee.RiderDetails.VehicleNumber) &&
+                        employee.RiderDetails.VehicleNumber != vehicle.VehicleNumber)
                     {
-                        warnings.Add($"Rider already has vehicle {employee.RiderDetails.VehicleNumber}, will be replaced");
+                        warnings.Add($"Rider's old vehicle {employee.RiderDetails.VehicleNumber} returned");
 
-                        // Return old vehicle
+                        // Deactivate old vehicle's "Taken" status
                         var oldVehicleStatus = await _dbcontext.RiderVehicleStatus
-                            .FirstOrDefaultAsync(s => s.VehicleNumber == employee.RiderDetails.VehicleNumber &&
-                                                     s.EmployeeIqamaNo == employee.IqamaNo &&
-                                                     s.IsActive &&
-                                                     s.StatusType == VehicleStatusType.Taken);
+                            .FirstOrDefaultAsync(s =>
+                                s.VehicleNumber == employee.RiderDetails.VehicleNumber &&
+                                s.EmployeeIqamaNo == employee.IqamaNo &&
+                                s.IsActive &&
+                                s.StatusType == VehicleStatusType.Taken);
 
                         if (oldVehicleStatus != null)
                         {
                             oldVehicleStatus.IsActive = false;
                             oldVehicleStatus.PermissionEndDate = DateTime.UtcNow.AddHours(3);
+                        }
 
-                            _dbcontext.RiderVehicleStatus.Add(new RiderVehicleStatus
-                            {
-                                VehicleNumber = employee.RiderDetails.VehicleNumber,
-                                EmployeeIqamaNo = employee.IqamaNo,
-                                StatusType = VehicleStatusType.Returned,
-                                Reason = "Replaced by bulk import",
-                                IsActive = false,
-                                Permission = oldVehicleStatus.Permission,
-                                PermissionStartDate = oldVehicleStatus.PermissionStartDate,
-                                PermissionEndDate = DateTime.UtcNow.AddHours(3),
-                                Timestamp = DateTime.UtcNow.AddHours(3)
-                            });
+                        // Add "Returned" status for old vehicle
+                        _dbcontext.RiderVehicleStatus.Add(new RiderVehicleStatus
+                        {
+                            VehicleNumber = employee.RiderDetails.VehicleNumber,
+                            EmployeeIqamaNo = employee.IqamaNo,
+                            StatusType = VehicleStatusType.Returned,
+                            Reason = $"Replaced with new vehicle (by {uploadedBy})",
+                            IsActive = false,
+                            Timestamp = DateTime.UtcNow.AddHours(3)
+                        });
+                    }
+
+                    // Deactivate ALL old statuses for this vehicle (Problem, Stolen, etc.)
+                    var oldStatuses = await _dbcontext.RiderVehicleStatus
+                        .Where(s => s.VehicleNumber == vehicle.VehicleNumber && s.IsActive)
+                        .ToListAsync();
+
+                    foreach (var status in oldStatuses)
+                    {
+                        status.IsActive = false;
+                        if (status.StatusType != VehicleStatusType.Returned)
+                        {
+                            warnings.Add($"Cleared vehicle status: {status.StatusType}");
                         }
                     }
 
-                    // Handle permission defaults
+                    // Handle permission
                     string finalPermission = rowData.Permission ?? "تصريح عام";
 
-                    // Check if permission contains "مرور" (traffic)
                     if (!string.IsNullOrWhiteSpace(rowData.Permission) &&
                         rowData.Permission.Contains("مرور"))
                     {
                         finalPermission = "تصريح مرور";
-
-                        // Set default dates if missing
                         rowData.PermissionStartDate ??= DateTime.UtcNow.AddHours(3);
                         rowData.PermissionEndDate ??= DateTime.UtcNow.AddHours(3).AddDays(30);
-
-                        warnings.Add("Traffic permission detected - using default 30-day period");
+                        warnings.Add("Traffic permission - 30-day default period");
                     }
 
-                    // Update vehicle location to housing name
+                    // Update vehicle location
                     string previousLocation = vehicle.Location;
                     string newLocation = employee.Housing?.Name ?? "غير محدد";
                     vehicle.Location = newLocation;
@@ -4459,13 +4582,13 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
                     // Assign vehicle to rider
                     employee.RiderDetails.VehicleNumber = vehicle.VehicleNumber;
 
-                    // Create vehicle status history
+                    // Create "Taken" status
                     _dbcontext.RiderVehicleStatus.Add(new RiderVehicleStatus
                     {
                         VehicleNumber = vehicle.VehicleNumber,
                         EmployeeIqamaNo = employee.IqamaNo,
                         StatusType = VehicleStatusType.Taken,
-                        Reason = $"Bulk import by {uploadedBy}",
+                        Reason = $"Assigned via bulk import (by {uploadedBy})",
                         IsActive = true,
                         Permission = finalPermission,
                         PermissionStartDate = rowData.PermissionStartDate ?? DateTime.UtcNow.AddHours(3),
@@ -4478,11 +4601,9 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
 
                     successfulAssignments++;
                     results.Add(new VehicleAssignmentRowResult(
-                        rowNumber,
-                        true,
+                        rowNumber, true,
                         cleanIqamaNo.ToString(),
-                        employee.NameEN,
-                        employee.NameAR,
+                        employee.NameEN, employee.NameAR,
                         cleanPlateNumber,
                         vehicle.VehicleNumber,
                         wasConvertedToRider,
@@ -4495,6 +4616,8 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
                         warnings,
                         null
                     ));
+
+                    Console.WriteLine($"[VehicleAssignment] ✓ Assigned {vehicle.VehicleNumber} to {employee.NameEN}");
                 }
                 catch (Exception ex)
                 {
@@ -4503,12 +4626,9 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
                     errors.Add($"Row {rowNumber}: {ex.Message}");
 
                     results.Add(new VehicleAssignmentRowResult(
-                        rowNumber,
-                        false,
-                        "N/A",
+                        rowNumber, false,
+                        "N/A", "N/A", "N/A",
                         "N/A", "N/A",
-                        "N/A",
-                        "N/A",
                         false, false,
                         null, null,
                         null, null, null,
@@ -4518,6 +4638,12 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
                 }
             }
 
+            Console.WriteLine($"[VehicleAssignment] Import complete:");
+            Console.WriteLine($"  - Successful: {successfulAssignments}");
+            Console.WriteLine($"  - Reassigned: {vehicleReassigned}");
+            Console.WriteLine($"  - Returned (not in Excel): {vehiclesReturned}");
+            Console.WriteLine($"  - Failed: {failedRecords}");
+
             var response = new VehicleAssignmentImportResponse(
                 TotalRecords: dataRows.Count,
                 SuccessfulAssignments: successfulAssignments,
@@ -4525,21 +4651,30 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
                 FailedRecords: failedRecords,
                 EmployeeNotFound: employeeNotFound,
                 VehicleNotFound: vehicleNotFound,
-                VehicleUnavailable: vehicleUnavailable,
+                VehicleUnavailable: vehicleReassigned, // Vehicles reassigned from one rider to another
                 Results: results,
                 Errors: errors,
                 ProcessedAt: DateTime.UtcNow.AddHours(3)
             );
 
+            // Add summary message about system sync
+            if (vehiclesReturned > 0)
+            {
+                errors.Insert(0, $"=== SYSTEM SYNC SUMMARY ===");
+                errors.Insert(1, $"Vehicles auto-returned (not in Excel): {vehiclesReturned}");
+                errors.Insert(2, $"Vehicles reassigned to different riders: {vehicleReassigned}");
+                errors.Insert(3, $"Total successful assignments from Excel: {successfulAssignments}");
+            }
+
             return Result.Success(response);
         }
         catch (Exception ex)
         {
+            Console.WriteLine($"[VehicleAssignment] FATAL ERROR: {ex}");
             return Result.Failure<VehicleAssignmentImportResponse>(
                 new Error("ProcessingError", $"Failed to process Excel file: {ex.Message}", 500));
         }
     }
-
     private IXLRow FindVehicleAssignmentHeaderRow(IXLWorksheet worksheet)
     {
         var knownColumns = new[]

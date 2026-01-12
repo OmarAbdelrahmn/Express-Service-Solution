@@ -651,6 +651,8 @@ public class ImportController(IImportService service , IBackgroundImportService 
     }
 
 
+
+
     [HttpPost("vehicle-assignments")]
     public async Task<IActionResult> ImportVehicleAssignmentsAsync(IFormFile file)
     {
@@ -675,13 +677,20 @@ public class ImportController(IImportService service , IBackgroundImportService 
                     totalRecords = result.Value.TotalRecords,
                     successfulAssignments = result.Value.SuccessfulAssignments,
                     employeesConvertedToRiders = result.Value.EmployeesConvertedToRiders,
+                    vehiclesReassigned = result.Value.VehicleUnavailable, // Now represents reassignments
                     failedRecords = result.Value.FailedRecords,
                     employeeNotFound = result.Value.EmployeeNotFound,
                     vehicleNotFound = result.Value.VehicleNotFound,
-                    vehicleUnavailable = result.Value.VehicleUnavailable,
                     successRate = result.Value.TotalRecords > 0
                         ? $"{(result.Value.SuccessfulAssignments * 100.0 / result.Value.TotalRecords):F1}%"
                         : "0%"
+                },
+                systemSync = new
+                {
+                    message = "System synchronized with Excel sheet",
+                    vehiclesInExcel = result.Value.SuccessfulAssignments,
+                    vehiclesReassigned = result.Value.VehicleUnavailable,
+                    note = "Vehicles not in Excel were automatically returned to available status"
                 }
             });
         }
@@ -705,6 +714,14 @@ public class ImportController(IImportService service , IBackgroundImportService 
             "PermissionStartDate / تاريخ بداية التصريح (Format: dd/MM/yyyy or yyyy-MM-dd)",
             "PermissionEndDate / تاريخ نهاية التصريح (Format: dd/MM/yyyy or yyyy-MM-dd)"
         },
+            criticalBehavior = new
+            {
+                systemSync = "The system will MATCH the Excel sheet exactly",
+                reassignment = "Vehicles with different riders will be reassigned automatically",
+                autoReturn = "Vehicles NOT in Excel will be auto-returned to available status",
+                statusClearing = "All vehicle problems/statuses will be cleared during assignment",
+                history = "Every change is tracked in RiderVehicleStatus history table"
+            },
             specialBehavior = new
             {
                 autoConversion = "Employees without RiderDetails will be automatically converted to riders",
@@ -713,32 +730,47 @@ public class ImportController(IImportService service , IBackgroundImportService 
                 trafficPermission = "If permission contains 'مرور', defaults to 30-day period",
                 replaceVehicle = "If rider already has a vehicle, it will be returned and replaced"
             },
-            permissionRules = new
+            examples = new
             {
-                defaultValue = "تصريح عام (if not provided)",
-                trafficDetection = "If contains 'مرور' → 'تصريح مرور' with 30-day default",
-                dateDefaults = "Traffic permissions get auto start/end dates if missing",
-                required = "Permission field is optional but recommended"
+                scenario1 = new
+                {
+                    name = "Reassignment",
+                    description = "Vehicle ABC-123 is with Rider A. Excel shows it should be with Rider B.",
+                    result = "Vehicle returned from Rider A (with history), then assigned to Rider B (with new history)"
+                },
+                scenario2 = new
+                {
+                    name = "Auto-Return",
+                    description = "Vehicle XYZ-789 is with Rider C. It's NOT in the Excel.",
+                    result = "Vehicle automatically returned from Rider C and marked as available"
+                },
+                scenario3 = new
+                {
+                    name = "Status Clearing",
+                    description = "Vehicle DEF-456 marked as 'Problem'. Excel shows it should be with Rider D.",
+                    result = "Problem status cleared, vehicle assigned to Rider D with fresh history"
+                }
             },
-            importBehavior = new
+            historyTracking = new
             {
-                employeeNotFound = "Skipped - must exist in database",
-                noRiderDetails = "Auto-creates RiderDetails with WorkingId='AUTO_{IqamaNo}'",
-                vehicleNotFound = "Skipped - must exist in database",
-                vehicleUnavailable = "Skipped - vehicle must be available (not taken/stolen/problem)",
-                housingMissing = "Location set to 'غير محدد' if employee has no housing",
-                duplicateAssignment = "Replaces old vehicle assignment"
+                takenRecords = "Created when vehicle assigned to rider (IsActive = true)",
+                returnedRecords = "Created when vehicle returned (IsActive = false)",
+                reassignmentRecords = "Both return and new taken records created",
+                permission = "Tracked with start/end dates for each assignment",
+                reason = "Every status change includes reason and who made it"
             },
             notes = new[]
             {
+            "⚠️ SYSTEM WILL MATCH EXCEL EXACTLY - Vehicles not in Excel will be auto-returned",
             "Spaces automatically removed from IqamaNo and PlateNumberA",
             "Employee must exist - will not create new employees",
             "Vehicle must exist - will not create new vehicles",
             "Employees without RiderDetails converted automatically",
             "Vehicle location updated to employee's housing name",
             "Permission containing 'مرور' gets special handling",
-            "All assignments tracked in RiderVehicleStatus history",
-            "Transactional - each row processed independently",
+            "All assignments and returns tracked in RiderVehicleStatus history",
+            "Problem/Stolen/BreakUp statuses cleared during assignment",
+            "Each row processed independently in transactions",
             "Maximum file size: 10MB"
         },
             exampleExcel = new
