@@ -4401,6 +4401,15 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
                         continue;
                     }
 
+                    if (!string.IsNullOrWhiteSpace(rowData.Phone))
+                    {
+                        if (employee.Phone != rowData.Phone)
+                        {
+                            warnings.Add($"Phone updated from '{employee.Phone}' to '{rowData.Phone}'");
+                            employee.Phone = rowData.Phone;
+                        }
+                    }
+
                     bool wasConvertedToRider = false;
 
                     // Convert employee to rider if needed
@@ -4729,6 +4738,9 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
         mapping.PermissionEndDateCol = FindColumn(cells,
             "PermissionEndDate", "Permission End Date", "تاريخ نهاية التصريح", "تاريخ النهاية", "نهاية التصريح");
 
+        mapping.PhoneCol = FindColumn(cells,
+             "PhoneNumber", "PhoneNumber", "رقم الجوال", "الجوال", "Mobile");
+
         var missing = new List<string>();
         if (mapping.IqamaNoCol == 0) missing.Add("Iqama Number");
         if (mapping.VehicleNumberCol == 0) missing.Add("Vehicle Number");  // ✅ Changed
@@ -4784,6 +4796,8 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
             // Parse optional fields
             data.Permission = GetCellValue(row, map.PermissionCol)?.Trim();
 
+            data.Phone = GetCellValue(row, map.PhoneCol)?.Trim();
+
             // Parse dates
             var startDateStr = GetCellValue(row, map.PermissionStartDateCol);
             if (!string.IsNullOrWhiteSpace(startDateStr))
@@ -4823,6 +4837,8 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
         public int PermissionCol { get; set; }
         public int PermissionStartDateCol { get; set; }
         public int PermissionEndDateCol { get; set; }
+        public int PhoneCol { get; set; }  // ✅ ADD THIS
+
     }
 
     internal class VehicleAssignmentRowData
@@ -4835,6 +4851,8 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
         public string? Permission { get; set; }
         public DateTime? PermissionStartDate { get; set; }
         public DateTime? PermissionEndDate { get; set; }
+        public string? Phone { get; set; }  // ✅ ADD THIS
+
     }
 
 

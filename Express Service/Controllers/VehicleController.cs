@@ -14,6 +14,33 @@ public class VehicleController(IVehicleService service) : ControllerBase
 {
     private readonly IVehicleService _service = service;
 
+
+    [HttpPost("sync-locations")]
+    //[Authorize(Roles = "Master,Admin")]
+    public async Task<IActionResult> SyncAllVehicleLocations()
+    {
+        var result = await _service.SyncAllVehicleLocationsAsync();
+        return result.IsSuccess
+            ? Ok(result.Value)
+            : result.ToProblem();
+    }
+
+
+    [HttpPost("switch")]
+    [Authorize(Roles = "Master,Admin")]
+    public async Task<IActionResult> SwitchVehicle(
+    [FromQuery] long IqamaNo,
+    [FromQuery] string newVehiclePlate,
+    [FromQuery] string reason,
+    [FromQuery] string permission,
+    [FromQuery] DateTime permissionEndDate)
+    {
+        var result = await _service.SwitchVehicleAsync(IqamaNo, newVehiclePlate, reason, permission, permissionEndDate);
+        return result.IsSuccess
+            ? Ok(new ApiMessage("Vehicle switched successfully. Old vehicle returned and new vehicle assigned."))
+            : result.ToProblem();
+    }
+
     [HttpPost]
     [Authorize(Roles = "Master,Admin")]
     public async Task<IActionResult> Create([FromBody] VehicleRequest request)

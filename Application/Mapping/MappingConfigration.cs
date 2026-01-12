@@ -13,8 +13,13 @@ public class MappingConfigration : IRegister
         //    .Map(des => des.UserName, src => $"{src.FirstName}{src.LastName}");
 
 
-        //config.NewConfig<RegisterRequest, ApplicataionUser>()
-        //    .Map(des => des.UserName, src => src.Email);
+        config.NewConfig<HousingResponse, Employees>()
+            .Map(des => des, src => src.Employees);
+        
+        
+        config.NewConfig<EmpolyeeResponse, Employees>()
+            .Map(des => des.NameAR, src => src.NameAR)
+            .Map(des => des.NameEN, src => src.NameEN);
 
         //config.NewConfig<(ApplicataionUser user, IList<string> userroles), UserResponse>()
         //    .Map(des => des, src => src.user)

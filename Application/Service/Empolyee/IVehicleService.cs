@@ -19,6 +19,11 @@ public interface IVehicleService
     Task<Result> DeleteAsync(string VehicleNumber, CancellationToken cancellationToken = default);
 
 
+    Task<Result> SwitchVehicleAsync(long IqamaNo, string newVehiclePlateNumber, string reason, string permission, DateTime permissionEndDate);
+    Task<Result<VehicleLocationSyncResponse>> SyncAllVehicleLocationsAsync();
+
+
+
     Task<Result> TakeVehicleAsync(long IqamaNo, string vehicleId, string reason, string permission, DateTime permissionEndDate);
     Task<Result> ReturnVehicleAsync(long IqamaNo, string vehicleId, string reason);
     Task<Result> ReportProblemAsync(long? IqamaNo, string vehicleId, string reason);
@@ -54,3 +59,104 @@ public interface IVehicleService
 
 
 
+
+// Add these classes at the end of your VehicleService.cs file or in a separate Contracts file
+
+/// <summary>
+/// Response for bulk vehicle location synchronization
+/// </summary>
+public class VehicleLocationSyncResponse
+{
+    /// <summary>
+    /// Total number of vehicles processed
+    /// </summary>
+    public int TotalVehicles { get; set; }
+
+    /// <summary>
+    /// Number of assigned vehicles that had their location updated to rider's housing
+    /// </summary>
+    public int AssignedVehiclesUpdated { get; set; }
+
+    /// <summary>
+    /// Number of unassigned vehicles that had their location updated to "الشركة"
+    /// </summary>
+    public int UnassignedVehiclesUpdated { get; set; }
+
+    /// <summary>
+    /// Number of vehicles that already had the correct location
+    /// </summary>
+    public int AlreadyCorrect { get; set; }
+
+    /// <summary>
+    /// Total number of vehicles updated
+    /// </summary>
+    public int TotalUpdated => AssignedVehiclesUpdated + UnassignedVehiclesUpdated;
+
+    /// <summary>
+    /// List of error messages if any vehicles failed to update
+    /// </summary>
+    public List<string> Errors { get; set; } = new();
+
+    /// <summary>
+    /// Whether the operation was successful
+    /// </summary>
+    public bool Success { get; set; }
+
+    /// <summary>
+    /// Summary message
+    /// </summary>
+    public string Message { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Response for single vehicle location update
+/// </summary>
+public class VehicleLocationUpdateResult
+{
+    /// <summary>
+    /// Vehicle number that was updated
+    /// </summary>
+    public string VehicleNumber { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Previous location
+    /// </summary>
+    public string OldLocation { get; set; } = string.Empty;
+
+    /// <summary>
+    /// New location after sync
+    /// </summary>
+    public string NewLocation { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Whether the vehicle is currently assigned to a rider
+    /// </summary>
+    public bool IsAssignedToRider { get; set; }
+
+    /// <summary>
+    /// Iqama number of the rider if assigned
+    /// </summary>
+    public long? RiderIqamaNo { get; set; }
+
+    /// <summary>
+    /// Name of the rider if assigned
+    /// </summary>
+    public string? RiderName { get; set; }
+
+    /// <summary>
+    /// Housing name if assigned
+    /// </summary>
+    public string? HousingName { get; set; }
+
+    /// <summary>
+    /// Whether the location was changed
+    /// </summary>
+    public bool LocationChanged { get; set; }
+
+    /// <summary>
+    /// Summary message
+    /// </summary>
+    public string Summary => LocationChanged
+        ? $"Location updated from '{OldLocation}' to '{NewLocation}'"
+        : $"Location already correct: '{NewLocation}'";
+}

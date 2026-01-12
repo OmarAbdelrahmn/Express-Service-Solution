@@ -142,6 +142,199 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
 
     #region Direct Vehicle Operations (Admin with Permission)
 
+    public async Task<Result> SwitchVehicleAsync(
+    long IqamaNo,
+    string newVehiclePlateNumber,
+    string reason,
+    string permission,
+    DateTime permissionEndDate)
+    {
+        using var transaction = await dbcontext.Database.BeginTransactionAsync();
+        try
+        {
+            // 1. Get rider details
+            var rider = await dbcontext.RiderDetails
+                .Include(r => r.Employee)
+                .FirstOrDefaultAsync(x => x.EmployeeIqamaNo == IqamaNo);
+
+            if (rider == null)
+                return Result.Failure(new Error("NoRider", "No rider found with this Iqama", 404));
+
+            if (rider.Employee.Status != "enable")
+                return Result.Failure(new Error("RiderDisabled", "Rider is disabled and cannot take a vehicle", 403));
+
+            // 2. Check if rider has a current vehicle
+            if (string.IsNullOrEmpty(rider.VehicleNumber))
+                return Result.Failure(new Error("NoCurrentVehicle",
+                    "Rider does not have a current vehicle to switch from. Use TakeVehicle instead.", 400));
+
+            var currentVehicleNumber = rider.VehicleNumber;
+
+            // 3. Get current vehicle's active status
+            var currentActiveStatus = await dbcontext.RiderVehicleStatus
+                .FirstOrDefaultAsync(s => s.VehicleNumber == currentVehicleNumber &&
+                                         s.EmployeeIqamaNo == IqamaNo &&
+                                         s.IsActive &&
+                                         s.StatusType == VehicleStatusType.Taken);
+
+            if (currentActiveStatus == null)
+                return Result.Failure(new Error("NoActiveStatus",
+                    "No active vehicle assignment found for current vehicle", 400));
+
+            // 4. Get the new vehicle
+            var newVehicle = await dbcontext.Vehicles
+                .FirstOrDefaultAsync(v => v.PlateNumberA == newVehiclePlateNumber);
+
+            if (newVehicle == null)
+                return Result.Failure(new Error("NoVehicle", "New vehicle not found", 404));
+
+            // 5. Validate new vehicle availability
+            var availabilityCheck = await ValidateVehicleAvailability(newVehicle.VehicleNumber, newVehiclePlateNumber);
+            if (!availabilityCheck.IsSuccess)
+                return availabilityCheck;
+
+            // 6. Check if trying to switch to the same vehicle
+            if (currentVehicleNumber == newVehicle.VehicleNumber)
+                return Result.Failure(new Error("SameVehicle",
+                    "Cannot switch to the same vehicle. Rider already has this vehicle.", 400));
+
+            // === STEP 1: Return current vehicle ===
+
+            // End permission for current vehicle
+            await EndPermission(currentActiveStatus);
+
+            // Create return status for current vehicle
+            dbcontext.RiderVehicleStatus.Add(new RiderVehicleStatus
+            {
+                EmployeeIqamaNo = IqamaNo,
+                VehicleNumber = currentVehicleNumber,
+                StatusType = VehicleStatusType.Returned,
+                Reason = $"Vehicle switch: {reason}",
+                IsActive = false,
+                Permission = currentActiveStatus.Permission,
+                PermissionStartDate = currentActiveStatus.PermissionStartDate,
+                PermissionEndDate = DateTime.UtcNow.AddHours(3)
+            });
+
+            // === STEP 2: Take new vehicle ===
+
+            // Update rider's vehicle assignment
+            rider.VehicleNumber = newVehicle.VehicleNumber;
+
+            // Create taken status for new vehicle
+            dbcontext.RiderVehicleStatus.Add(new RiderVehicleStatus
+            {
+                EmployeeIqamaNo = IqamaNo,
+                VehicleNumber = newVehicle.VehicleNumber,
+                StatusType = VehicleStatusType.Taken,
+                Reason = $"Vehicle switch: {reason}",
+                IsActive = true,
+                Permission = permission,
+                PermissionStartDate = DateTime.UtcNow.AddHours(3),
+                PermissionEndDate = permissionEndDate
+            });
+
+            await dbcontext.SaveChangesAsync();
+            await transaction.CommitAsync();
+
+            return Result.Success();
+        }
+        catch (Exception ex)
+        {
+            await transaction.RollbackAsync();
+            return Result.Failure(new Error("SwitchVehicleError",
+                $"Failed to switch vehicle: {ex.Message}", 500));
+        }
+    }
+
+
+    public async Task<Result<VehicleLocationSyncResponse>> SyncAllVehicleLocationsAsync()
+    {
+        using var transaction = await dbcontext.Database.BeginTransactionAsync();
+        try
+        {
+            int assignedVehiclesUpdated = 0;
+            int unassignedVehiclesUpdated = 0;
+            int alreadyCorrect = 0;
+            var errors = new List<string>();
+
+            // Get all vehicles
+            var allVehicles = await dbcontext.Vehicles.ToListAsync();
+
+            foreach (var vehicle in allVehicles)
+            {
+                try
+                {
+                    // Check if vehicle is assigned to a rider
+                    var rider = await dbcontext.RiderDetails
+                        .Include(r => r.Employee)
+                            .ThenInclude(e => e.Housing)
+                        .FirstOrDefaultAsync(r => r.VehicleNumber == vehicle.VehicleNumber);
+
+                    if (rider != null && rider.Employee.Housing != null)
+                    {
+                        // Vehicle is assigned to a rider with housing
+                        var housingName = rider.Employee.Housing.Name;
+
+                        if (vehicle.Location != housingName)
+                        {
+                            vehicle.Location = housingName;
+                            assignedVehiclesUpdated++;
+                        }
+                        else
+                        {
+                            alreadyCorrect++;
+                        }
+                    }
+                    else
+                    {
+                        // Vehicle is not assigned or rider has no housing - set to company
+                        const string companyLocation = "الشركة";
+
+                        if (vehicle.Location != companyLocation)
+                        {
+                            vehicle.Location = companyLocation;
+                            unassignedVehiclesUpdated++;
+                        }
+                        else
+                        {
+                            alreadyCorrect++;
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    errors.Add($"Error updating vehicle {vehicle.VehicleNumber}: {ex.Message}");
+                }
+            }
+
+            await dbcontext.SaveChangesAsync();
+            await transaction.CommitAsync();
+
+            var response = new VehicleLocationSyncResponse
+            {
+                TotalVehicles = allVehicles.Count,
+                AssignedVehiclesUpdated = assignedVehiclesUpdated,
+                UnassignedVehiclesUpdated = unassignedVehiclesUpdated,
+                AlreadyCorrect = alreadyCorrect,
+                Errors = errors,
+                Success = errors.Count == 0,
+                Message = errors.Count == 0
+                    ? "All vehicle locations synchronized successfully"
+                    : $"Synchronized with {errors.Count} errors"
+            };
+
+            return Result.Success(response);
+        }
+        catch (Exception ex)
+        {
+            await transaction.RollbackAsync();
+            return Result.Failure<VehicleLocationSyncResponse>(
+                new Error("SyncLocationError",
+                    $"Failed to sync vehicle locations: {ex.Message}", 500));
+        }
+    }
+
     public async Task<Result> TakeVehicleAsync(long IqamaNo, string PlateNumberA, string reason, string permission, DateTime permissionEndDate)
     {
         using var transaction = await dbcontext.Database.BeginTransactionAsync();
