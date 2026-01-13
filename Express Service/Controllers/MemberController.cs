@@ -413,4 +413,15 @@ public class MemberController(IMemberService housingService) : ControllerBase
             ? Ok(new { message = "Vehicle problem report submitted successfully" })
             : result.ToProblem();
     }
+
+
+    [HttpPost("vehicles/request-switch-vehicel")]
+    public async Task<IActionResult> Requestswitch([FromBody] MemberSwitchVehicleRequest request)
+    {
+        var managerIqamaNo = User.GetUserIqamaNo();
+        var result = await housingService.RequestSwitchVehicleForHousingAsync(managerIqamaNo, request);
+        return result.IsSuccess
+            ? Ok(new { message = "Vehicle problem report submitted successfully" })
+            : result.ToProblem();
+    }
 }

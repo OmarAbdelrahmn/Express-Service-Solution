@@ -9,6 +9,8 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using static Application.Service.Empolyee.IVehicleService;
+using static Application.Service.Member.IMemberService;
 
 namespace Application.Service.Empolyee;
 
@@ -247,6 +249,182 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
         }
     }
 
+    //public async Task<Result<IEnumerable<TempVehicleOperationResponse>>> GetPendingOperationsAsync()
+    //{
+    //    try
+    //    {
+    //        // Get pending operations that are NOT switch operations
+    //        // Switch operations have both VehicleNumber and VehiclePlateNumber set
+    //        var pendingOperations = await dbcontext.TempVehicleOperations
+    //            .Where(t => !t.IsResolved
+    //                && (string.IsNullOrEmpty(t.VehicleNumber)
+    //                    || string.IsNullOrEmpty(t.VehiclePlateNumber)))  // Exclude switch operations
+    //            .Include(t => t.Rider)
+    //                .ThenInclude(r => r.Employee)
+    //            .Include(t => t.Vehicle)
+    //            .OrderBy(t => t.RequestedAt)
+    //            .ToListAsync();
+
+    //        var responses = new List<TempVehicleOperationResponse>();
+
+    //        foreach (var operation in pendingOperations)
+    //        {
+    //            var validation = await ValidateOperation(operation);
+    //            responses.Add(MapToResponse(operation, validation));
+    //        }
+
+    //        return Result.Success<IEnumerable<TempVehicleOperationResponse>>(responses);
+    //    }
+    //    catch (Exception ex)
+    //    {
+    //        return Result.Failure<IEnumerable<TempVehicleOperationResponse>>(
+    //            new Error("GetPendingError", $"Failed to get pending operations: {ex.Message}", 500));
+    //    }
+    //}
+
+    public async Task<Result<List<PendingSwitchVehicleAdminResponse>>> GetAllPendingSwitchOperationsAsync()
+    {
+        try
+        {
+            var pendingSwitches = await dbcontext.TempVehicleOperations
+                .Include(t => t.Rider)
+                    .ThenInclude(r => r.Employee)
+                        .ThenInclude(e => e.Housing)
+                .Where(t => !t.IsResolved
+                    && !string.IsNullOrEmpty(t.VehicleNumber)
+                    && !string.IsNullOrEmpty(t.VehiclePlateNumber)
+                    && t.VehicleStatusType == VehicleStatusType.Taken)
+                .OrderByDescending(t => t.RequestedAt)
+                .ToListAsync();
+
+            var responses = new List<PendingSwitchVehicleAdminResponse>();
+
+            foreach (var operation in pendingSwitches)
+            {
+                var currentVehicle = await dbcontext.Vehicles
+                    .FirstOrDefaultAsync(v => v.VehicleNumber == operation.VehicleNumber);
+
+                var newVehicle = await dbcontext.Vehicles
+                    .FirstOrDefaultAsync(v => v.PlateNumberA == operation.VehiclePlateNumber);
+
+                if (currentVehicle == null || newVehicle == null)
+                    continue;
+
+                var validation = await ValidateSwitchOperation(
+                    operation.RiderIqamaNo,
+                    operation.VehicleNumber,
+                    newVehicle.VehicleNumber);
+
+                responses.Add(new PendingSwitchVehicleAdminResponse(
+                    operation.Id,
+                    operation.RiderIqamaNo,
+                    operation.Rider?.Employee?.NameAR ?? "Unknown",
+                    operation.Rider?.Employee?.NameEN ?? "Unknown",
+                    operation.Rider?.Employee?.Housing?.Name ?? "Unknown",
+                    operation.VehicleNumber,
+                    currentVehicle.PlateNumberA,
+                    newVehicle.VehicleNumber,
+                    operation.VehiclePlateNumber,
+                    operation.Reason ?? "No reason provided",
+                    operation.RequestedAt,
+                    operation.RequestedBy,
+                    validation
+                ));
+            }
+
+            return Result.Success(responses);
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<List<PendingSwitchVehicleAdminResponse>>(
+                new Error("GetPendingSwitchesError",
+                    $"Failed to get pending switch operations: {ex.Message}", 500));
+        }
+    }
+  
+    private async Task<VehicleSwitchValidation> ValidateSwitchOperation(
+       long riderIqamaNo,
+       string currentVehicleNumber,
+       string newVehicleNumber)
+    {
+        var errors = new List<string>();
+        var warnings = new List<string>();
+
+        // Check if rider still has the current vehicle
+        var rider = await dbcontext.RiderDetails
+            .Include(r => r.Employee)
+            .FirstOrDefaultAsync(r => r.EmployeeIqamaNo == riderIqamaNo);
+
+        if (rider == null)
+        {
+            errors.Add("Rider not found");
+            return new VehicleSwitchValidation(false, errors, warnings);
+        }
+
+        if (rider.Employee.Status.ToLower() != "enable")
+        {
+            errors.Add("Rider is not enabled");
+        }
+
+        if (rider.VehicleNumber != currentVehicleNumber)
+        {
+            errors.Add($"Rider no longer has the current vehicle. Current assignment: {rider.VehicleNumber ?? "None"}");
+        }
+
+        // Check if current vehicle has active taken status
+        var currentVehicleActive = await dbcontext.RiderVehicleStatus
+            .AnyAsync(s => s.VehicleNumber == currentVehicleNumber
+                && s.EmployeeIqamaNo == riderIqamaNo
+                && s.IsActive
+                && s.StatusType == VehicleStatusType.Taken);
+
+        if (!currentVehicleActive)
+        {
+            warnings.Add("No active 'Taken' status found for current vehicle");
+        }
+
+        // Check if new vehicle is still available
+        var newVehicleUnavailable = await dbcontext.RiderVehicleStatus
+            .AnyAsync(s => s.VehicleNumber == newVehicleNumber
+                && s.IsActive
+                && (s.StatusType == VehicleStatusType.Taken
+                    || s.StatusType == VehicleStatusType.Problem
+                    || s.StatusType == VehicleStatusType.Stolen
+                    || s.StatusType == VehicleStatusType.BreakUp));
+
+        if (newVehicleUnavailable)
+        {
+            errors.Add("New vehicle is no longer available");
+        }
+
+        // Check if vehicles are the same
+        if (currentVehicleNumber == newVehicleNumber)
+        {
+            errors.Add("Current and new vehicle are the same");
+        }
+
+        return new VehicleSwitchValidation(
+            IsValid: errors.Count == 0,
+            Errors: errors,
+            Warnings: warnings
+        );
+    }
+
+     public record PendingSwitchVehicleAdminResponse(
+        int Id,
+        long RiderIqamaNo,
+        string RiderNameAR,
+        string RiderNameEN,
+        string HousingName,
+        string CurrentVehicleNumber,
+        string CurrentVehiclePlate,
+        string NewVehicleNumber,
+        string NewVehiclePlate,
+        string Reason,
+        DateTime RequestedAt,
+        string RequestedBy,
+        VehicleSwitchValidation Validation
+    );
 
     public async Task<Result<VehicleLocationSyncResponse>> SyncAllVehicleLocationsAsync()
     {
@@ -1023,6 +1201,91 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
                 new Error("ResolveError", $"Failed to resolve operation: {ex.Message}", 500));
         }
     }
+    public async Task<Result> ResolveSwitchOperationAsync(VehicleSwitchResolutionRequest request)
+    {
+        using var transaction = await dbcontext.Database.BeginTransactionAsync();
+        try
+        {
+            if (request.Resolution != "Approved" && request.Resolution != "Rejected")
+                return Result.Failure(
+                    new Error("InvalidResolution", "Resolution must be 'Approved' or 'Rejected'", 400));
+
+            // Find the switch operation
+            var operation = await dbcontext.TempVehicleOperations
+                .Include(t => t.Rider)
+                    .ThenInclude(r => r.Employee)
+                .FirstOrDefaultAsync(t => t.Id == request.OperationId && !t.IsResolved);
+
+            if (operation == null)
+                return Result.Failure(
+                    new Error("NoOperation", "No pending operation found with this ID", 404));
+
+            // Verify this is a switch operation (both VehicleNumber and VehiclePlateNumber are set)
+            if (string.IsNullOrEmpty(operation.VehicleNumber) ||
+                string.IsNullOrEmpty(operation.VehiclePlateNumber))
+                return Result.Failure(
+                    new Error("NotSwitchOperation", "This is not a switch operation", 400));
+
+            var currentVehicleNumber = operation.VehicleNumber;
+            var newVehiclePlate = operation.VehiclePlateNumber;
+
+            // Get the new vehicle details
+            var newVehicle = await dbcontext.Vehicles
+                .FirstOrDefaultAsync(v => v.PlateNumberA == newVehiclePlate);
+
+            if (newVehicle == null)
+                return Result.Failure(
+                    new Error("NewVehicleNotFound", "New vehicle not found", 404));
+
+            if (request.Resolution == "Approved")
+            {
+                // Validate permission data
+                if (string.IsNullOrWhiteSpace(request.Permission) || !request.PermissionEndDate.HasValue)
+                {
+                    return Result.Failure(
+                        new Error("PermissionRequired",
+                            "Permission and PermissionEndDate are required when approving switch requests", 400));
+                }
+
+                // Execute the switch
+                var executeResult = await ExecuteSwitchOperation(
+                    operation,
+                    newVehicle.VehicleNumber,
+                    request.Permission,
+                    request.PermissionEndDate.Value);
+
+                if (!executeResult.IsSuccess)
+                {
+                    return Result.Failure(
+                        new Error("ExecutionFailed",
+                            $"Failed to execute switch: {executeResult.Error.Description}", 400));
+                }
+
+                // Store permission data in the operation record
+                operation.Permission = request.Permission;
+                operation.PermissionEndDate = request.PermissionEndDate.Value;
+            }
+
+            // Mark as resolved
+            operation.IsResolved = true;
+            operation.Resolution = request.Resolution;
+            operation.ResolvedBy = request.ResolvedBy;
+            operation.ResolvedAt = DateTime.UtcNow.AddHours(3);
+            operation.AdminNotes = request.Note;
+
+            await dbcontext.SaveChangesAsync();
+            await transaction.CommitAsync();
+
+            return Result.Success();
+        }
+        catch (Exception ex)
+        {
+            await transaction.RollbackAsync();
+            return Result.Failure(
+                new Error("ResolveSwitchError", $"Failed to resolve switch operation: {ex.Message}", 500));
+        }
+    }
+
     #endregion
 
     #region Query Operations
@@ -2333,6 +2596,114 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
     }
 
     #endregion
+
+
+    // Add to VehicleService class
+
+
+    private async Task<Result> ExecuteSwitchOperation(
+        TempVehicleOperation operation,
+        string newVehicleNumber,
+        string permission,
+        DateTime permissionEndDate)
+    {
+        try
+        {
+            var rider = await dbcontext.RiderDetails
+                .Include(r => r.Employee)
+                .FirstOrDefaultAsync(r => r.EmployeeIqamaNo == operation.RiderIqamaNo);
+
+            if (rider == null)
+                return Result.Failure(new Error("NoRider", "Rider not found", 404));
+
+            if (rider.Employee.Status != "enable")
+                return Result.Failure(new Error("RiderDisabled",
+                    "Rider is disabled and cannot switch vehicles", 403));
+
+            var currentVehicleNumber = operation.VehicleNumber;
+
+            // Verify rider still has the current vehicle
+            if (rider.VehicleNumber != currentVehicleNumber)
+                return Result.Failure(new Error("VehicleMismatch",
+                    $"Rider no longer has the current vehicle. Expected: {currentVehicleNumber}, Actual: {rider.VehicleNumber}", 400));
+
+            // Get current vehicle's active taken status
+            var currentActiveStatus = await dbcontext.RiderVehicleStatus
+                .FirstOrDefaultAsync(s => s.VehicleNumber == currentVehicleNumber
+                    && s.EmployeeIqamaNo == operation.RiderIqamaNo
+                    && s.IsActive
+                    && s.StatusType == VehicleStatusType.Taken);
+
+            if (currentActiveStatus == null)
+                return Result.Failure(new Error("NoActiveStatus",
+                    "No active vehicle assignment found for current vehicle", 400));
+
+            // Verify new vehicle is still available
+            var newVehicleUnavailable = await dbcontext.RiderVehicleStatus
+                .AnyAsync(s => s.VehicleNumber == newVehicleNumber
+                    && s.IsActive
+                    && (s.StatusType == VehicleStatusType.Taken
+                        || s.StatusType == VehicleStatusType.Problem
+                        || s.StatusType == VehicleStatusType.Stolen
+                        || s.StatusType == VehicleStatusType.BreakUp));
+
+            if (newVehicleUnavailable)
+                return Result.Failure(new Error("NewVehicleUnavailable",
+                    "New vehicle is no longer available", 400));
+
+            // Check if trying to switch to the same vehicle
+            if (currentVehicleNumber == newVehicleNumber)
+                return Result.Failure(new Error("SameVehicle",
+                    "Cannot switch to the same vehicle", 400));
+
+            // === STEP 1: Return current vehicle ===
+
+            // End permission for current vehicle
+            await EndPermission(currentActiveStatus);
+
+            // Create return status for current vehicle
+            dbcontext.RiderVehicleStatus.Add(new RiderVehicleStatus
+            {
+                EmployeeIqamaNo = operation.RiderIqamaNo,
+                VehicleNumber = currentVehicleNumber,
+                StatusType = VehicleStatusType.Returned,
+                Reason = operation.Reason ?? "Vehicle switch",
+                IsActive = false,
+                Permission = currentActiveStatus.Permission,
+                PermissionStartDate = currentActiveStatus.PermissionStartDate,
+                PermissionEndDate = DateTime.UtcNow.AddHours(3)
+            });
+
+            // === STEP 2: Take new vehicle ===
+
+            // Update rider's vehicle assignment
+            rider.VehicleNumber = newVehicleNumber;
+
+            // Create taken status for new vehicle with NEW permission
+            dbcontext.RiderVehicleStatus.Add(new RiderVehicleStatus
+            {
+                EmployeeIqamaNo = operation.RiderIqamaNo,
+                VehicleNumber = newVehicleNumber,
+                StatusType = VehicleStatusType.Taken,
+                Reason = operation.Reason ?? "Vehicle switch",
+                IsActive = true,
+                Permission = permission,  // NEW permission from admin
+                PermissionStartDate = DateTime.UtcNow.AddHours(3),
+                PermissionEndDate = permissionEndDate  // NEW permission end date from admin
+            });
+
+            await dbcontext.SaveChangesAsync();
+
+            return Result.Success();
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure(new Error("ExecuteSwitchError",
+                $"Failed to execute vehicle switch: {ex.Message}", 500));
+        }
+    }
+
+
 
 
 

@@ -10,6 +10,47 @@ namespace Application.Service.Member;
 
 public interface IMemberService
 {
+    // Add to IMemberService interface
+
+    /// <summary>
+    /// Request to switch rider's current vehicle to a new one
+    /// </summary>
+    Task<Result> RequestSwitchVehicleForHousingAsync(
+        long managerIqamaNo,
+        MemberSwitchVehicleRequest request);
+
+    /// <summary>
+    /// Get all pending switch vehicle requests for the housing
+    /// </summary>
+    Task<Result<List<PendingSwitchVehicleResponse>>> GetPendingSwitchVehicleRequests(
+        long managerIqamaNo);
+
+    // Request DTOs at the end of IMemberService.cs
+    public record MemberSwitchVehicleRequest(
+        long RiderIqamaNo,
+        string NewVehiclePlate,
+        string Reason
+    );
+
+    public record PendingSwitchVehicleResponse(
+        int Id,
+        long RiderIqamaNo,
+        string RiderName,
+        string CurrentVehicleNumber,
+        string CurrentVehiclePlate,
+        string NewVehicleNumber,
+        string NewVehiclePlate,
+        string Reason,
+        DateTime RequestedAt,
+        string RequestedBy,
+        VehicleSwitchValidation Validation
+    );
+
+    public record VehicleSwitchValidation(
+        bool IsValid,
+        List<string> Errors,
+        List<string> Warnings
+    );
     Task<Result> RequestFixVehicleProblemForHousingAsync(long managerIqamaNo, MemberFixVehicleRequest request);
     Task<Result<List<HousingProblemVehicleResponse>>> GetHousingProblemVehicles(long managerIqamaNo);
     Task<Result<HousingRiderDailyDetailReport>> GetHousingRiderDailyDetailReportAsync(

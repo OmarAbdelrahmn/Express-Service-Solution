@@ -55,6 +55,23 @@ public interface IVehicleService
     Task<Result> ResolveOperationAsync(VehicleResolutionRequest request);
 
 
+
+    // Add to IVehicleService interface
+
+    /// <summary>
+    /// Approve or reject a vehicle switch request (Admin only)
+    /// </summary>
+    Task<Result> ResolveSwitchOperationAsync(VehicleSwitchResolutionRequest request);
+
+    // Add at the end of IVehicleService.cs
+    public record VehicleSwitchResolutionRequest(
+        int OperationId,
+        string Resolution, // "Approved" or "Rejected"
+        string ResolvedBy,
+        string? Note,
+        string? Permission, // Required when approving
+        DateTime? PermissionEndDate // Required when approving
+    );
 }
 
 

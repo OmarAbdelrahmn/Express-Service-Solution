@@ -2445,6 +2445,14 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
             return Result.Failure(HousingMemberErrors.RiderNotInHousing);
         }
 
+        if (!string.IsNullOrEmpty(rider.VehicleNumber))
+            return Result.Failure(new Error(
+              "rider has vehicle already",
+              "rider has vehicle already",
+              404
+          ));
+
+
         // Verify vehicle exists and get its assignment
         var vehicle = await context.Vehicles
             .FirstOrDefaultAsync(v => v.PlateNumberA == request.VehiclePlate);
@@ -2658,11 +2666,23 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
             .AnyAsync(s => s.VehicleNumber == vehicle.VehicleNumber
                 && s.IsActive
                 && s.StatusType == VehicleStatusType.Problem);
+  
+        var existingreport = await context.TempVehicleOperations
+            .AnyAsync(s => s.VehicleNumber == vehicle.VehicleNumber
+                && !s.IsResolved);
 
         if (existingProblem)
         {
             return Result.Failure(new Error(
                 "AlreadyReported",
+                "This vehicle already has an active problem reported",
+                400
+            ));
+        }
+        if (existingreport)
+        {
+            return Result.Failure(new Error(
+                "already reported",
                 "This vehicle already has an active problem reported",
                 400
             ));
@@ -2804,6 +2824,272 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
         await context.SaveChangesAsync();
 
         return Result.Success();
+    }
+
+
+    // Add to MemberService class
+
+    public async Task<Result> RequestSwitchVehicleForHousingAsync(
+        long managerIqamaNo,
+        MemberSwitchVehicleRequest request)
+    {
+        var housingResult = await GetManagedHousing(managerIqamaNo);
+        if (housingResult.IsFailure)
+            return housingResult;
+
+        var housing = housingResult.Value;
+        var employeeIqamas = housing.Employees.Where(e => !e.IsDeleted).Select(e => e.IqamaNo).ToList();
+
+        // Verify rider belongs to this housing
+        var rider = await context.RiderDetails
+            .Include(r => r.Employee)
+            .FirstOrDefaultAsync(r => r.EmployeeIqamaNo == request.RiderIqamaNo
+                && employeeIqamas.Contains(r.EmployeeIqamaNo));
+
+        if (rider is null)
+            return Result.Failure(HousingMemberErrors.RiderNotInHousing);
+
+        // Verify rider has a current vehicle
+        if (string.IsNullOrEmpty(rider.VehicleNumber))
+            return Result.Failure(HousingMemberErrors.NoCurrentVehicle);
+
+        var currentVehicleNumber = rider.VehicleNumber;
+
+        // Get current vehicle details
+        var currentVehicle = await context.Vehicles
+            .FirstOrDefaultAsync(v => v.VehicleNumber == currentVehicleNumber);
+
+        if (currentVehicle is null)
+            return Result.Failure(new Error(
+                "CurrentVehicleNotFound",
+                "Current vehicle not found in system",
+                404
+            ));
+
+        // Verify new vehicle exists
+        var newVehicle = await context.Vehicles
+            .Include(c=>c.RiderDetails)
+            .FirstOrDefaultAsync(v => v.PlateNumberA == request.NewVehiclePlate);
+
+        if (newVehicle is null)
+            return Result.Failure(new Error(
+                "VehicleNotFound",
+                "New vehicle not found",
+                404
+            ));
+
+        // Check if trying to switch to the same vehicle
+        if (currentVehicleNumber == newVehicle.VehicleNumber)
+            return Result.Failure(HousingMemberErrors.SameVehicleSwitch);
+
+        if(newVehicle.RiderDetails is not null)
+            return Result.Failure(new Error("vehicle has rider","vehicle has a rider already",400));
+
+
+        // Verify new vehicle belongs to housing or is available
+        var newVehicleInHousing = await context.RiderDetails
+            .AnyAsync(r => employeeIqamas.Contains(r.EmployeeIqamaNo)
+                && r.VehicleNumber == newVehicle.VehicleNumber);
+
+        if (!newVehicleInHousing && !string.IsNullOrEmpty(newVehicle.Location))
+        {
+            if (!newVehicle.Location.Contains(housing.Name, StringComparison.OrdinalIgnoreCase))
+            {
+                return Result.Failure(new Error(
+                    "VehicleNotInHousing",
+                    "The new vehicle does not belong to your housing",
+                    403
+                ));
+            }
+        }
+
+        // Check if new vehicle is available
+        var isNewVehicleAvailable = !await context.RiderVehicleStatus
+            .AnyAsync(s => s.VehicleNumber == newVehicle.VehicleNumber
+                && s.IsActive
+                && (s.StatusType == VehicleStatusType.Taken
+                    || s.StatusType == VehicleStatusType.Problem
+                    || s.StatusType == VehicleStatusType.Stolen
+                    || s.StatusType == VehicleStatusType.BreakUp));
+
+        if (!isNewVehicleAvailable)
+            return Result.Failure(HousingMemberErrors.NewVehicleNotAvailable);
+
+        // Check if there's already a pending switch request for this rider
+        var existingSwitchRequest = await context.TempVehicleOperations
+            .AnyAsync(t => t.RiderIqamaNo == request.RiderIqamaNo
+                && !t.IsResolved
+                && t.VehicleNumber == currentVehicleNumber  // Current vehicle stored in VehicleNumber
+                && !string.IsNullOrEmpty(t.VehiclePlateNumber)); // New vehicle in VehiclePlateNumber
+
+        if (existingSwitchRequest)
+            return Result.Failure(HousingMemberErrors.PendingSwitchRequest);
+
+        // Get the manager name
+        var manager = await userManager.FindByNameAsync(managerIqamaNo.ToString());
+        if (manager is null)
+            return Result.Failure(UserErrors.UserNotFound);
+
+        var t = long.Parse(manager.UserName!);
+        var name = await context.Employees
+            .Where(e => e.IqamaNo == t)
+            .Select(e => e.NameAR)
+            .FirstOrDefaultAsync();
+
+        // Create the switch vehicle operation request
+        // IMPORTANT: We use a special pattern to indicate this is a switch:
+        // - VehicleNumber = Current vehicle (that will be returned)
+        // - VehiclePlateNumber = New vehicle plate (that will be taken)
+        // - VehicleStatusType = Taken (to indicate taking the new vehicle)
+        var operation = new TempVehicleOperation
+        {
+            RiderIqamaNo = request.RiderIqamaNo,
+            VehicleNumber = currentVehicleNumber,  // Current vehicle to be returned
+            VehiclePlateNumber = request.NewVehiclePlate,  // New vehicle to be taken
+            VehicleStatusType = VehicleStatusType.switched,  // Indicates this is for taking a vehicle
+            Reason = $"Switch request: {request.Reason}",
+            RequestedAt = DateTime.UtcNow.AddHours(3),
+            RequestedBy = name!,
+            IsResolved = false
+        };
+
+        await context.TempVehicleOperations.AddAsync(operation);
+        await context.SaveChangesAsync();
+
+        return Result.Success();
+    }
+
+    public async Task<Result<List<PendingSwitchVehicleResponse>>> GetPendingSwitchVehicleRequests(
+        long managerIqamaNo)
+    {
+        var housingResult = await GetManagedHousing(managerIqamaNo);
+        if (housingResult.IsFailure)
+            return Result.Failure<List<PendingSwitchVehicleResponse>>(housingResult.Error);
+
+        var housing = housingResult.Value;
+        var employeeIqamas = housing.Employees.Where(e => !e.IsDeleted).Select(e => e.IqamaNo).ToList();
+
+        // Get all pending operations for this housing where:
+        // - VehicleNumber is set (current vehicle)
+        // - VehiclePlateNumber is set (new vehicle)
+        // - This indicates a switch operation
+        var pendingSwitches = await context.TempVehicleOperations
+            .Include(t => t.Rider)
+                .ThenInclude(r => r.Employee)
+            .Where(t => !t.IsResolved
+                && employeeIqamas.Contains(t.RiderIqamaNo)
+                && !string.IsNullOrEmpty(t.VehicleNumber)
+                && !string.IsNullOrEmpty(t.VehiclePlateNumber)
+                && t.VehicleStatusType == VehicleStatusType.Taken)
+            .OrderByDescending(t => t.RequestedAt)
+            .ToListAsync();
+
+        var responses = new List<PendingSwitchVehicleResponse>();
+
+        foreach (var operation in pendingSwitches)
+        {
+            // Get current vehicle details
+            var currentVehicle = await context.Vehicles
+                .FirstOrDefaultAsync(v => v.VehicleNumber == operation.VehicleNumber);
+
+            // Get new vehicle details
+            var newVehicle = await context.Vehicles
+                .FirstOrDefaultAsync(v => v.PlateNumberA == operation.VehiclePlateNumber);
+
+            if (currentVehicle == null || newVehicle == null)
+                continue;
+
+            // Validate the switch operation
+            var validation = await ValidateSwitchOperation(
+                operation.RiderIqamaNo,
+                operation.VehicleNumber,
+                newVehicle.VehicleNumber);
+
+            responses.Add(new PendingSwitchVehicleResponse(
+                operation.Id,
+                operation.RiderIqamaNo,
+                operation.Rider?.Employee?.NameAR ?? "Unknown",
+                operation.VehicleNumber,
+                currentVehicle.PlateNumberA,
+                newVehicle.VehicleNumber,
+                operation.VehiclePlateNumber,
+                operation.Reason ?? "No reason provided",
+                operation.RequestedAt,
+                operation.RequestedBy,
+                validation
+            ));
+        }
+
+        return Result.Success(responses);
+    }
+
+    // Helper method to validate switch operations
+    private async Task<VehicleSwitchValidation> ValidateSwitchOperation(
+        long riderIqamaNo,
+        string currentVehicleNumber,
+        string newVehicleNumber)
+    {
+        var errors = new List<string>();
+        var warnings = new List<string>();
+
+        // Check if rider still has the current vehicle
+        var rider = await context.RiderDetails
+            .Include(r => r.Employee)
+            .FirstOrDefaultAsync(r => r.EmployeeIqamaNo == riderIqamaNo);
+
+        if (rider == null)
+        {
+            errors.Add("Rider not found");
+            return new VehicleSwitchValidation(false, errors, warnings);
+        }
+
+        if (rider.Employee.Status.ToLower() != "enable")
+        {
+            errors.Add("Rider is not enabled");
+        }
+
+        if (rider.VehicleNumber != currentVehicleNumber)
+        {
+            errors.Add($"Rider no longer has the current vehicle. Current assignment: {rider.VehicleNumber ?? "None"}");
+        }
+
+        // Check if current vehicle has active taken status
+        var currentVehicleActive = await context.RiderVehicleStatus
+            .AnyAsync(s => s.VehicleNumber == currentVehicleNumber
+                && s.EmployeeIqamaNo == riderIqamaNo
+                && s.IsActive
+                && s.StatusType == VehicleStatusType.Taken);
+
+        if (!currentVehicleActive)
+        {
+            warnings.Add("No active 'Taken' status found for current vehicle");
+        }
+
+        // Check if new vehicle is still available
+        var newVehicleUnavailable = await context.RiderVehicleStatus
+            .AnyAsync(s => s.VehicleNumber == newVehicleNumber
+                && s.IsActive
+                && (s.StatusType == VehicleStatusType.Taken
+                    || s.StatusType == VehicleStatusType.Problem
+                    || s.StatusType == VehicleStatusType.Stolen
+                    || s.StatusType == VehicleStatusType.BreakUp));
+
+        if (newVehicleUnavailable)
+        {
+            errors.Add("New vehicle is no longer available");
+        }
+
+        // Check if vehicles are the same
+        if (currentVehicleNumber == newVehicleNumber)
+        {
+            errors.Add("Current and new vehicle are the same");
+        }
+
+        return new VehicleSwitchValidation(
+            IsValid: errors.Count == 0,
+            Errors: errors,
+            Warnings: warnings
+        );
     }
 }
 

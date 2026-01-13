@@ -77,6 +77,19 @@ public class ShiftController(IRiderShiftService service) : ControllerBase
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
 
+
+    [HttpPost("update")]
+    public async Task<IActionResult> updateShiftsFromExcelAsync(IFormFile excelFile)
+    {
+        if (excelFile == null || excelFile.Length == 0)
+        {
+            return BadRequest("No file uploaded.");
+        }
+        using var stream = excelFile.OpenReadStream();
+        var result = await service.UpdateShiftsFromExcelAsync(stream);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
     [HttpDelete("date")]
  
     public async Task<IActionResult> DeleteShiftsByDateAsync([FromQuery] DateOnly shiftDate, CancellationToken cancellationToken)

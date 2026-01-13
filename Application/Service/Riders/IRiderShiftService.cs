@@ -42,9 +42,14 @@ public interface IRiderShiftService
         string workingId,
         CancellationToken cancellationToken = default);
 
+    Task<Result<BulkUpdateResult>> UpdateShiftsFromExcelAsync(
+        Stream excelStream,
+        CancellationToken cancellationToken = default);
+
     // Response DTO
-   
+
 }
+
 public record AcceptedOrdersResponse(
        int RiderId,
        string WorkingId,

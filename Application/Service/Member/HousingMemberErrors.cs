@@ -72,4 +72,28 @@ public static class HousingMemberErrors
         "Invalid request type",
         StatusCodes.Status400BadRequest
     );
+
+    public static readonly Error SameVehicleSwitch = new(
+    "HousingMember.SameVehicleSwitch",
+    "Cannot switch to the same vehicle",
+    StatusCodes.Status400BadRequest
+);
+
+    public static readonly Error NoCurrentVehicle = new(
+        "HousingMember.NoCurrentVehicle",
+        "Rider does not have a current vehicle to switch from",
+        StatusCodes.Status400BadRequest
+    );
+
+    public static readonly Error NewVehicleNotAvailable = new(
+        "HousingMember.NewVehicleNotAvailable",
+        "The requested new vehicle is not available",
+        StatusCodes.Status400BadRequest
+    );
+
+    public static readonly Error PendingSwitchRequest = new(
+        "HousingMember.PendingSwitchRequest",
+        "There is already a pending switch request for this rider",
+        StatusCodes.Status400BadRequest
+    );
 }

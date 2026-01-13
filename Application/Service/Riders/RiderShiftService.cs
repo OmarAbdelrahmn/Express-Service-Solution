@@ -5,6 +5,7 @@ using DocumentFormat.OpenXml.Spreadsheet;
 using Domain;
 using Domain.Entities;
 using Microsoft.EntityFrameworkCore;
+using System.Globalization;
 
 
 namespace Application.Service.Riders;
@@ -1615,6 +1616,372 @@ public class RiderShiftService(ApplicationDbcontext dbcontext , IRiderWorkingIdH
         }
     }
 
+
+    public async Task<Result<BulkUpdateResult>> UpdateShiftsFromExcelAsync(
+        Stream excelStream,
+        CancellationToken cancellationToken = default)
+    {
+        var errors = new List<ImportError>();
+        var successfulUpdates = new List<UpdateDetail>();
+        var notFoundShifts = new List<NotFoundDetail>();
+        var totalRecords = 0;
+
+        try
+        {
+            using var workbook = new XLWorkbook(excelStream);
+            var worksheet = workbook.Worksheet(1);
+
+            // Find column indices for WorkingId, AcceptedOrders, and ShiftDate
+            var columnMapping = FindUpdateColumnIndices(worksheet);
+            if (!columnMapping.IsValid)
+            {
+                return Result.Failure<BulkUpdateResult>(
+                    new Error("InvalidExcel", columnMapping.ErrorMessage!, 400));
+            }
+
+            var rows = worksheet.RowsUsed().Skip(1);
+            totalRecords = rows.Count();
+
+            var rowNumber = 1;
+
+            foreach (var row in rows)
+            {
+                rowNumber++;
+                try
+                {
+                    // Parse Excel row
+                    var updateData = ParseUpdateExcelRow(row, columnMapping, rowNumber);
+
+                    if (!updateData.IsValid)
+                    {
+                        errors.Add(new ImportError(
+                            rowNumber,
+                            updateData.WorkingId ?? "N/A",
+                            updateData.ErrorMessage!));
+                        continue;
+                    }
+
+                    // Try to find shift with current WorkingId
+                    var shift = await dbcontext.RiderShifts
+                        .Include(s => s.Rider)
+                            .ThenInclude(r => r.Employee)
+                        .Include(s => s.Rider)
+                            .ThenInclude(r => r.Company)
+                        .FirstOrDefaultAsync(s =>
+                            s.WorkingId == updateData.WorkingId &&
+                            s.ShiftDate == updateData.ShiftDate,
+                            cancellationToken);
+
+                    if (shift != null)
+                    {
+                        // Direct match found - update it
+                        var oldAcceptedOrders = shift.AcceptedDailyOrders;
+                        shift.AcceptedDailyOrders = updateData.AcceptedOrders!.Value;
+
+                        // Recalculate shift status based on new accepted orders
+                        var newStatus = CalculateShiftStatus(
+                            shift.AcceptedDailyOrders,
+                            shift.Rider.Company.Name);
+                        shift.ShiftStatus = newStatus;
+
+                        await dbcontext.SaveChangesAsync(cancellationToken);
+
+                        successfulUpdates.Add(new UpdateDetail(
+                            rowNumber,
+                            updateData.WorkingId!,
+                            updateData.WorkingId!,
+                            shift.Rider.Employee.NameEN,
+                            updateData.ShiftDate!.Value,
+                            oldAcceptedOrders,
+                            updateData.AcceptedOrders.Value,
+                            shift.Rider.Company.Name,
+                            false));
+                    }
+                    else
+                    {
+                        // Shift not found with current WorkingId - check history
+                        var historyRecord = await dbcontext.Set<RiderWorkingIdHistory>()
+                            .Include(h => h.Employee)
+                            .Include(h => h.Company)
+                            .Where(h => h.WorkingId == updateData.WorkingId)
+                            .OrderByDescending(h => h.StartDate)
+                            .FirstOrDefaultAsync(cancellationToken);
+
+                        if (historyRecord == null)
+                        {
+                            notFoundShifts.Add(new NotFoundDetail(
+                                rowNumber,
+                                updateData.WorkingId!,
+                                updateData.ShiftDate!.Value,
+                                "WorkingId not found in current riders or history"));
+                            continue;
+                        }
+
+                        // Get the rider's current WorkingId
+                        var currentRider = await dbcontext.RiderDetails
+                            .Include(r => r.Employee)
+                            .Include(r => r.Company)
+                            .FirstOrDefaultAsync(r =>
+                                r.EmployeeIqamaNo == historyRecord.RiderIqamaNo,
+                                cancellationToken);
+
+                        if (currentRider == null)
+                        {
+                            notFoundShifts.Add(new NotFoundDetail(
+                                rowNumber,
+                                updateData.WorkingId!,
+                                updateData.ShiftDate!.Value,
+                                $"Rider with IqamaNo {historyRecord.RiderIqamaNo} not found"));
+                            continue;
+                        }
+
+                        // Now search for shift with the current WorkingId
+                        var shiftWithCurrentId = await dbcontext.RiderShifts
+                            .Include(s => s.Rider)
+                                .ThenInclude(r => r.Employee)
+                            .Include(s => s.Rider)
+                                .ThenInclude(r => r.Company)
+                            .FirstOrDefaultAsync(s =>
+                                s.WorkingId == currentRider.WorkingId &&
+                                s.ShiftDate == updateData.ShiftDate,
+                                cancellationToken);
+
+                        if (shiftWithCurrentId != null)
+                        {
+                            // Found shift with new WorkingId - update it
+                            var oldAcceptedOrders = shiftWithCurrentId.AcceptedDailyOrders;
+                            shiftWithCurrentId.AcceptedDailyOrders = updateData.AcceptedOrders!.Value;
+
+                            // Recalculate shift status
+                            var newStatus = CalculateShiftStatus(
+                                shiftWithCurrentId.AcceptedDailyOrders,
+                                shiftWithCurrentId.Rider.Company.Name);
+                            shiftWithCurrentId.ShiftStatus = newStatus;
+
+                            await dbcontext.SaveChangesAsync(cancellationToken);
+
+                            successfulUpdates.Add(new UpdateDetail(
+                                rowNumber,
+                                updateData.WorkingId!,
+                                currentRider.WorkingId!,
+                                currentRider.Employee.NameEN,
+                                updateData.ShiftDate!.Value,
+                                oldAcceptedOrders,
+                                updateData.AcceptedOrders.Value,
+                                currentRider.Company.Name,
+                                true));
+                        }
+                        else
+                        {
+                            notFoundShifts.Add(new NotFoundDetail(
+                                rowNumber,
+                                updateData.WorkingId!,
+                                updateData.ShiftDate!.Value,
+                                $"No shift found for date {updateData.ShiftDate}. " +
+                                $"WorkingId {updateData.WorkingId} belongs to {currentRider.Employee.NameEN} " +
+                                $"(Current ID: {currentRider.WorkingId})"));
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    errors.Add(new ImportError(
+                        rowNumber,
+                        "N/A",
+                        $"Error processing row: {ex.Message}"));
+                }
+            }
+
+            var result = new BulkUpdateResult(
+                totalRecords,
+                successfulUpdates.Count,
+                notFoundShifts.Count,
+                errors.Count,
+                successfulUpdates,
+                notFoundShifts,
+                errors);
+
+            return Result.Success(result);
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<BulkUpdateResult>(
+                new Error("ServerError", $"Error reading Excel file: {ex.Message}", 500));
+        }
+    }
+
+    private static UpdateColumnMapping FindUpdateColumnIndices(IXLWorksheet worksheet)
+    {
+        var headerRow = worksheet.FirstRowUsed();
+        if (headerRow == null)
+        {
+            return new UpdateColumnMapping
+            {
+                IsValid = false,
+                ErrorMessage = "Excel file is empty or has no header row"
+            };
+        }
+
+        var mapping = new UpdateColumnMapping();
+        var headerCells = headerRow.CellsUsed().ToList();
+
+        mapping.WorkingIdColumn = FindColumn(headerCells, ExcelColumnConfig.WorkingIdColumns);
+        mapping.AcceptedOrdersColumn = FindColumn(headerCells, ExcelColumnConfig.AcceptedOrdersColumns);
+        mapping.ShiftDateColumn = FindColumn(headerCells, ExcelColumnConfig.ShiftDateColumns);
+
+        var missingColumns = new List<string>();
+
+        if (mapping.WorkingIdColumn == 0)
+            missingColumns.Add($"WorkingId (tried: {string.Join(", ", ExcelColumnConfig.WorkingIdColumns)})");
+        if (mapping.AcceptedOrdersColumn == 0)
+            missingColumns.Add($"AcceptedOrders (tried: {string.Join(", ", ExcelColumnConfig.AcceptedOrdersColumns)})");
+        if (mapping.ShiftDateColumn == 0)
+            missingColumns.Add($"ShiftDate (tried: {string.Join(", ", ExcelColumnConfig.ShiftDateColumns)})");
+
+        if (missingColumns.Any())
+        {
+            mapping.IsValid = false;
+            mapping.ErrorMessage = $"Missing required columns: {string.Join(", ", missingColumns)}";
+            return mapping;
+        }
+
+        mapping.IsValid = true;
+        return mapping;
+    }
+
+    private static (
+        bool IsValid,
+        string? WorkingId,
+        DateOnly? ShiftDate,
+        int? AcceptedOrders,
+        string? ErrorMessage) ParseUpdateExcelRow(
+        IXLRow row,
+        UpdateColumnMapping mapping,
+        int rowNumber)
+    {
+        try
+        {
+            var workingIdCell = row.Cell(mapping.WorkingIdColumn).Value;
+            var workingId = workingIdCell.ToString()?.Trim();
+            if (string.IsNullOrWhiteSpace(workingId))
+                return (false, null, null, null, "Invalid Working ID");
+
+            // Parse shift date
+            var dateCell = row.Cell(mapping.ShiftDateColumn);
+            DateOnly? shiftDate;
+            try
+            {
+                // Excel stores dates as DateTime, so get it as DateTime first
+                if (dateCell.Value.IsDateTime)
+                {
+                    shiftDate = DateOnly.FromDateTime(dateCell.GetDateTime());
+                }
+                else
+                {
+                    // If not a DateTime cell, use the custom date parser
+                    var dateString = dateCell.Value.ToString()?.Trim();
+                    shiftDate = ParseDate(dateString);
+
+                    if (!shiftDate.HasValue)
+                    {
+                        return (false, workingId, null, null, $"Invalid Shift Date format: '{dateString}'. Expected date format like: 1/4/2026, 01-04-2026, or 2026-01-04");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                return (false, workingId, null, null, $"Error parsing Shift Date: {ex.Message}");
+            }
+
+            //string[] formats = { "yyyy-MM-dd", "MM/dd/yyyy", "M/d/yyyy" , "M/dd/yyyy" , "MM/d/yyyy" };
+
+            //if (!DateOnly.TryParseExact(dateString, formats, CultureInfo.InvariantCulture, DateTimeStyles.None, out var shiftDate))
+            //{
+            //    return (false, workingId, null, null, $"Invalid Shift Date format. Expected formats: {string.Join(", ", formats)}");
+            //}
+
+            var acceptedCell = row.Cell(mapping.AcceptedOrdersColumn).Value;
+            if (!int.TryParse(acceptedCell.ToString(), out var acceptedOrders) || acceptedOrders < 0)
+                return (false, workingId, shiftDate, null, "Invalid Accepted Orders (must be >= 0)");
+
+            return (true, workingId, shiftDate, acceptedOrders, null);
+        }
+        catch (Exception ex)
+        {
+            return (false, null, null, null, $"Error: {ex.Message}");
+        }
+    }
+    private static DateOnly? ParseDate(string? dateStr)
+    {
+        if (string.IsNullOrWhiteSpace(dateStr))
+            return null;
+
+        string[] formats = {
+            "dd/MM/yyyy", "d/M/yyyy", "dd-MM-yyyy", "d-M-yyyy",
+            "MM/dd/yyyy", "M/d/yyyy", "MM-dd-yyyy", "M-d-yyyy",
+            "yyyy/MM/dd", "yyyy-MM-dd", "yyyy/M/d", "yyyy-M-d",
+            "dd.MM.yyyy", "d.M.yyyy"
+        };
+
+        foreach (var format in formats)
+        {
+            if (DateTime.TryParseExact(dateStr, format,
+                CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime date))
+            {
+                return DateOnly.FromDateTime(date);
+            }
+        }
+
+        if (DateTime.TryParse(dateStr, out DateTime generalDate))
+        {
+            return DateOnly.FromDateTime(generalDate);
+        }
+
+        return null;
+    }
+    // Supporting classes
+    public class UpdateColumnMapping
+    {
+        public bool IsValid { get; set; }
+        public string? ErrorMessage { get; set; }
+        public int WorkingIdColumn { get; set; }
+        public int ShiftDateColumn { get; set; }
+        public int AcceptedOrdersColumn { get; set; }
+    }
+
+    public record BulkUpdateResult(
+        int TotalRecords,
+        int SuccessCount,
+        int NotFoundCount,
+        int ErrorCount,
+        List<UpdateDetail> SuccessfulUpdates,
+        List<NotFoundDetail> NotFoundShifts,
+        List<ImportError> Errors
+    );
+
+    public record UpdateDetail(
+        int RowNumber,
+        string ExcelWorkingId,
+        string ActualWorkingId,
+        string RiderName,
+        DateOnly ShiftDate,
+        int OldAcceptedOrders,
+        int NewAcceptedOrders,
+        string CompanyName,
+        bool WasHistoricalLookup
+    );
+
+    public record NotFoundDetail(
+        int RowNumber,
+        string WorkingId,
+        DateOnly ShiftDate,
+        string Reason
+    );
+
+    // Add this to ExcelColumnConfig class in your main service file:
+    // public static readonly string[] ShiftDateColumns = 
+    //     { "ShiftDate", "Shift_Date", "Shift Date", "Date", "WorkDate", "Work_Date", "تاريخ الوردية" };
+
 }
 
 
@@ -1641,6 +2008,9 @@ public static class ExcelColumnConfig
 
     public static readonly string[] WorkingHoursColumns =
         { "Actual Working Hours", "Working_Hours", "Working Hours", "وقت اتصال السائقين عبر تطبيق السائق.", "وقت اتصال السائقين عبر تطبيق السائق", "Total_Hours" };
+
+    public static readonly string[] ShiftDateColumns =
+    { "ShiftDate", "Shift_Date", "Shift Date", "Date", "WorkDate", "Work_Date", "تاريخ الوردية" };
 }
 
 public class ShiftConflictDto

@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
 using System.Threading.Tasks;
+using static Application.Service.Empolyee.IVehicleService;
 
 namespace Express_Service.Controllers;
 
@@ -49,6 +50,14 @@ public class VehicleController(IVehicleService service) : ControllerBase
     {
         var result = await _service.CreateAsync(request);
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    [HttpPost("resolve-switch")]
+    [Authorize(Roles = "Master,Admin")]
+    public async Task<IActionResult> Resolve([FromBody] VehicleSwitchResolutionRequest request)
+    {
+        var result = await _service.ResolveSwitchOperationAsync(request);
+        return result.IsSuccess ? Ok() : result.ToProblem();
     }
 
     [HttpPut("{plateNumber}")]

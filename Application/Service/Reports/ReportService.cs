@@ -1694,9 +1694,9 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
         {
             // Get all shifts for the specified date with housing information
             var shifts = await _dbcontext.RiderShifts
+                .Include(m=>m.Housing)
                 .Include(s => s.Rider)
                     .ThenInclude(r => r.Employee)
-                    .ThenInclude(e => e.Housing)
                 .Where(s => s.ShiftDate == reportDate && s.CompanyId == 1)
                 .AsNoTracking()
                 .ToListAsync(cancellationToken);
@@ -1725,8 +1725,8 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
             // Group by housing
             var housingGroups = validShifts
                 .GroupBy(s => new {
-                    HousingId = s.Rider.Employee.Housing.Id,
-                    HousingName = s.Rider.Employee.Housing.Name
+                    HousingId = s.HousingId,
+                    HousingName = s.Housing?.Name
                 });
 
             var housingSummaries = new List<HousingDailySummary>();
@@ -1744,8 +1744,8 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                     : 0;
 
                 housingSummaries.Add(new HousingDailySummary(
-                    HousingId: group.Key.HousingId,
-                    HousingName: group.Key.HousingName,
+                    HousingId: group.Key.HousingId ?? 1,
+                    HousingName: group.Key.HousingName!,
                     TotalOrders: housingOrders,
                     ActiveRiders: activeRiders,
                     AverageOrdersPerRider: avgOrdersPerRider,
@@ -1790,9 +1790,9 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
         {
             // Get all shifts for the specified date with full details
             var shifts = await _dbcontext.RiderShifts
+                .Include(m=>m.Housing)
                 .Include(s => s.Rider)
                     .ThenInclude(r => r.Employee)
-                    .ThenInclude(e => e.Housing)
                 .Where(s => s.ShiftDate == reportDate && s.CompanyId == 1)
                 .AsNoTracking()
                 .ToListAsync(cancellationToken);

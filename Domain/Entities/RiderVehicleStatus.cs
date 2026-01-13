@@ -31,5 +31,6 @@ public enum VehicleStatusType
     Returned = 2,
     Problem = 3,
     Stolen = 4,
-    BreakUp = 5
+    BreakUp = 5,
+    switched = 6
 }
