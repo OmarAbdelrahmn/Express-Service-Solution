@@ -2311,7 +2311,7 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
         var response = pendingChanges.Select(change => new PendingStatusChangeResponse(
             change.Id,
             change.EmployeeIqamaNo,
-            change.Employee.NameEN,
+            change.Employee.NameAR,
             change.Action,
             change.Reason,
             change.RequestedBy,
