@@ -1,6 +1,7 @@
 ﻿using Application.Service.export;
 using Application.Service.Reports;
 using Application.Service.Riders;
+using k8s.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -32,6 +33,24 @@ public class ReportController(IReportService service) : ControllerBase
             ? Ok(result.Value)
             : result.ToProblem();
     }
+
+    [HttpGet("keta/validation")]
+    //[Authorize(Roles = "Master,Admin")]
+    public async Task<IActionResult> GetCompany2MonthlyValidation(
+       [FromQuery] int year,
+       [FromQuery] int month,
+       CancellationToken cancellationToken = default)
+    {
+        var result = await service.GetCompany2MonthlyRiderValidationAsync(
+            year,
+            month,
+            cancellationToken);
+
+        return result.IsSuccess
+            ? Ok(result.Value)
+            : result.ToProblem();
+    }
+
 
     [HttpGet("rider-daily-detail")]
     public async Task<IActionResult> GetRiderDailyDetail(
