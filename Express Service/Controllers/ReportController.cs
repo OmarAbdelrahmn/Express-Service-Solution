@@ -364,7 +364,7 @@ public class ReportController(IReportService service) : ControllerBase
 
 
     [HttpGet("monthly/{WorkingId}")]
-    [Authorize(Roles = "Master,Admin,Member")]
+    //[Authorize(Roles = "Master,Admin,Member")]
     public async Task<IActionResult> GetMonthlyReportByWorkingIdAsync(
         [FromRoute] string WorkingId,
         [FromQuery] int year,
@@ -383,7 +383,7 @@ public class ReportController(IReportService service) : ControllerBase
     }
 
     [HttpGet("monthly/all")]
-    [Authorize(Roles = "Master,Admin")]
+    //[Authorize(Roles = "Master,Admin")]
 
     public async Task<IActionResult> GetAllRidersMonthlyReportAsync(
         [FromQuery] int year,
@@ -400,7 +400,7 @@ public class ReportController(IReportService service) : ControllerBase
     }
 
     [HttpGet("yearly/{WorkingId}")]
-    [Authorize(Roles = "Master,Admin,Member")]
+    //[Authorize(Roles = "Master,Admin,Member")]
     public async Task<IActionResult> GetYearlyReportByWorkingIdAsync(
         [FromRoute] string WorkingId,
         [FromQuery] int year,
@@ -416,7 +416,7 @@ public class ReportController(IReportService service) : ControllerBase
     }
 
     [HttpGet("yearly/all")]
-    [Authorize(Roles = "Master,Admin")]
+    //[Authorize(Roles = "Master,Admin")]
     public async Task<IActionResult> GetAllRidersYearlyReportAsync(
         [FromQuery] int year,
         CancellationToken cancellationToken = default)
@@ -430,7 +430,7 @@ public class ReportController(IReportService service) : ControllerBase
     }
 
     [HttpGet("riders/{WorkingId}/renge")]
-    [Authorize(Roles = "Master,Admin,Member")]
+    //[Authorize(Roles = "Master,Admin,Member")]
     public async Task<IActionResult> GetCustomDateRangeReportByWorkingIdAsync(
         [FromRoute] string WorkingId,
         [FromQuery] DateOnly startDate,
@@ -448,7 +448,7 @@ public class ReportController(IReportService service) : ControllerBase
     }
 
     [HttpGet("all/range")]
-    [Authorize(Roles = "Master,Admin")]
+    //[Authorize(Roles = "Master,Admin")]
     public async Task<IActionResult> GetAllRidersCustomDateRangeReportAsync(
         [FromQuery] DateOnly startDate,
         [FromQuery] DateOnly endDate,
@@ -464,7 +464,7 @@ public class ReportController(IReportService service) : ControllerBase
     }
 
     [HttpGet("company-performance")]
-    [Authorize(Roles = "Master,Admin")]
+    //[Authorize(Roles = "Master,Admin")]
     public async Task<IActionResult> GetCompanyPerformanceReportAsync(
         [FromQuery] string companyName,
         [FromQuery] DateOnly startDate,
@@ -482,7 +482,7 @@ public class ReportController(IReportService service) : ControllerBase
     }
 
     [HttpGet("compare-company-periods")]
-    [Authorize(Roles = "Master,Admin")]
+    //[Authorize(Roles = "Master,Admin")]
     public async Task<IActionResult> CompareCompanyPeriodsAsync(
         [FromQuery] string companyName,
         [FromQuery] DateOnly period1Start,
@@ -504,7 +504,7 @@ public class ReportController(IReportService service) : ControllerBase
     }
 
     [HttpGet("problem")]
-    [Authorize(Roles = "Master,Admin,Member")]
+    //[Authorize(Roles = "Master,Admin,Member")]
     public async Task<IActionResult> ProblemAsync(
         [FromQuery] DateOnly StartDate,
         [FromQuery] DateOnly EndDate,
@@ -519,7 +519,7 @@ public class ReportController(IReportService service) : ControllerBase
     }
 
     [HttpGet("riders/compare-periods")]
-    [Authorize(Roles = "Master,Admin")]
+    //[Authorize(Roles = "Master,Admin")]
     public async Task<IActionResult> CompareAllRidersPeriodsAsync(
         DateOnly period1Start,
         DateOnly period1End,
@@ -539,7 +539,7 @@ public class ReportController(IReportService service) : ControllerBase
     }
 
     [HttpGet("riders/compare/{WorkingId}")]
-    [Authorize(Roles = "Master,Admin,Member")]
+    //[Authorize(Roles = "Master,Admin,Member")]
     public async Task<IActionResult> CompareRiderPeriodsAsync(
         [FromRoute] string WorkingId,
         [FromQuery] DateOnly period1Start,
@@ -561,7 +561,7 @@ public class ReportController(IReportService service) : ControllerBase
     }
 
     [HttpGet("riders/compare-monthly/{WorkingId}")]
-    [Authorize(Roles = "Master,Admin,Member")]
+    //[Authorize(Roles = "Master,Admin,Member")]
 
     public async Task<IActionResult> CompareRidersMonthlyAsync(
         [FromRoute] string WorkingId,
@@ -584,7 +584,7 @@ public class ReportController(IReportService service) : ControllerBase
     }
     
     [HttpGet("riders/compare-yearly/{WorkingId}")]
-    [Authorize(Roles = "Master,Admin,Member")]
+    //[Authorize(Roles = "Master,Admin,Member")]
 
     public async Task<IActionResult> CompareRiderYearlyAsync(
         [FromRoute] string WorkingId,
@@ -603,7 +603,7 @@ public class ReportController(IReportService service) : ControllerBase
     }
 
     [HttpGet("housing/compare")]
-    [Authorize(Roles = "Master,Admin,Member")]
+    //[Authorize(Roles = "Master,Admin,Member")]
     public async Task<IActionResult> CompareHousingCompaniesAsync(
         [FromQuery] DateOnly startDate,
         [FromQuery] DateOnly endDate,
@@ -623,7 +623,7 @@ public class ReportController(IReportService service) : ControllerBase
     }
 
     [HttpGet("housing/riders")]
-    [Authorize(Roles = "Master,Admin,Member")]
+    //[Authorize(Roles = "Master,Admin,Member")]
     public async Task<IActionResult> GetRidersForHousingAsync(string housingName,
         DateOnly startDate,
         DateOnly endDate)
@@ -636,7 +636,7 @@ public class ReportController(IReportService service) : ControllerBase
     }
 
     [HttpGet("housing/riders-compare")]
-    [Authorize(Roles = "Master,Admin,Member")]
+    //[Authorize(Roles = "Master,Admin,Member")]
     public async Task<IActionResult> CompareHousingRidersAsync(
         [FromQuery] string housingName,
         [FromQuery] DateOnly period1Start,
@@ -658,7 +658,7 @@ public class ReportController(IReportService service) : ControllerBase
     }
 
     [HttpGet("top-riders/yearly")]
-    [Authorize(Roles = "Master,Admin")]
+    //[Authorize(Roles = "Master,Admin")]
 
     public async Task<IActionResult> GetTopRidersForYearAsync(int year,
         int topCount = 10)
@@ -672,7 +672,7 @@ public class ReportController(IReportService service) : ControllerBase
     
     
     [HttpGet("top-riders/monthly")]
-    [Authorize(Roles = "Master,Admin")]
+    //[Authorize(Roles = "Master,Admin")]
     public async Task<IActionResult> GetTopRidersFormonthAsync(int year, int month,
 
         int topCount = 10)
@@ -685,7 +685,7 @@ public class ReportController(IReportService service) : ControllerBase
     }
 
     [HttpGet("top-riders/company")]
-    [Authorize(Roles = "Master,Admin")]
+    //[Authorize(Roles = "Master,Admin")]
     public async Task<IActionResult> GetTopRidersPerCompanyAsync(DateOnly Start , DateOnly End)
     {
         var result = await service.GetTopRidersPerCompanyAsync(Start , End);
@@ -696,7 +696,7 @@ public class ReportController(IReportService service) : ControllerBase
     }
 
     [HttpGet("stacked/{WorkingId}")]
-    [Authorize(Roles = "Master,Admin,Member")]
+    //[Authorize(Roles = "Master,Admin,Member")]
 
     public async Task<IActionResult> GetMonthlyStackedDeliveriesByWorkingIdAsync(string WorkingId,
         [FromQuery]   int year,
