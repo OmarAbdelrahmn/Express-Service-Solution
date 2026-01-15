@@ -76,8 +76,8 @@ public class TempVehicleOperation
 {
     public int Id { get; set; }
 
-    public long RiderIqamaNo { get; set; }
-    public RiderDetails Rider { get; set; } = default!;
+    public long? RiderIqamaNo { get; set; }
+    public RiderDetails? Rider { get; set; } = default!;
 
     public string VehiclePlateNumber { get; set; } = string.Empty;
     public string VehicleNumber { get; set; } = string.Empty;

@@ -61,7 +61,7 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
 
         // Verify the rider belongs to this housing
         var employeeIqamas = housing.Employees.Select(e => e.IqamaNo).ToList();
-        if (request.RiderIqamaNo != 0 && !employeeIqamas.Contains(request.RiderIqamaNo))
+        if (request.RiderIqamaNo != 0 && !employeeIqamas.Contains(request.RiderIqamaNo ?? 2536361732))
             return Result.Failure(HousingMemberErrors.UnauthorizedToCancel);
 
         // Mark as resolved/cancelled
@@ -360,7 +360,7 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
         // Create the fix vehicle operation request (no rider needed)
         var operation = new TempVehicleOperation
         {
-            RiderIqamaNo = 0, // No rider - vehicle was returned when problem was reported
+            RiderIqamaNo = null, // No rider - vehicle was returned when problem was reported
             VehiclePlateNumber = request.VehiclePlate,
             VehicleNumber = vehicle.VehicleNumber,
             VehicleStatusType = VehicleStatusType.Returned, // Request to mark as available (fixed)
@@ -1454,7 +1454,7 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
         {
             var batch = riderIqamas.Skip(i).Take(batchSize).ToList();
             var count = await context.TempVehicleOperations
-                .Where(t => !t.IsResolved && batch.Contains(t.RiderIqamaNo))
+                .Where(t => !t.IsResolved && batch.Contains(t.RiderIqamaNo ?? 2536361732))
                 .CountAsync();
             pendingVehicleOps += count;
         }
@@ -1509,7 +1509,7 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
         {
             var batch = riderIqamas.Skip(i).Take(batchSize).ToList();
             var batchActivities = await context.TempVehicleOperations
-                .Where(t => batch.Contains(t.RiderIqamaNo))
+                .Where(t => batch.Contains(t.RiderIqamaNo ?? 2536361732))
                 .OrderByDescending(t => t.RequestedAt)
                 .Take(5)
                 .Select(t => new RecentActivityItem(
@@ -2123,13 +2123,13 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
             .Include(t => t.Rider)
                 .ThenInclude(r => r.Employee)
             .Include(t => t.Vehicle)
-            .Where(t => !t.IsResolved && employeeIqamas.Contains(t.RiderIqamaNo))
+            .Where(t => !t.IsResolved && employeeIqamas.Contains(t.RiderIqamaNo ?? 2536361732))
             .OrderByDescending(t => t.RequestedAt)
             .ToListAsync();
 
         var response = pendingOps.Select(op => new PendingVehicleOperationResponse(
             op.Id,
-            op.RiderIqamaNo,
+            op.RiderIqamaNo ?? 2536361732,
             op.Rider.Employee.NameEN,
             op.VehicleNumber,
             op.VehiclePlateNumber,
@@ -2977,7 +2977,7 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
             .Include(t => t.Rider)
                 .ThenInclude(r => r.Employee)
             .Where(t => !t.IsResolved
-                && employeeIqamas.Contains(t.RiderIqamaNo)
+                && employeeIqamas.Contains(t.RiderIqamaNo ?? 2536361732)
                 && !string.IsNullOrEmpty(t.VehicleNumber)
                 && !string.IsNullOrEmpty(t.VehiclePlateNumber)
                 && t.VehicleStatusType == VehicleStatusType.Taken)
@@ -3001,13 +3001,13 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
 
             // Validate the switch operation
             var validation = await ValidateSwitchOperation(
-                operation.RiderIqamaNo,
+                operation.RiderIqamaNo ?? 2536361732,
                 operation.VehicleNumber,
                 newVehicle.VehicleNumber);
 
             responses.Add(new PendingSwitchVehicleResponse(
                 operation.Id,
-                operation.RiderIqamaNo,
+                operation.RiderIqamaNo ?? 2536361732,
                 operation.Rider?.Employee?.NameAR ?? "Unknown",
                 operation.VehicleNumber,
                 currentVehicle.PlateNumberA,

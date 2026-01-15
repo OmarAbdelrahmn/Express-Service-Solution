@@ -4,6 +4,7 @@ using Domain;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Domain.Migrations
 {
     [DbContext(typeof(ApplicationDbcontext))]
-    partial class ApplicationDbcontextModelSnapshot : ModelSnapshot
+    [Migration("20260115122942_safsdfsdf")]
+    partial class safsdfsdf
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -236,7 +239,7 @@ namespace Domain.Migrations
                     b.HasIndex("Name")
                         .IsUnique();
 
-                    b.ToTable("Companies", (string)null);
+                    b.ToTable("Companies");
                 });
 
             modelBuilder.Entity("Domain.Entities.DeletedEmployees", b =>
@@ -325,7 +328,7 @@ namespace Domain.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("DeletedEmployees", (string)null);
+                    b.ToTable("DeletedEmployees");
                 });
 
             modelBuilder.Entity("Domain.Entities.EmployeeDocuments", b =>
@@ -374,7 +377,7 @@ namespace Domain.Migrations
                     b.HasIndex("EmployeeIqamaNo")
                         .IsUnique();
 
-                    b.ToTable("EmployeeDocuments", (string)null);
+                    b.ToTable("EmployeeDocuments");
                 });
 
             modelBuilder.Entity("Domain.Entities.Employees", b =>
@@ -471,7 +474,7 @@ namespace Domain.Migrations
                     b.HasIndex("Status")
                         .HasDatabaseName("IX_Employees_Status");
 
-                    b.ToTable("Employees", (string)null);
+                    b.ToTable("Employees");
                 });
 
             modelBuilder.Entity("Domain.Entities.Housing", b =>
@@ -503,7 +506,7 @@ namespace Domain.Migrations
                     b.HasIndex("Name")
                         .IsUnique();
 
-                    b.ToTable("Housings", (string)null);
+                    b.ToTable("Housings");
                 });
 
             modelBuilder.Entity("Domain.Entities.HungerDisability", b =>
@@ -591,7 +594,7 @@ namespace Domain.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("RiderCompanyHistory", (string)null);
+                    b.ToTable("RiderCompanyHistory");
                 });
 
             modelBuilder.Entity("Domain.Entities.RiderDetails", b =>
@@ -636,7 +639,7 @@ namespace Domain.Migrations
 
                     b.HasIndex("WorkingId");
 
-                    b.ToTable("RiderDetails", (string)null);
+                    b.ToTable("RiderDetails");
                 });
 
             modelBuilder.Entity("Domain.Entities.RiderShift", b =>
@@ -692,7 +695,7 @@ namespace Domain.Migrations
 
                     b.HasIndex("WorkingId");
 
-                    b.ToTable("RiderShifts", (string)null);
+                    b.ToTable("RiderShifts");
                 });
 
             modelBuilder.Entity("Domain.Entities.RiderShiftSubstitution", b =>
@@ -751,7 +754,7 @@ namespace Domain.Migrations
 
                     b.HasIndex("SubstituteWorkingId", "IsActive");
 
-                    b.ToTable("RiderShiftSubstitutions", (string)null);
+                    b.ToTable("RiderShiftSubstitutions");
                 });
 
             modelBuilder.Entity("Domain.Entities.RiderVehicleStatus", b =>
@@ -808,7 +811,7 @@ namespace Domain.Migrations
 
                     b.HasIndex("VehicleNumber", "IsActive", "StatusType");
 
-                    b.ToTable("RiderVehicleStatus", (string)null);
+                    b.ToTable("RiderVehicleStatus");
                 });
 
             modelBuilder.Entity("Domain.Entities.RiderWorkingIdHistory", b =>
@@ -854,7 +857,7 @@ namespace Domain.Migrations
 
                     b.HasIndex("WorkingId", "IsActive");
 
-                    b.ToTable("RiderWorkingIdHistories", (string)null);
+                    b.ToTable("RiderWorkingIdHistories");
                 });
 
             modelBuilder.Entity("Domain.Entities.TempEmployeeStatusChange", b =>
@@ -909,7 +912,7 @@ namespace Domain.Migrations
 
                     b.HasIndex("RequestedAt");
 
-                    b.ToTable("TempEmployeeStatusChanges", (string)null);
+                    b.ToTable("TempEmployeeStatusChanges");
                 });
 
             modelBuilder.Entity("Domain.Entities.TempEmployeeUpdate", b =>
@@ -1042,7 +1045,7 @@ namespace Domain.Migrations
 
                     b.HasIndex("UploadedAt");
 
-                    b.ToTable("TempEmployeeUpdates", (string)null);
+                    b.ToTable("TempEmployeeUpdates");
                 });
 
             modelBuilder.Entity("Domain.Entities.TempRiderShiftComparison", b =>
@@ -1139,7 +1142,7 @@ namespace Domain.Migrations
 
                     b.HasIndex("RiderId", "WorkingId", "ShiftDate");
 
-                    b.ToTable("TempRiderShiftComparisons", (string)null);
+                    b.ToTable("TempRiderShiftComparisons");
                 });
 
             modelBuilder.Entity("Domain.Entities.TempVehicleOperation", b =>
@@ -1220,7 +1223,7 @@ namespace Domain.Migrations
 
                     b.HasIndex("RiderIqamaNo", "IsResolved");
 
-                    b.ToTable("TempVehicleOperations", (string)null);
+                    b.ToTable("TempVehicleOperations");
                 });
 
             modelBuilder.Entity("Domain.Entities.Vehicle", b =>
@@ -1287,7 +1290,7 @@ namespace Domain.Migrations
 
                     b.HasIndex("VehicleNumber");
 
-                    b.ToTable("Vehicles", (string)null);
+                    b.ToTable("Vehicles");
                 });
 
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRoleClaim<string>", b =>

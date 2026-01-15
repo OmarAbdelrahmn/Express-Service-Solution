@@ -311,13 +311,13 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
                     continue;
 
                 var validation = await ValidateSwitchOperation(
-                    operation.RiderIqamaNo,
+                    operation.RiderIqamaNo ?? 2536361732,
                     operation.VehicleNumber,
                     newVehicle.VehicleNumber);
 
                 responses.Add(new PendingSwitchVehicleAdminResponse(
                     operation.Id,
-                    operation.RiderIqamaNo,
+                    operation.RiderIqamaNo ?? 2536361732,
                     operation.Rider?.Employee?.NameAR ?? "Unknown",
                     operation.Rider?.Employee?.NameEN ?? "Unknown",
                     operation.Rider?.Employee?.Housing?.Name ?? "Unknown",
@@ -1667,9 +1667,9 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
     {
         return operation.VehicleStatusType switch
         {
-            VehicleStatusType.Taken => await ValidateTakeOperation(operation.RiderIqamaNo, operation.VehicleNumber),
-            VehicleStatusType.Returned => await ValidateReturnOperation(operation.RiderIqamaNo, operation.VehicleNumber),
-            VehicleStatusType.Problem => await ValidateReportProblemOperation(operation.RiderIqamaNo, operation.VehicleNumber),
+            VehicleStatusType.Taken => await ValidateTakeOperation(operation.RiderIqamaNo ?? 2536361732, operation.VehicleNumber),
+            VehicleStatusType.Returned => await ValidateReturnOperation(operation.RiderIqamaNo ?? 2536361732, operation.VehicleNumber),
+            VehicleStatusType.Problem => await ValidateReportProblemOperation(operation.RiderIqamaNo ?? 2536361732, operation.VehicleNumber),
             _ => new VehicleOperationValidation(false, new List<string> { "Unknown operation type" }, new List<string>())
         };
     }
@@ -2568,6 +2568,7 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
                 $"Failed to group vehicles by status: {ex.Message}", 500));
         }
     }
+
     #region Mapping and Response Helpers
 
     private TempVehicleOperationResponse MapToResponse(
@@ -2576,7 +2577,7 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
     {
         return new TempVehicleOperationResponse(
             Id: operation.Id,
-            RiderIqamaNo: operation.RiderIqamaNo,
+            RiderIqamaNo: operation.RiderIqamaNo ?? 0,
             RiderNameAR: operation.Rider?.Employee?.NameAR ?? "N/A",
             RiderNameEN: operation.Rider?.Employee?.NameEN ?? "N/A",
             VehiclePlateNumber: operation.VehiclePlateNumber,
