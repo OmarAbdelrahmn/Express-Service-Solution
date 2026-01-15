@@ -8,6 +8,17 @@ namespace Application.Service.Reports;
 
 public interface IReportService
 {
+    Task<Result<Company2DailySummaryReport>> GetCompany2DailySummaryAsync(
+    DateOnly reportDate,
+    CancellationToken cancellationToken = default);
+
+    Task<Result<Company2CumulativeRiderReport>> GetCompany2CumulativeRiderStatsAsync(
+        DateOnly endDate,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<Company2DailyRiderDetailsReport>> GetCompany2DailyRiderDetailsAsync(
+        DateOnly reportDate,
+        CancellationToken cancellationToken = default);
     Task<Result<MonthlyRiderValidationReport>> GetCompany2MonthlyRiderValidationAsync(
         int year,
         int month,

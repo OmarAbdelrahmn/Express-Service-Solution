@@ -69,6 +69,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
             var shifts = await _dbcontext.RiderShifts
                 .Include(s => s.Rider)
                     .ThenInclude(r => r.Employee)
+                                .ThenInclude(e => e.Housing)
                 .Where(s => s.CompanyId == 2 &&
                            s.ShiftDate >= startDate &&
                            s.ShiftDate <= endDate)
@@ -205,7 +206,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
         var totalMissingDays = missingDays.Count;
         var totalOrders = riderShifts.Sum(s => s.AcceptedDailyOrders);
         var totalHours = riderShifts.Sum(s => s.WorkingHours);
-        var totalWorkingDays = riderShifts.Count;
+        var totalWorkingDays = goodDays;
 
         // Perform validation
         var validationResult = PerformValidation(
@@ -218,6 +219,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
             lastDayOfMonth);
 
         return new RiderMonthlyValidation(
+            rider.Employee.Housing?.Name ?? "unknown",
             RiderId: rider.Id,
             IqamaNo: rider.EmployeeIqamaNo,
             RiderNameAR: rider.Employee.NameAR,
@@ -313,7 +315,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
         {
             errors.Add(
                 $"⚠️ أيام عمل أقل من {MIN_WORKING_HOURS_PER_DAY} ساعات (تُحتسب كأيام غياب): " +
-                $"الأيام {string.Join(", ", daysWithLessThan10Hours)}");    
+                $":الأيام {string.Join(", ", daysWithLessThan10Hours)}");    
         }
 
         // Add general missing days info if any and not already mentioned
@@ -322,7 +324,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
             var regularMissingDays = missingDays.Except(daysWithLessThan10Hours).ToList();
             if (regularMissingDays.Any())
             {
-                errors.Add($"⚠️ أيام بدون  دوام: {string.Join(", ", regularMissingDays)}");
+                errors.Add($"⚠️ تاريخ الأيام بدون دوام: {string.Join(", ", regularMissingDays)}");
             }
         }
 
@@ -337,9 +339,265 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
 
     private record ValidationResult(bool IsValid, List<string> Errors);
 
+    // Add these methods to ReportService.cs
 
-// Records for Validation Results
-public record MonthlyRiderValidationReport(
+    /// <summary>
+    /// Get daily summary report for Company 2 (Keta) - Report 1: تقرير الى 13-01-2026
+    /// </summary>
+    public async Task<Result<Company2DailySummaryReport>> GetCompany2DailySummaryAsync(
+        DateOnly reportDate,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var monthStart = new DateOnly(reportDate.Year, reportDate.Month, 1);
+
+            // Get all shifts for Company 2 from start of month to report date
+            var shifts = await _dbcontext.RiderShifts
+                .Include(s => s.Rider)
+                    .ThenInclude(r => r.Employee)
+                .Where(s => s.CompanyId == 2 &&
+                           s.ShiftDate >= monthStart &&
+                           s.ShiftDate <= reportDate)
+                .AsNoTracking()
+                .ToListAsync(cancellationToken);
+
+            if (!shifts.Any())
+            {
+                return Result.Failure<Company2DailySummaryReport>(
+                    new Error($"No shifts found for Company 2 up to {reportDate:yyyy-MM-dd}", "no_data", 404));
+            }
+
+            var totalOrders = shifts.Sum(s => s.AcceptedDailyOrders);
+            var totalShifts = shifts.Sum(s=>s.RejectedDailyOrders);
+            var totalWorkingHours = shifts.Sum(s => s.WorkingHours);
+            var avgWorkingHours = totalShifts > 0 ? totalWorkingHours / totalShifts : 0;
+
+            // Calculate on-time delivery rate
+            var totalOnTimeDeliveries =  0;
+
+            var report = new Company2DailySummaryReport(
+                ReportDate: reportDate,
+                PeriodStart: monthStart,
+                PeriodEnd: reportDate,
+                TotalOrdersDelivered: totalOrders,
+                AverageWorkingHours: avgWorkingHours,
+                TotalShifts: totalShifts,
+                TotalRiders: shifts.Select(s => s.RiderId).Distinct().Count()
+            );
+
+            return Result.Success(report);
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<Company2DailySummaryReport>(
+                new Error($"Error generating Company 2 daily summary: {ex.Message}", "server_error", 500));
+        }
+    }
+
+    /// <summary>
+    /// Get cumulative rider statistics for Company 2 - Report 2: اجمالي الطلبات الى 13-01-2026
+    /// </summary>
+    public async Task<Result<Company2CumulativeRiderReport>> GetCompany2CumulativeRiderStatsAsync(
+        DateOnly endDate,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var monthStart = new DateOnly(endDate.Year, endDate.Month, 1);
+            var totalExpectedDays = endDate.Day;
+
+            // Get all shifts for Company 2 in this period
+            var shifts = await _dbcontext.RiderShifts
+                .Include(s => s.Rider)
+                    .ThenInclude(r => r.Employee)
+                .Include(s => s.Housing)
+                .Where(s => s.CompanyId == 2 &&
+                           s.ShiftDate >= monthStart &&
+                           s.ShiftDate <= endDate)
+                .AsNoTracking()
+                .ToListAsync(cancellationToken);
+
+            if (!shifts.Any())
+            {
+                return Result.Failure<Company2CumulativeRiderReport>(
+                    new Error($"No shifts found for Company 2 up to {endDate:yyyy-MM-dd}", "no_data", 404));
+            }
+
+            // Group by rider
+            var riderGroups = shifts.GroupBy(s => s.RiderId);
+            var riderStats = new List<Company2RiderCumulativeStats>();
+
+            foreach (var group in riderGroups)
+            {
+                var rider = group.First().Rider;
+                if (rider?.Employee == null) continue;
+
+                var riderShifts = group.OrderBy(s => s.ShiftDate).ToList();
+                var totalOrders = riderShifts.Sum(s => s.AcceptedDailyOrders);
+                var workingDays = riderShifts.Count;
+                var avgOrdersPerDay = workingDays > 0 ? (float)totalOrders / workingDays : 0;
+
+                // Calculate deficit/surplus (العجز)
+                var targetOrders = totalExpectedDays * TARGET_ORDERS_PER_DAY2;
+                var deficitOrSurplus = totalOrders - targetOrders;
+
+                var housingName = riderShifts.FirstOrDefault()?.Housing?.Name ?? "غير محدد";
+
+                riderStats.Add(new Company2RiderCumulativeStats(
+                    RiderId: rider.Id,
+                    IqamaNo: rider.EmployeeIqamaNo,
+                    RiderNameAR: rider.Employee.NameAR,
+                    WorkingId: rider.WorkingId ?? "0",
+                    TotalOrders: totalOrders,
+                    AverageOrdersPerDay: avgOrdersPerDay,
+                    DeficitOrSurplus: deficitOrSurplus,
+                    HousingGroup: housingName
+                ));
+            }
+
+            // Sort by total orders descending
+            riderStats = riderStats.OrderByDescending(r => r.TotalOrders).ToList();
+
+            // Assign ranks
+            for (int i = 0; i < riderStats.Count; i++)
+            {
+                riderStats[i] = riderStats[i] with { Rank = i + 1 };
+            }
+
+            var report = new Company2CumulativeRiderReport(
+                PeriodStart: monthStart,
+                PeriodEnd: endDate,
+                TotalExpectedDays: totalExpectedDays,
+                RiderStats: riderStats,
+                TotalOrdersAllRiders: riderStats.Sum(r => r.TotalOrders)
+            );
+
+            return Result.Success(report);
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<Company2CumulativeRiderReport>(
+                new Error($"Error generating Company 2 cumulative stats: {ex.Message}", "server_error", 500));
+        }
+    }
+
+    /// <summary>
+    /// Get daily rider details for Company 2 - Report 3: طلبات 13-01-2026
+    /// </summary>
+    public async Task<Result<Company2DailyRiderDetailsReport>> GetCompany2DailyRiderDetailsAsync(
+        DateOnly reportDate,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            // Get all shifts for Company 2 on this specific date
+            var shifts = await _dbcontext.RiderShifts
+                .Include(s => s.Rider)
+                    .ThenInclude(r => r.Employee)
+                .Include(s => s.Housing)
+                .Where(s => s.CompanyId == 2 && s.ShiftDate == reportDate)
+                .AsNoTracking()
+                .ToListAsync(cancellationToken);
+
+            if (!shifts.Any())
+            {
+                return Result.Failure<Company2DailyRiderDetailsReport>(
+                    new Error($"No shifts found for Company 2 on {reportDate:yyyy-MM-dd}", "no_data", 404));
+            }
+
+            var riderDetails = shifts
+                .Select(s => new Company2DailyRiderDetail(
+                    RiderId: s.RiderId,
+                    IqamaNo: s.Rider?.EmployeeIqamaNo ?? 0,
+                    RiderNameAR: s.Rider?.Employee.NameAR ?? "Unknown",
+                    WorkingId: s.WorkingId ?? "0",
+                    OrderCount: s.AcceptedDailyOrders,
+                    WorkingHours: s.WorkingHours,
+                    HousingGroup: s.Housing?.Name ?? "غير محدد",
+                    DriverAppConnectionTime: s.CreatedAt
+                ))
+                .OrderByDescending(r => r.OrderCount)
+                .ToList();
+
+            // Assign ranks
+            for (int i = 0; i < riderDetails.Count; i++)
+            {
+                riderDetails[i] = riderDetails[i] with { Rank = i + 1 };
+            }
+
+            var report = new Company2DailyRiderDetailsReport(
+                ReportDate: reportDate,
+                RiderDetails: riderDetails,
+                TotalOrders: riderDetails.Sum(r => r.OrderCount),
+                TotalRiders: riderDetails.Count,
+                AverageOrdersPerRider: riderDetails.Count > 0
+                    ? (decimal)riderDetails.Sum(r => r.OrderCount) / riderDetails.Count
+                    : 0
+            );
+
+            return Result.Success(report);
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<Company2DailyRiderDetailsReport>(
+                new Error($"Error generating Company 2 daily rider details: {ex.Message}", "server_error", 500));
+        }
+    }
+
+    // Record definitions - add to IReportService.cs
+
+    public record Company2DailySummaryReport(
+        DateOnly ReportDate,
+        DateOnly PeriodStart,
+        DateOnly PeriodEnd,
+        int TotalOrdersDelivered,
+        float AverageWorkingHours,
+        int TotalShifts,
+        int TotalRiders
+    );
+
+    public record Company2CumulativeRiderReport(
+        DateOnly PeriodStart,
+        DateOnly PeriodEnd,
+        int TotalExpectedDays,
+        List<Company2RiderCumulativeStats> RiderStats,
+        int TotalOrdersAllRiders
+    );
+
+    public record Company2RiderCumulativeStats(
+        int RiderId,
+        long IqamaNo,
+        string RiderNameAR,
+        string WorkingId,
+        int TotalOrders,
+        float AverageOrdersPerDay,
+        int DeficitOrSurplus,
+        string HousingGroup,
+        int Rank = 0
+    );
+
+    public record Company2DailyRiderDetailsReport(
+        DateOnly ReportDate,
+        List<Company2DailyRiderDetail> RiderDetails,
+        int TotalOrders,
+        int TotalRiders,
+        decimal AverageOrdersPerRider
+    );
+
+    public record Company2DailyRiderDetail(
+        int RiderId,
+        long IqamaNo,
+        string RiderNameAR,
+        string WorkingId,
+        int OrderCount,
+        float WorkingHours,
+        string HousingGroup,
+        DateTime DriverAppConnectionTime,
+        int Rank = 0
+    );
+    // Records for Validation Results
+    public record MonthlyRiderValidationReport(
     int Year,
     int Month,
     DateOnly StartDate,
@@ -355,6 +613,7 @@ public record MonthlyRiderValidationReport(
 );
 
 public record RiderMonthlyValidation(
+    string HousingName,
     int RiderId,
     long IqamaNo,
     string RiderNameAR,

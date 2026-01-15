@@ -51,6 +51,59 @@ public class ReportController(IReportService service) : ControllerBase
             : result.ToProblem();
     }
 
+    [HttpGet("keta/daily-summary")]
+    //[Authorize(Roles = "Master,Admin")]
+    public async Task<IActionResult> GetCompany2DailySummary(
+    [FromQuery] DateOnly reportDate,
+    CancellationToken cancellationToken = default)
+    {
+        var result = await service.GetCompany2DailySummaryAsync(
+            reportDate,
+            cancellationToken);
+
+        return result.IsSuccess
+            ? Ok(result.Value)
+            : result.ToProblem();
+    }
+
+    /// <summary>
+    /// Get Company 2 (Keta) cumulative rider statistics - اجمالي الطلبات الى 13-01-2026
+    /// Shows rider rankings with total orders, average orders per day, and deficit/surplus
+    /// </summary>
+    [HttpGet("keta/cumulative-stats")]
+    //[Authorize(Roles = "Master,Admin")]
+    public async Task<IActionResult> GetCompany2CumulativeStats(
+        [FromQuery] DateOnly endDate,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await service.GetCompany2CumulativeRiderStatsAsync(
+            endDate,
+            cancellationToken);
+
+        return result.IsSuccess
+            ? Ok(result.Value)
+            : result.ToProblem();
+    }
+
+    /// <summary>
+    /// Get Company 2 (Keta) daily rider details - طلبات 13-01-2026
+    /// Shows individual rider performance for a specific day
+    /// </summary>
+    [HttpGet("keta/daily-rider-details")]
+    //[Authorize(Roles = "Master,Admin")]
+    public async Task<IActionResult> GetCompany2DailyRiderDetails(
+        [FromQuery] DateOnly reportDate,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await service.GetCompany2DailyRiderDetailsAsync(
+            reportDate,
+            cancellationToken);
+
+        return result.IsSuccess
+            ? Ok(result.Value)
+            : result.ToProblem();
+    }
+
 
     [HttpGet("rider-daily-detail")]
     public async Task<IActionResult> GetRiderDailyDetail(
