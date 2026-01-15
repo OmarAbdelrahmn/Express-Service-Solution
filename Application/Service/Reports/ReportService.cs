@@ -169,7 +169,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                         WorkingHours: shift.WorkingHours,
                         AcceptedOrders: shift.AcceptedDailyOrders,
                         IsValid: false,
-                        Reason: $"Working hours ({shift.WorkingHours:F1}h) less than {MIN_WORKING_HOURS_PER_DAY}h"
+                        Reason: $"ساعات العمل ({shift.WorkingHours:F1} ساعة) أقل من {MIN_WORKING_HOURS_PER_DAY} ساعات"
                     ));
                 }
                 else
@@ -182,7 +182,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                         WorkingHours: shift.WorkingHours,
                         AcceptedOrders: shift.AcceptedDailyOrders,
                         IsValid: true,
-                        Reason: "✓ Valid"
+                        Reason: "✓ صالح"
                     ));
                 }
             }
@@ -255,7 +255,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
         if (totalMissingDays > MAX_ALLOWED_MISSING_DAYS)
         {
             isValid = false;
-            errors.Add($"❌ Too many missing days: {totalMissingDays} (max allowed: {MAX_ALLOWED_MISSING_DAYS})");
+            errors.Add($"❌ عدد أيام الغياب كبير جدًا: {totalMissingDays} (الحد الأقصى المسموح: {MAX_ALLOWED_MISSING_DAYS})");
         }
 
         // Rule 2: Check first 3 days (only if they fall within the current period)
@@ -282,7 +282,9 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
         {
             // All non-critical days are present, but more than 1 critical day is missing
             isValid = false;
-            errors.Add($"❌ Missing {missingInCritical.Count} critical days (first {FIRST_CRITICAL_DAYS} or last {LAST_CRITICAL_DAYS}), only 1 allowed when all other days are present: Days {string.Join(", ", missingInCritical)}");
+            errors.Add(
+                $"❌ تم فقدان {missingInCritical.Count} أيام حرجة (أول {FIRST_CRITICAL_DAYS} أيام أو آخر {LAST_CRITICAL_DAYS} أيام)، " +
+                $"المسموح فقط يوم واحد عند اكتمال باقي الأيام. الأيام: {string.Join(", ", missingInCritical)}");
         }
         else if (missingInCritical.Count > 0 && missingInNonCritical.Count > 0)
         {
@@ -290,11 +292,11 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
             isValid = false;
             if (missingInFirst3.Any())
             {
-                errors.Add($"❌ Missing days in first {FIRST_CRITICAL_DAYS} days: Days {string.Join(", ", missingInFirst3)}");
+                errors.Add($"❌ أيام مفقودة في أول {FIRST_CRITICAL_DAYS} أيام: الأيام {string.Join(", ", missingInFirst3)}");
             }
             if (missingInLast4.Any())
             {
-                errors.Add($"❌ Missing days in last {LAST_CRITICAL_DAYS} days: Days {string.Join(", ", missingInLast4)}");
+                errors.Add($"❌ أيام مفقودة في آخر {LAST_CRITICAL_DAYS} أيام: الأيام {string.Join(", ", missingInLast4)}");
             }
         }
 
@@ -303,13 +305,15 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
         {
             isValid = false;
             var shortage = targetOrders - totalOrders;
-            errors.Add($"❌ Insufficient orders: {totalOrders} (required: {targetOrders}, shortage: {shortage})");
+            errors.Add($"❌ عدد الطلبات غير كافٍ: {totalOrders} (المطلوب: {targetOrders}، النقص: {shortage})");
         }
 
         // Add details about days with less than 10 hours
         if (daysWithLessThan10Hours.Any())
         {
-            errors.Add($"⚠️ Days with less than {MIN_WORKING_HOURS_PER_DAY} working hours (counted as missing): Days {string.Join(", ", daysWithLessThan10Hours)}");
+            errors.Add(
+                $"⚠️ أيام عمل أقل من {MIN_WORKING_HOURS_PER_DAY} ساعات (تُحتسب كأيام غياب): " +
+                $"الأيام {string.Join(", ", daysWithLessThan10Hours)}");    
         }
 
         // Add general missing days info if any and not already mentioned
@@ -318,14 +322,14 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
             var regularMissingDays = missingDays.Except(daysWithLessThan10Hours).ToList();
             if (regularMissingDays.Any())
             {
-                errors.Add($"⚠️ Days with no shifts: {string.Join(", ", regularMissingDays)}");
+                errors.Add($"⚠️ أيام بدون  دوام: {string.Join(", ", regularMissingDays)}");
             }
         }
 
         // If no errors, add success message
         if (!errors.Any())
         {
-            errors.Add("✅ All validation criteria met");
+            errors.Add("✅ جميع شروط التحقق مستوفاة");
         }
 
         return new ValidationResult(isValid, errors);
