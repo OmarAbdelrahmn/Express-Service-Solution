@@ -1140,8 +1140,17 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
                 return Result.Failure(
                     new Error("InvalidResolution", "Resolution must be 'Approved' or 'Rejected'", 400));
 
+
+            var vehicle = await dbcontext.Vehicles
+                
+                .FirstOrDefaultAsync(v => v.PlateNumberA == request.Plate)
+                ;
+            if (vehicle == null)
+                return Result.Failure(
+                    new Error("NoVehicle", "Vehicle not found", 404));
+
             var operation = await dbcontext.TempVehicleOperations
-                .Where(t => t.RiderIqamaNo == request.RiderIqamaNo && !t.IsResolved)
+                .Where(t => t.VehicleNumber == vehicle.VehicleNumber && !t.IsResolved)
                 .Include(t => t.Rider)
                     .ThenInclude(r => r.Employee)
                 .Include(t => t.Vehicle)
@@ -1728,6 +1737,13 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
 
     private async Task<Result> ExecuteReturnOperation(TempVehicleOperation operation)
     {
+        // Special case: Vehicle fix (no rider involved)
+        if (operation.RiderIqamaNo == 0 || !operation.RiderIqamaNo.HasValue)
+        {
+            return await ExecuteVehicleFixOperation(operation);
+        }
+
+        // Normal return operation with rider
         var rider = await dbcontext.RiderDetails
             .FirstOrDefaultAsync(r => r.EmployeeIqamaNo == operation.RiderIqamaNo);
 
@@ -1745,8 +1761,8 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
 
         // End permission
         await EndPermission(activeStatus);
-        rider.VehicleNumber = null;
 
+        rider.VehicleNumber = null;
 
         dbcontext.RiderVehicleStatus.Add(new RiderVehicleStatus
         {
@@ -1755,12 +1771,44 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
             StatusType = VehicleStatusType.Returned,
             Reason = operation.Reason,
             IsActive = false,
-            Permission = activeStatus.Permission, // Use existing permission from Taken status
-            PermissionStartDate = activeStatus.PermissionStartDate, // Keep original start date
-            PermissionEndDate = DateTime.UtcNow.AddHours(3) // End permission NOW
+            Permission = activeStatus.Permission,
+            PermissionStartDate = activeStatus.PermissionStartDate,
+            PermissionEndDate = DateTime.UtcNow.AddHours(3)
         });
 
         await dbcontext.SaveChangesAsync();
+
+        return Result.Success();
+    }
+
+    // NEW METHOD: Handle vehicle fix (no rider)
+    private async Task<Result> ExecuteVehicleFixOperation(TempVehicleOperation operation)
+    {
+        // Find the active problem status
+        var activeProblemStatus = await dbcontext.RiderVehicleStatus
+            .FirstOrDefaultAsync(s => s.VehicleNumber == operation.VehicleNumber &&
+                                     s.IsActive &&
+                                     s.StatusType == VehicleStatusType.Problem);
+
+        if (activeProblemStatus == null)
+            return Result.Failure(new Error("NoProblem", "No active problem found for this vehicle", 404));
+
+        // Deactivate the problem status
+        activeProblemStatus.IsActive = false;
+
+        // Add a new "Returned" status (vehicle is now available)
+        dbcontext.RiderVehicleStatus.Add(new RiderVehicleStatus
+        {
+            EmployeeIqamaNo = null, // No rider - vehicle is just being fixed
+            VehicleNumber = operation.VehicleNumber,
+            StatusType = VehicleStatusType.Returned,
+            Reason = operation.Reason ?? "Vehicle problem fixed - now available",
+            IsActive = true, // ✅ Vehicle is now available
+            Timestamp = DateTime.UtcNow.AddHours(3)
+        });
+
+        await dbcontext.SaveChangesAsync();
+
         return Result.Success();
     }
 

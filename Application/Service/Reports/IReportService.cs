@@ -8,6 +8,41 @@ namespace Application.Service.Reports;
 
 public interface IReportService
 {
+    /// <summary>
+    /// Get monthly performance distribution for Company 2 (Keta)
+    /// Shows percentage of riders in different performance tiers
+    /// </summary>
+    /// 
+    /// <summary>
+    /// Compare orders between two time periods for a specific company
+    /// </summary>
+    Task<Result<PeriodOrdersComparison>> ComparePeriodOrdersForCompanyAsync(
+        int companyId,
+        DateOnly period2Start,
+        DateOnly period2End,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Get daily summary report grouped by housing for a specific company
+    /// </summary>
+    Task<Result<HousingDailySummaryReport>> GetHousingDailySummaryForCompanyAsync(
+        int companyId,
+        DateOnly reportDate,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Get detailed daily report with individual riders grouped by housing for a specific company
+    /// </summary>
+    Task<Result<HousingDailyDetailedReport>> GetHousingDailyDetailedReportForCompanyAsync(
+        int companyId,
+        DateOnly reportDate,
+        CancellationToken cancellationToken = default);
+
+
+    Task<Result<Company2MonthlyPerformanceDistribution>> GetCompany2MonthlyPerformanceDistributionAsync(
+              DateOnly startDate,
+      DateOnly endDate,
+        CancellationToken cancellationToken = default);
     Task<Result<Company2DailySummaryReport>> GetCompany2DailySummaryAsync(
     DateOnly reportDate,
     CancellationToken cancellationToken = default);
@@ -922,3 +957,65 @@ public record WeeklyTrend(
     int TotalOrders,
     decimal AveragePerformance
 );
+
+// Company 2 Monthly Performance Distribution Records
+public record Company2MonthlyPerformanceDistribution(
+    int Year,
+    int Month,
+    DateOnly StartDate,
+    DateOnly CurrentDate,
+    int TotalExpectedDays,
+    int CurrentDayOfMonth,
+    int TargetOrdersToDate,
+    CompanyPerformanceSummary CompanySummary,
+    List<HousingPerformanceDistribution> HousingDistributions,
+    List<RiderPerformanceDetail> RiderDetails
+);
+
+public record CompanyPerformanceSummary(
+    int TotalRiders,
+    int TotalOrders,
+    PerformanceTierDistribution TierDistribution
+);
+
+public record HousingPerformanceDistribution(
+    int HousingId,
+    string HousingName,
+    int TotalRiders,
+    int TotalOrders,
+    PerformanceTierDistribution TierDistribution,
+    List<RiderPerformanceDetail> Riders
+);
+
+public record PerformanceTierDistribution(
+    int ExcellentCount,
+    decimal ExcellentPercentage,
+    int GoodCount,
+    decimal GoodPercentage,
+    int PoorCount,
+    decimal PoorPercentage,
+    string Summary
+);
+
+public record RiderPerformanceDetail(
+    int RiderId,
+    long IqamaNo,
+    string RiderNameAR,
+    string RiderNameEN,
+    string WorkingId,
+    string HousingName,
+    int TotalOrders,
+    int TargetOrders,
+    int OrdersDifference,
+    decimal AverageOrdersPerDay,
+    int TotalWorkingDays,
+    PerformanceTier Tier,
+    string TierDescription
+);
+
+public enum PerformanceTier
+{
+    Excellent = 1,  // 400+ orders (14+ per day average)
+    Good = 2,       // 301-400 orders (10-13 per day average)
+    Poor = 3        // 1-300 orders (1-9 per day average)
+}

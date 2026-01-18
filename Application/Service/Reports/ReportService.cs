@@ -37,6 +37,514 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
     private const int FIRST_CRITICAL_DAYS = 3;
     private const int LAST_CRITICAL_DAYS = 4;
 
+
+    public async Task<Result<PeriodOrdersComparison>> ComparePeriodOrdersForCompanyAsync(
+    int companyId,
+    DateOnly period2Start,
+    DateOnly period2End,
+    CancellationToken cancellationToken = default)
+    {
+        // Validate period 2 dates
+        if (period2End < period2Start)
+            return Result.Failure<PeriodOrdersComparison>(
+                new Error("Period 2: End date must be after or equal to start date", "invalid_input", 400));
+
+        // Automatically calculate Period 1 (previous month of Period 2)
+        var period1Start = period2Start.AddMonths(-1);
+        var period1End = period2End.AddMonths(-1);
+
+        try
+        {
+            // Get shifts for period 1 filtered by company
+            var period1Shifts = await _dbcontext.RiderShifts
+                .Where(s => s.ShiftDate >= period1Start &&
+                           s.ShiftDate <= period1End &&
+                           s.CompanyId == companyId)
+                .AsNoTracking()
+                .ToListAsync(cancellationToken);
+
+            // Get shifts for period 2 filtered by company
+            var period2Shifts = await _dbcontext.RiderShifts
+                .Where(s => s.ShiftDate >= period2Start &&
+                           s.ShiftDate <= period2End &&
+                           s.CompanyId == companyId)
+                .AsNoTracking()
+                .ToListAsync(cancellationToken);
+
+            // Calculate total orders for each period
+            var period1TotalOrders = period1Shifts.Sum(s => s.AcceptedDailyOrders);
+            var period2TotalOrders = period2Shifts.Sum(s => s.AcceptedDailyOrders);
+
+            // Calculate difference and percentage
+            var ordersDifference = period2TotalOrders - period1TotalOrders;
+            var changePercentage = period1TotalOrders > 0
+                ? Math.Round(((decimal)ordersDifference / period1TotalOrders) * 100, 2)
+                : (period2TotalOrders > 0 ? 100m : 0m);
+
+            // Generate trend description
+            var trendDescription = GenerateTrendDescription(
+                ordersDifference, changePercentage, period1TotalOrders, period2TotalOrders);
+
+            var comparison = new PeriodOrdersComparison(
+                Period1Start: period1Start,
+                Period1End: period1End,
+                Period2Start: period2Start,
+                Period2End: period2End,
+                Period1TotalOrders: period1TotalOrders,
+                Period2TotalOrders: period2TotalOrders,
+                OrdersDifference: ordersDifference,
+                ChangePercentage: changePercentage,
+                TrendDescription: trendDescription
+            );
+
+            return Result.Success(comparison);
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<PeriodOrdersComparison>(
+                new Error($"Error comparing periods: {ex.Message}", "server_error", 500));
+        }
+    }
+
+    public async Task<Result<HousingDailySummaryReport>> GetHousingDailySummaryForCompanyAsync(
+        int companyId,
+        DateOnly reportDate,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            // Get all shifts for the specified date and company with housing information
+            var shifts = await _dbcontext.RiderShifts
+                .Include(m => m.Housing)
+                .Include(s => s.Rider)
+                    .ThenInclude(r => r.Employee)
+                .Where(s => s.ShiftDate == reportDate && s.CompanyId == companyId)
+                .AsNoTracking()
+                .ToListAsync(cancellationToken);
+
+            if (!shifts.Any())
+            {
+                return Result.Failure<HousingDailySummaryReport>(
+                    new Error($"No shifts found for company {companyId} on {reportDate:yyyy-MM-dd}", "no_data", 404));
+            }
+
+            // Filter shifts with valid housing
+            var validShifts = shifts
+                .Where(s => s.Housing != null)
+                .ToList();
+
+            if (!validShifts.Any())
+            {
+                return Result.Failure<HousingDailySummaryReport>(
+                    new Error($"No shifts with housing information found for {reportDate:yyyy-MM-dd}", "no_data", 404));
+            }
+
+            // Calculate totals
+            var totalOrders = validShifts.Sum(s => s.AcceptedDailyOrders);
+            var totalRiders = validShifts.Select(s => s.RiderId).Distinct().Count();
+
+            // Group by housing
+            var housingGroups = validShifts
+                .GroupBy(s => new {
+                    HousingId = s.HousingId ?? 0,
+                    HousingName = s.Housing?.Name ?? "Unknown"
+                });
+
+            var housingSummaries = new List<HousingDailySummary>();
+
+            foreach (var group in housingGroups)
+            {
+                var housingShifts = group.ToList();
+                var housingOrders = housingShifts.Sum(s => s.AcceptedDailyOrders);
+                var activeRiders = housingShifts.Select(s => s.RiderId).Distinct().Count();
+                var avgOrdersPerRider = activeRiders > 0
+                    ? Math.Round((decimal)housingOrders / activeRiders, 2)
+                    : 0;
+                var percentageOfTotal = totalOrders > 0
+                    ? Math.Round((decimal)housingOrders / totalOrders * 100, 2)
+                    : 0;
+
+                housingSummaries.Add(new HousingDailySummary(
+                    HousingId: group.Key.HousingId,
+                    HousingName: group.Key.HousingName,
+                    TotalOrders: housingOrders,
+                    ActiveRiders: activeRiders,
+                    AverageOrdersPerRider: avgOrdersPerRider,
+                    PercentageOfTotalOrders: percentageOfTotal
+                ));
+            }
+
+            // Sort by total orders descending
+            housingSummaries = housingSummaries
+                .OrderByDescending(h => h.TotalOrders)
+                .ToList();
+
+            var avgOrdersPerRiderOverall = totalRiders > 0
+                ? Math.Round((decimal)totalOrders / totalRiders, 2)
+                : 0;
+
+            var report = new HousingDailySummaryReport(
+                ReportDate: reportDate,
+                HousingSummaries: housingSummaries,
+                TotalOrders: totalOrders,
+                TotalRiders: totalRiders,
+                AverageOrdersPerRider: avgOrdersPerRiderOverall
+            );
+
+            return Result.Success(report);
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<HousingDailySummaryReport>(
+                new Error($"Error generating housing daily summary: {ex.Message}", "server_error", 500));
+        }
+    }
+
+    public async Task<Result<HousingDailyDetailedReport>> GetHousingDailyDetailedReportForCompanyAsync(
+        int companyId,
+        DateOnly reportDate,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            // Get all shifts for the specified date and company with full details
+            var shifts = await _dbcontext.RiderShifts
+                .Include(m => m.Housing)
+                .Include(s => s.Rider)
+                    .ThenInclude(r => r.Employee)
+                .Where(s => s.ShiftDate == reportDate && s.CompanyId == companyId)
+                .AsNoTracking()
+                .ToListAsync(cancellationToken);
+
+            if (!shifts.Any())
+            {
+                return Result.Failure<HousingDailyDetailedReport>(
+                    new Error($"No shifts found for company {companyId} on {reportDate:yyyy-MM-dd}", "no_data", 404));
+            }
+
+            // Filter shifts with valid housing
+            var validShifts = shifts
+                .Where(s => s.Housing != null)
+                .ToList();
+
+            if (!validShifts.Any())
+            {
+                return Result.Failure<HousingDailyDetailedReport>(
+                    new Error($"No shifts with housing information found for {reportDate:yyyy-MM-dd}", "no_data", 404));
+            }
+
+            // Calculate grand totals
+            var grandTotalOrders = validShifts.Sum(s => s.AcceptedDailyOrders);
+            var grandTotalRiders = validShifts.Select(s => s.RiderId).Distinct().Count();
+
+            // Group by housing
+            var housingGroups = validShifts
+                .GroupBy(s => new {
+                    HousingId = s.HousingId ?? 0,
+                    HousingName = s.Housing?.Name ?? "Unknown"
+                });
+
+            var housingDetails = new List<HousingDailyDetails>();
+
+            foreach (var group in housingGroups)
+            {
+                var housingShifts = group.ToList();
+                var housingTotalOrders = housingShifts.Sum(s => s.AcceptedDailyOrders);
+                var housingRiderCount = housingShifts.Select(s => s.RiderId).Distinct().Count();
+                var percentageOfCompany = grandTotalOrders > 0
+                    ? Math.Round((decimal)housingTotalOrders / grandTotalOrders * 100, 2)
+                    : 0;
+
+                // Get individual rider performances
+                var riderPerformances = housingShifts
+                    .Select(s => new RiderDailyPerformance(
+                        RiderId: s.RiderId,
+                        RiderName: s.Rider?.Employee.NameAR ?? "Unknown",
+                        RiderNameE: s.Rider?.Employee.NameEN ?? "Unknown",
+                        PhoneNumber: s.Rider?.Employee.Phone ?? "050",
+                        WorkingId: s.WorkingId ?? "0",
+                        AcceptedOrders: s.AcceptedDailyOrders,
+                        ShiftDate: s.ShiftDate
+                    ))
+                    .OrderByDescending(r => r.AcceptedOrders)
+                    .ToList();
+
+                housingDetails.Add(new HousingDailyDetails(
+                    HousingId: group.Key.HousingId,
+                    HousingName: group.Key.HousingName,
+                    Riders: riderPerformances,
+                    HousingTotalOrders: housingTotalOrders,
+                    HousingRiderCount: housingRiderCount,
+                    PercentageOfCompanyTotal: percentageOfCompany
+                ));
+            }
+
+            // Sort by total orders descending
+            housingDetails = housingDetails
+                .OrderByDescending(h => h.HousingTotalOrders)
+                .ToList();
+
+            var report = new HousingDailyDetailedReport(
+                ReportDate: reportDate,
+                HousingDetails: housingDetails,
+                GrandTotalOrders: grandTotalOrders,
+                GrandTotalRiders: grandTotalRiders
+            );
+
+            return Result.Success(report);
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<HousingDailyDetailedReport>(
+                new Error($"Error generating housing daily detailed report: {ex.Message}", "server_error", 500));
+        }
+    }
+
+
+    public async Task<Result<Company2MonthlyPerformanceDistribution>> GetCompany2MonthlyPerformanceDistributionAsync(
+        DateOnly startDate,
+        DateOnly endDate,
+        CancellationToken cancellationToken = default)
+    {
+        if (endDate < startDate)
+            return Result.Failure<Company2MonthlyPerformanceDistribution>(
+                new Error("End date must be after or equal to start date", "invalid_input", 400));
+
+        try
+        {
+            var today = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3));
+
+            // Use the provided end date, or yesterday if end date is in the future
+            var currentDate = endDate > today ? today.AddDays(-2) : endDate;
+
+            var totalExpectedDays = (currentDate.DayNumber - startDate.DayNumber) + 1;
+            var targetOrdersToDate = totalExpectedDays * TARGET_ORDERS_PER_DAY; // 14 orders per day for Company 2
+
+            // Get all shifts for company 2 in this period
+            var shifts = await _dbcontext.RiderShifts
+                .Include(s => s.Rider)
+                    .ThenInclude(r => r.Employee)
+                        .ThenInclude(e => e.Housing)
+                .Where(s => s.CompanyId == 1 &&
+                           s.ShiftDate >= startDate &&
+                           s.ShiftDate <= currentDate)
+                .AsNoTracking()
+                .ToListAsync(cancellationToken);
+
+            if (!shifts.Any())
+            {
+                return Result.Failure<Company2MonthlyPerformanceDistribution>(
+                    new Error($"No shifts found for Company 1 between {startDate:yyyy-MM-dd} and {currentDate:yyyy-MM-dd}", "no_data", 404));
+            }
+
+            // Group by rider and calculate individual performance
+            var riderGroups = shifts.GroupBy(s => s.RiderId);
+            var riderPerformanceDetails = new List<RiderPerformanceDetail>();
+
+            foreach (var group in riderGroups)
+            {
+                var rider = group.First().Rider;
+                if (rider?.Employee == null) continue;
+
+                var riderShifts = group.ToList();
+                var totalOrders = riderShifts.Sum(s => s.AcceptedDailyOrders);
+                var totalWorkingDays = riderShifts.Count;
+                var averageOrdersPerDay = totalWorkingDays > 0 ? (decimal)totalOrders / totalWorkingDays : 0;
+                var ordersDifference = totalOrders - targetOrdersToDate;
+
+                // Determine performance tier based on total orders and period length
+                var tier = DeterminePerformanceTier(totalOrders, totalExpectedDays);
+                var tierDescription = GetTierDescription(tier, totalOrders, totalExpectedDays);
+
+                riderPerformanceDetails.Add(new RiderPerformanceDetail(
+                    RiderId: rider.Id,
+                    IqamaNo: rider.EmployeeIqamaNo,
+                    RiderNameAR: rider.Employee.NameAR,
+                    RiderNameEN: rider.Employee.NameEN,
+                    WorkingId: rider.WorkingId ?? "0",
+                    HousingName: rider.Employee.Housing?.Name ?? "غير محدد",
+                    TotalOrders: totalOrders,
+                    TargetOrders: targetOrdersToDate,
+                    OrdersDifference: ordersDifference,
+                    AverageOrdersPerDay: averageOrdersPerDay,
+                    TotalWorkingDays: totalWorkingDays,
+                    Tier: tier,
+                    TierDescription: tierDescription
+                ));
+            }
+
+            // Calculate company-wide distribution
+            var companySummary = CalculateCompanyDistribution(riderPerformanceDetails);
+
+            // Calculate housing-wise distributions
+            var housingDistributions = CalculateHousingDistributions(riderPerformanceDetails);
+
+            // Sort riders by total orders descending
+            riderPerformanceDetails = riderPerformanceDetails
+                .OrderByDescending(r => r.TotalOrders)
+                .ToList();
+
+            var report = new Company2MonthlyPerformanceDistribution(
+                Year: startDate.Year,
+                Month: startDate.Month,
+                StartDate: startDate,
+                CurrentDate: currentDate,
+                TotalExpectedDays: totalExpectedDays,
+                CurrentDayOfMonth: currentDate.Day,
+                TargetOrdersToDate: targetOrdersToDate,
+                CompanySummary: companySummary,
+                HousingDistributions: housingDistributions,
+                RiderDetails: riderPerformanceDetails
+            );
+
+            return Result.Success(report);
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<Company2MonthlyPerformanceDistribution>(
+                new Error($"Error generating performance distribution: {ex.Message}", "server_error", 500));
+        }
+    }
+
+    private PerformanceTier DeterminePerformanceTier(int totalOrders, int totalExpectedDays)
+    {
+        // Dynamic thresholds based on period length
+        // Excellent: 14+ orders per day
+        // Good: 10-13 orders per day
+        // Poor: below 10 orders per day
+
+        var excellentThreshold = 14 * totalExpectedDays;
+        var goodThreshold = 10 * totalExpectedDays;
+
+        if (totalOrders >= excellentThreshold)
+            return PerformanceTier.Excellent;
+        else if (totalOrders >= goodThreshold)
+            return PerformanceTier.Good;
+        else
+            return PerformanceTier.Poor;
+    }
+
+    private string GetTierDescription(PerformanceTier tier, int totalOrders, int totalExpectedDays)
+    {
+        var excellentThreshold = 14 * totalExpectedDays;
+        var goodThreshold = 10 * totalExpectedDays;
+
+        return tier switch
+        {
+            PerformanceTier.Excellent => $"🌟 Excellent - {totalOrders} orders (14+ per day average, target: {excellentThreshold}+)",
+            PerformanceTier.Good => $"✅ Good - {totalOrders} orders (10-13 per day average, target: {goodThreshold}-{excellentThreshold - 1})",
+            PerformanceTier.Poor => $"⚠️ Needs Improvement - {totalOrders} orders (below 10 per day average, target: {goodThreshold}+)",
+            _ => "Unknown"
+        };
+    }
+
+    private CompanyPerformanceSummary CalculateCompanyDistribution(
+        List<RiderPerformanceDetail> riders)
+    {
+        var totalRiders = riders.Count;
+        var totalOrders = riders.Sum(r => r.TotalOrders);
+
+        var excellentCount = riders.Count(r => r.Tier == PerformanceTier.Excellent);
+        var goodCount = riders.Count(r => r.Tier == PerformanceTier.Good);
+        var poorCount = riders.Count(r => r.Tier == PerformanceTier.Poor);
+
+        var excellentPercentage = totalRiders > 0 ? (decimal)excellentCount / totalRiders * 100 : 0;
+        var goodPercentage = totalRiders > 0 ? (decimal)goodCount / totalRiders * 100 : 0;
+        var poorPercentage = totalRiders > 0 ? (decimal)poorCount / totalRiders * 100 : 0;
+
+        var summary = GenerateDistributionSummary(excellentCount, goodCount, poorCount, totalRiders);
+
+        var tierDistribution = new PerformanceTierDistribution(
+            ExcellentCount: excellentCount,
+            ExcellentPercentage: excellentPercentage,
+            GoodCount: goodCount,
+            GoodPercentage: goodPercentage,
+            PoorCount: poorCount,
+            PoorPercentage: poorPercentage,
+            Summary: summary
+        );
+
+        return new CompanyPerformanceSummary(
+            TotalRiders: totalRiders,
+            TotalOrders: totalOrders,
+            TierDistribution: tierDistribution
+        );
+    }
+
+    private List<HousingPerformanceDistribution> CalculateHousingDistributions(
+        List<RiderPerformanceDetail> allRiders)
+    {
+        var housingGroups = allRiders.GroupBy(r => r.HousingName);
+        var distributions = new List<HousingPerformanceDistribution>();
+
+        foreach (var group in housingGroups)
+        {
+            var housingName = group.Key;
+            var housingRiders = group.ToList();
+            var totalRiders = housingRiders.Count;
+            var totalOrders = housingRiders.Sum(r => r.TotalOrders);
+
+            var excellentCount = housingRiders.Count(r => r.Tier == PerformanceTier.Excellent);
+            var goodCount = housingRiders.Count(r => r.Tier == PerformanceTier.Good);
+            var poorCount = housingRiders.Count(r => r.Tier == PerformanceTier.Poor);
+
+            var excellentPercentage = totalRiders > 0 ? (decimal)excellentCount / totalRiders * 100 : 0;
+            var goodPercentage = totalRiders > 0 ? (decimal)goodCount / totalRiders * 100 : 0;
+            var poorPercentage = totalRiders > 0 ? (decimal)poorCount / totalRiders * 100 : 0;
+
+            var summary = GenerateDistributionSummary(excellentCount, goodCount, poorCount, totalRiders);
+
+            var tierDistribution = new PerformanceTierDistribution(
+                ExcellentCount: excellentCount,
+                ExcellentPercentage: excellentPercentage,
+                GoodCount: goodCount,
+                GoodPercentage: goodPercentage,
+                PoorCount: poorCount,
+                PoorPercentage: poorPercentage,
+                Summary: summary
+            );
+
+            // Get housing ID from first rider (they all have the same housing)
+            var housing = _dbcontext.Housings
+                .FirstOrDefault(h => h.Name == housingName);
+
+            distributions.Add(new HousingPerformanceDistribution(
+                HousingId: housing?.Id ?? 0,
+                HousingName: housingName,
+                TotalRiders: totalRiders,
+                TotalOrders: totalOrders,
+                TierDistribution: tierDistribution,
+                Riders: housingRiders.OrderByDescending(r => r.TotalOrders).ToList()
+            ));
+        }
+
+        return distributions.OrderByDescending(h => h.TotalOrders).ToList();
+    }
+
+    private string GenerateDistributionSummary(
+        int excellentCount,
+        int goodCount,
+        int poorCount,
+        int totalRiders)
+    {
+        if (totalRiders == 0)
+            return "No riders data available";
+
+        var excellentPercent = (decimal)excellentCount / totalRiders * 100;
+        var goodPercent = (decimal)goodCount / totalRiders * 100;
+        var poorPercent = (decimal)poorCount / totalRiders * 100;
+
+        if (excellentPercent >= 50)
+            return $"🌟 Outstanding: {excellentPercent:F1}% excellent performers";
+        else if (excellentPercent + goodPercent >= 70)
+            return $"✅ Strong: {excellentPercent:F1}% excellent, {goodPercent:F1}% good";
+        else if (poorPercent >= 50)
+            return $"⚠️ Attention Needed: {poorPercent:F1}% need improvement";
+        else
+            return $"📊 Mixed: {excellentPercent:F1}% excellent, {goodPercent:F1}% good, {poorPercent:F1}% improving";
+    }
+
+
     public async Task<Result<MonthlyRiderValidationReport>> GetCompany2MonthlyRiderValidationAsync(
        int year,
        int month,
