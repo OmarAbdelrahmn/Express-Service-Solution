@@ -5,7 +5,7 @@ using Domain;
 using Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 
-namespace Application.Service;
+namespace Application.Service.Hungerdisa;
 
 public class HungerDisabilityService(
     ApplicationDbcontext dbcontext,

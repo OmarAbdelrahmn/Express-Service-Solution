@@ -4,7 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 
-namespace Application.Service;
+namespace Application.Service.Hungerdisa;
 
 public interface IHungerDisabilityService
 {

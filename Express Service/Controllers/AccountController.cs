@@ -1,6 +1,6 @@
 ﻿using Application.Contracts.Users;
 using Application.Extensions;
-using Application.User;
+using Application.Service.User;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 

@@ -1,7 +1,7 @@
 ﻿using Application.Abstraction;
 using Application.Contracts.Auth;
 
-namespace Application.Auth;
+namespace Application.Service.Auth;
 
 public interface IAuthService
 {

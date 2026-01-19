@@ -7,7 +7,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 
-namespace Application.User;
+namespace Application.Service.User;
 
 public class UserServices(UserManager<ApplicationUser> manager) : IUserService
 {

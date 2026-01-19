@@ -2,7 +2,7 @@
 using Application.Contracts.Users;
 
 
-namespace Application.Admin;
+namespace Application.Service.Admin;
 
 public interface IAdminService
 {

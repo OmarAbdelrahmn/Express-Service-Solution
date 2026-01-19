@@ -4,9 +4,9 @@ using Microsoft.AspNetCore.Http;
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
-using static Application.Service.ImportService;
+using static Application.Service.Import.ImportService;
 
-namespace Application.Service;
+namespace Application.Service.Import;
 
 public interface IImportService
 {

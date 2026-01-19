@@ -1,6 +1,6 @@
-﻿using Application.Admin;
+﻿using Application.Service.Admin;
 using Application.Service.DE;
-using Application.User;
+using Application.Service.User;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR.Protocol;

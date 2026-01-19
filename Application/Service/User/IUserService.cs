@@ -1,7 +1,7 @@
 ﻿using Application.Abstraction;
 using Application.Contracts.Users;
 
-namespace Application.User;
+namespace Application.Service.User;
 
 public interface IUserService
 {

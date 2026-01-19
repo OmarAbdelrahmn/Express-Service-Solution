@@ -1,5 +1,4 @@
-﻿
-using Application.Abstraction;
+﻿using Application.Abstraction;
 using Application.Abstraction.Errors;
 using Application.Contracts.Users;
 using Domain;
@@ -10,7 +9,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using System.Data;
 
-namespace Application.Admin;
+namespace Application.Service.Admin;
 
 public class AdminService(
      UserManager<ApplicationUser> manager

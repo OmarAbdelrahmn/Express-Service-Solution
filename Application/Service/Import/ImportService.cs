@@ -12,9 +12,9 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
-using static Application.Service.ImportService;
+using static Application.Service.Import.ImportService;
 
-namespace Application.Service;
+namespace Application.Service.Import;
 
 public class ImportService(ApplicationDbcontext dbcontext) : IImportService
 {

@@ -1,11 +1,11 @@
-﻿using Application.Service;
-using Application.Service.Backgroundimports;
+﻿using Application.Service.Backgroundimports;
+using Application.Service.Import;
 using k8s.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Timeouts;
 using Microsoft.AspNetCore.Mvc;
-using static Application.Service.ImportService;
+using static Application.Service.Import.ImportService;
 
 namespace Express_Service.Controllers;
 

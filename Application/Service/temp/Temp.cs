@@ -8,7 +8,7 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Text;
 
-namespace Application.Service;
+namespace Application.Service.temp;
 
 public class Temp(ApplicationDbcontext dbcontext) : ITemp
 {

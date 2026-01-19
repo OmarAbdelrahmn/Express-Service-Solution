@@ -1,7 +1,6 @@
 ﻿using Application.Abstraction;
 using Application.Abstraction.Consts;
 using Application.Abstraction.Errors;
-using Application.Auth;
 using Application.Authentication;
 using Application.Contracts.Auth;
 using Domain;
@@ -15,7 +14,7 @@ using Microsoft.Extensions.Logging;
 using System.Security.Cryptography;
 using System.Text;
 
-namespace Application.Services.Auth;
+namespace Application.Service.Auth;
 
 public class AuthService(
     UserManager<ApplicationUser> manager,
