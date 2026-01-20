@@ -535,6 +535,31 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
         }
     }
 
+    private (DateOnly startDate, bool isNewRider) GetRiderStartInfo(
+        List<RiderShift> riderShifts,
+        DateOnly monthStart,
+        DateOnly currentEndDate,
+        bool workedPreviousMonth)
+    {
+        if (!riderShifts.Any())
+            return (monthStart, true);
+
+        var firstShiftDate = riderShifts.Min(s => s.ShiftDate);
+
+        // If rider worked previous month, they're continuing, not starting
+        if (workedPreviousMonth)
+        {
+            return (monthStart, false); // Expected to work from day 1
+        }
+
+        // If rider has shifts before this month in this company, they started from beginning
+        if (firstShiftDate <= monthStart)
+            return (monthStart, false);
+
+        // Otherwise, they're genuinely starting mid-month
+        return (firstShiftDate, true);
+    }
+
     private PerformanceTier DeterminePerformanceTier(int totalOrders, int totalExpectedDays)
     {
         // Dynamic thresholds based on period length
@@ -728,6 +753,13 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                 var rider = group.First().Rider;
                 if (rider?.Employee == null) continue;
 
+                // Check if rider worked in previous month
+                var workedPreviousMonth = await DidRiderWorkInPreviousMonthAsync(
+                    rider.Id,
+                    2, // Company 2 (Keta)
+                    startDate,
+                    cancellationToken);
+
                 var validation = ValidateRider(
                     rider,
                     group.OrderBy(s => s.ShiftDate).ToList(),
@@ -735,7 +767,10 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                     month,
                     currentDayOfMonth,
                     lastDayOfMonth,
-                    targetOrders);
+                    targetOrders,
+                    startDate,
+                    endDate,
+                    workedPreviousMonth); // Add this parameter
 
                 validationResults.Add(validation);
             }
@@ -771,15 +806,228 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
         }
     }
 
-    private RiderMonthlyValidation ValidateRider(
-        RiderDetails rider,
-        List<RiderShift> riderShifts,
-        int year,
-        int month,
+    private async Task<bool> DidRiderWorkInPreviousMonthAsync(
+    int riderId,
+    int companyId,
+    DateOnly monthStart,
+    CancellationToken cancellationToken)
+    {
+        // Calculate previous month range
+        var previousMonthStart = monthStart.AddMonths(-1);
+        var previousMonthEnd = monthStart.AddDays(-1);
+
+        // Check if rider has any shifts in previous month for this company
+        var hasShifts = await _dbcontext.RiderShifts
+            .AnyAsync(s => s.RiderId == riderId &&
+                          s.CompanyId == companyId &&
+                          s.ShiftDate >= previousMonthStart &&
+                          s.ShiftDate <= previousMonthEnd,
+                          cancellationToken);
+
+        return hasShifts;
+    }
+
+    private ValidationResult PerformValidation(
+        int totalMissingDays,
+        List<int> missingDays,
+        List<int> daysWithLessThan10Hours,
+        int totalOrders,
+        int targetOrders,
         int currentDayOfMonth,
         int lastDayOfMonth,
-        int targetOrders)
+        int allowedMissingDays,
+        int actualStartDay,
+        int expectedWorkingDays,
+        bool workedPreviousMonth,    // NEW PARAMETER
+        bool isNewRider)             // NEW PARAMETER
     {
+        var isValid = true;
+        var errors = new List<string>();
+
+        // CRITICAL CHECK: Existing rider missing first 5 days
+        if (workedPreviousMonth && actualStartDay > 5)
+        {
+            isValid = false;
+            errors.Add($"❌ الموظف عمل الشهر الماضي ولكن غاب أول {actualStartDay - 1} أيام من هذا الشهر - غير صالح");
+        }
+
+        // Rule 1: Total missing days should not exceed allowed missing days
+        if (totalMissingDays > allowedMissingDays)
+        {
+            isValid = false;
+            errors.Add($"❌ عدد أيام الغياب كبير جدًا: {totalMissingDays} (الحد الأقصى المسموح: {allowedMissingDays})");
+        }
+
+        // Add info about rider's start date if mid-month AND is new rider
+        if (actualStartDay > 1 && isNewRider && !workedPreviousMonth)
+        {
+            errors.Add($"ℹ️ موظف جديد بدأ العمل من يوم {actualStartDay} من الشهر (الأيام المتوقعة: {expectedWorkingDays})");
+        }
+        else if (workedPreviousMonth)
+        {
+            errors.Add($"ℹ️ موظف مستمر من الشهر الماضي (متوقع العمل من يوم 1)");
+        }
+
+        // Rest of the validation logic remains the same...
+        // (Keep all the existing critical days checks, orders check, etc.)
+
+        // Rule 2: Check first 3 days
+        var first3Days = Enumerable.Range(Math.Max(1, actualStartDay), Math.Min(FIRST_CRITICAL_DAYS, currentDayOfMonth - actualStartDay + 1)).ToList();
+        var missingInFirst3 = first3Days.Intersect(missingDays).ToList();
+
+        // Rule 3: Check last 4 days
+        var last4DaysStart = Math.Max(actualStartDay, lastDayOfMonth - LAST_CRITICAL_DAYS + 1);
+        var last4Days = Enumerable.Range(last4DaysStart, Math.Min(LAST_CRITICAL_DAYS, lastDayOfMonth - last4DaysStart + 1))
+            .Where(d => d <= currentDayOfMonth && d >= actualStartDay)
+            .ToList();
+        var missingInLast4 = last4Days.Intersect(missingDays).ToList();
+
+        var criticalDays = first3Days.Concat(last4Days).Distinct().ToList();
+        var missingInCritical = criticalDays.Intersect(missingDays).ToList();
+        var nonCriticalDays = Enumerable.Range(actualStartDay, expectedWorkingDays)
+            .Except(criticalDays)
+            .ToList();
+        var missingInNonCritical = nonCriticalDays.Intersect(missingDays).ToList();
+
+        // Check critical days violation with proper rules
+        // Rule: Max 1 missing in first 3 days, max 1 missing in last 4 days
+        // These limits are SEPARATE from the total missing days limit
+
+        bool criticalDaysViolation = false;
+
+        // Check first 3 days - max 1 missing allowed
+        if (missingInFirst3.Count > 1)
+        {
+            isValid = false;
+            criticalDaysViolation = true;
+            errors.Add($"❌ أيام مفقودة في أول {FIRST_CRITICAL_DAYS} أيام: {missingInFirst3.Count} أيام ({string.Join(", ", missingInFirst3)}) - المسموح فقط يوم واحد");
+        }
+
+        // Check last 4 days - max 1 missing allowed  
+        if (missingInLast4.Count > 1)
+        {
+            isValid = false;
+            criticalDaysViolation = true;
+            errors.Add($"❌ أيام مفقودة في آخر {LAST_CRITICAL_DAYS} أيام: {missingInLast4.Count} أيام ({string.Join(", ", missingInLast4)}) - المسموح فقط يوم واحد");
+        }
+
+        // Add informational message if there are missing days in critical periods (but still within limits)
+        if (!criticalDaysViolation && (missingInFirst3.Any() || missingInLast4.Any()))
+        {
+            var criticalInfo = new List<string>();
+            if (missingInFirst3.Any())
+            {
+                criticalInfo.Add($"يوم {missingInFirst3[0]} في أول 3 أيام");
+            }
+            if (missingInLast4.Any())
+            {
+                criticalInfo.Add($"يوم {missingInLast4[0]} في آخر 4 أيام");
+            }
+            errors.Add($"ℹ️ أيام غياب في الفترات الحرجة: {string.Join(" و ", criticalInfo)} (ضمن الحد المسموح)");
+        }
+
+        // Rule 4: Total orders should be >= target
+        if (totalOrders < targetOrders)
+        {
+            isValid = false;
+            var shortage = targetOrders - totalOrders;
+            errors.Add($"❌ عدد الطلبات غير كافٍ: {totalOrders} (المطلوب: {targetOrders}، النقص: {shortage})");
+        }
+
+        if (daysWithLessThan10Hours.Any())
+        {
+            errors.Add(
+                $"⚠️ أيام عمل أقل من {MIN_WORKING_HOURS_PER_DAY} ساعات (تُحتسب كأيام غياب): " +
+                $"الأيام {string.Join(", ", daysWithLessThan10Hours)}");
+        }
+
+        if (missingDays.Any() && !errors.Any(e => e.Contains("Missing days in")))
+        {
+            var regularMissingDays = missingDays.Except(daysWithLessThan10Hours).ToList();
+            if (regularMissingDays.Any())
+            {
+                errors.Add($"⚠️ تاريخ الأيام بدون دوام: {string.Join(", ", regularMissingDays)}");
+            }
+        }
+
+        if (!errors.Any())
+        {
+            errors.Add("✅ جميع شروط التحقق مستوفاة");
+        }
+
+        return new ValidationResult(isValid, errors);
+    }
+
+    private RiderMonthlyValidation ValidateRider(
+     RiderDetails rider,
+     List<RiderShift> riderShifts,
+     int year,
+     int month,
+     int currentDayOfMonth,
+     int lastDayOfMonth,
+     int targetOrders,
+     DateOnly monthStart,
+     DateOnly endDate,
+     bool workedPreviousMonth)  // NEW PARAMETER
+    {
+        // Detect when rider actually started working this month
+        var (riderStartDate, isNewRider) = GetRiderStartInfo(
+            riderShifts,
+            monthStart,
+            endDate,
+            workedPreviousMonth);
+
+        var actualStartDay = riderStartDate.Day;
+
+        // **CRITICAL CHECK**: If rider worked previous month but missed first 5 days
+        if (workedPreviousMonth && actualStartDay > 5)
+        {
+            // This rider is NOT a new starter, they just didn't show up
+            // Force them to be invalid with full month expectations
+            actualStartDay = 1;
+            isNewRider = false;
+        }
+
+        // Calculate expected days based on when they started
+        var expectedWorkingDays = currentDayOfMonth - actualStartDay + 1;
+
+        // Adjust target orders based on actual working period
+        // BUT: if rider worked previous month, they need full month target
+        int adjustedTargetOrders;
+        if (workedPreviousMonth || !isNewRider)
+        {
+            // Existing rider - use full month target
+            adjustedTargetOrders = targetOrders;
+        }
+        else
+        {
+            // New rider - adjust target based on start date
+            adjustedTargetOrders = (int)Math.Ceiling((decimal)expectedWorkingDays / lastDayOfMonth * FULL_MONTH_TARGET_ORDERS);
+        }
+
+        // Determine allowed missing days based on start date and history
+        int allowedMissingDays;
+        if (workedPreviousMonth || !isNewRider)
+        {
+            // Existing rider - use standard rules (4 days max)
+            allowedMissingDays = MAX_ALLOWED_MISSING_DAYS;
+        }
+        else if (actualStartDay >= 11)
+        {
+            // New rider started from day 11 or later: only 1 day miss allowed
+            allowedMissingDays = 1;
+        }
+        else if (actualStartDay >= 2)
+        {
+            // New rider started before day 10: 2 days miss allowed
+            allowedMissingDays = 2;
+        }
+        else
+        {
+            // Started from day 1: use the original MAX_ALLOWED_MISSING_DAYS (4)
+            allowedMissingDays = MAX_ALLOWED_MISSING_DAYS;
+        }
+
         // Create a dictionary of shifts by date for easy lookup
         var shiftsByDate = riderShifts.ToDictionary(s => s.ShiftDate);
 
@@ -788,14 +1036,16 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
         var daysWithLessThan10Hours = new List<int>();
         var dailyDetails = new List<DailyValidationDetail>();
 
-        // Check each day from start to current day
-        for (int day = 1; day <= currentDayOfMonth; day++)
+        // For existing riders, check from day 1
+        // For new riders, check from their actual start date
+        int checkStartDay = (workedPreviousMonth || !isNewRider) ? 1 : actualStartDay;
+
+        for (int day = checkStartDay; day <= currentDayOfMonth; day++)
         {
             var currentDate = new DateOnly(year, month, day);
 
             if (shiftsByDate.TryGetValue(currentDate, out var shift))
             {
-                // Check if working hours is less than 10
                 if (shift.WorkingHours < MIN_WORKING_HOURS_PER_DAY)
                 {
                     daysWithLessThan10Hours.Add(day);
@@ -826,7 +1076,6 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
             }
             else
             {
-                // No shift for this day
                 missingDays.Add(day);
                 dailyDetails.Add(new DailyValidationDetail(
                     Day: day,
@@ -845,15 +1094,24 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
         var totalHours = riderShifts.Sum(s => s.WorkingHours);
         var totalWorkingDays = goodDays;
 
-        // Perform validation
+        // Recalculate expected working days based on check start day
+        var actualExpectedDays = currentDayOfMonth - checkStartDay + 1;
+
+        // Perform validation with adjusted parameters
         var validationResult = PerformValidation(
             totalMissingDays,
             missingDays,
             daysWithLessThan10Hours,
             totalOrders,
-            targetOrders,
+            adjustedTargetOrders,
             currentDayOfMonth,
-            lastDayOfMonth);
+            lastDayOfMonth,
+            allowedMissingDays,
+            checkStartDay,           // Use checkStartDay instead of actualStartDay
+            actualExpectedDays,
+            workedPreviousMonth,     // NEW PARAMETER
+            isNewRider              // NEW PARAMETER
+        );
 
         return new RiderMonthlyValidation(
             rider.Employee.Housing?.Name ?? "unknown",
@@ -862,14 +1120,14 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
             RiderNameAR: rider.Employee.NameAR,
             RiderNameEN: rider.Employee.NameEN,
             WorkingId: rider.WorkingId ?? "0",
-            TotalExpectedDays: currentDayOfMonth,
+            TotalExpectedDays: actualExpectedDays,
             TotalWorkingDays: totalWorkingDays,
             GoodDays: goodDays,
             MissingDays: totalMissingDays,
             MissingDaysList: missingDays,
             DaysWithLessThan10Hours: daysWithLessThan10Hours,
             TotalOrders: totalOrders,
-            TargetOrders: targetOrders,
+            TargetOrders: adjustedTargetOrders,
             TotalWorkingHours: totalHours,
             AverageHoursPerDay: totalWorkingDays > 0 ? totalHours / totalWorkingDays : 0,
             IsValidForMonth: validationResult.IsValid,
@@ -877,103 +1135,6 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
             DailyDetails: dailyDetails
         );
     }
-
-    private ValidationResult PerformValidation(
-        int totalMissingDays,
-        List<int> missingDays,
-        List<int> daysWithLessThan10Hours,
-        int totalOrders,
-        int targetOrders,
-        int currentDayOfMonth,
-        int lastDayOfMonth)
-    {
-        var isValid = true;
-        var errors = new List<string>();
-
-        // Rule 1: Total missing days should not be more than 4
-        if (totalMissingDays > MAX_ALLOWED_MISSING_DAYS)
-        {
-            isValid = false;
-            errors.Add($"❌ عدد أيام الغياب كبير جدًا: {totalMissingDays} (الحد الأقصى المسموح: {MAX_ALLOWED_MISSING_DAYS})");
-        }
-
-        // Rule 2: Check first 3 days (only if they fall within the current period)
-        var first3Days = Enumerable.Range(1, Math.Min(FIRST_CRITICAL_DAYS, currentDayOfMonth)).ToList();
-        var missingInFirst3 = first3Days.Intersect(missingDays).ToList();
-
-        // Rule 3: Check last 4 days (only if we're at the end of month or past those days)
-        var last4DaysStart = Math.Max(1, lastDayOfMonth - LAST_CRITICAL_DAYS + 1);
-        var last4Days = Enumerable.Range(last4DaysStart, Math.Min(LAST_CRITICAL_DAYS, lastDayOfMonth - last4DaysStart + 1))
-            .Where(d => d <= currentDayOfMonth)
-            .ToList();
-        var missingInLast4 = last4Days.Intersect(missingDays).ToList();
-
-        // Exception: If all other days are correct, allow 1 missing day from the critical 7 days
-        var criticalDays = first3Days.Concat(last4Days).Distinct().ToList();
-        var missingInCritical = criticalDays.Intersect(missingDays).ToList();
-        var nonCriticalDays = Enumerable.Range(1, currentDayOfMonth)
-            .Except(criticalDays)
-            .ToList();
-        var missingInNonCritical = nonCriticalDays.Intersect(missingDays).ToList();
-
-        // Check critical days violation
-        if (missingInNonCritical.Count == 0 && missingInCritical.Count > 1)
-        {
-            // All non-critical days are present, but more than 1 critical day is missing
-            isValid = false;
-            errors.Add(
-                $"❌ تم فقدان {missingInCritical.Count} أيام حرجة (أول {FIRST_CRITICAL_DAYS} أيام أو آخر {LAST_CRITICAL_DAYS} أيام)، " +
-                $"المسموح فقط يوم واحد عند اكتمال باقي الأيام. الأيام: {string.Join(", ", missingInCritical)}");
-        }
-        else if (missingInCritical.Count > 0 && missingInNonCritical.Count > 0)
-        {
-            // Has missing days in both critical and non-critical
-            isValid = false;
-            if (missingInFirst3.Any())
-            {
-                errors.Add($"❌ أيام مفقودة في أول {FIRST_CRITICAL_DAYS} أيام: الأيام {string.Join(", ", missingInFirst3)}");
-            }
-            if (missingInLast4.Any())
-            {
-                errors.Add($"❌ أيام مفقودة في آخر {LAST_CRITICAL_DAYS} أيام: الأيام {string.Join(", ", missingInLast4)}");
-            }
-        }
-
-        // Rule 4: Total orders should be >= target
-        if (totalOrders < targetOrders)
-        {
-            isValid = false;
-            var shortage = targetOrders - totalOrders;
-            errors.Add($"❌ عدد الطلبات غير كافٍ: {totalOrders} (المطلوب: {targetOrders}، النقص: {shortage})");
-        }
-
-        // Add details about days with less than 10 hours
-        if (daysWithLessThan10Hours.Any())
-        {
-            errors.Add(
-                $"⚠️ أيام عمل أقل من {MIN_WORKING_HOURS_PER_DAY} ساعات (تُحتسب كأيام غياب): " +
-                $":الأيام {string.Join(", ", daysWithLessThan10Hours)}");    
-        }
-
-        // Add general missing days info if any and not already mentioned
-        if (missingDays.Any() && !errors.Any(e => e.Contains("Missing days in")))
-        {
-            var regularMissingDays = missingDays.Except(daysWithLessThan10Hours).ToList();
-            if (regularMissingDays.Any())
-            {
-                errors.Add($"⚠️ تاريخ الأيام بدون دوام: {string.Join(", ", regularMissingDays)}");
-            }
-        }
-
-        // If no errors, add success message
-        if (!errors.Any())
-        {
-            errors.Add("✅ جميع شروط التحقق مستوفاة");
-        }
-
-        return new ValidationResult(isValid, errors);
-    }
-
     private record ValidationResult(bool IsValid, List<string> Errors);
 
     // Add these methods to ReportService.cs
