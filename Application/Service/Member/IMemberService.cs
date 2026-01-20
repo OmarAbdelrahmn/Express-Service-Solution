@@ -181,6 +181,19 @@ public record RiderMonthlyHistory(
     List<MonthlyShiftSummary> MonthlyData
 );
 
+public record RiderMonthlyHistorys(
+    long IqamaNo,
+    string RiderName,
+    string WorkingId,
+    DateOnly FirstShiftDate,
+    DateOnly LastShiftDate,
+    int TotalMonths,
+    int ActiveMonthsCount,
+    decimal AverageOrdersPerActiveMonth,
+    List<int> ActiveMonthNumbers,
+    List<MonthlyShiftSummary> MonthlyData
+);
+
 public record MonthlyShiftSummary(
     int Year,
     int Month,

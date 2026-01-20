@@ -8,6 +8,11 @@ namespace Application.Service.Reports;
 
 public interface IReportService
 {
+    Task<Result<List<RiderWorkHistorySummary>>> GetAllRidersWorkHistoryAsync(
+    DateOnly? startDate = null,
+    DateOnly? endDate = null,
+    CancellationToken cancellationToken = default);
+
     /// <summary>
     /// Get monthly performance distribution for Company 2 (Keta)
     /// Shows percentage of riders in different performance tiers
@@ -299,7 +304,7 @@ public interface IReportService
         long managerIqamaNo,
     CancellationToken cancellationToken = default);
 
-    Task<Result<RiderMonthlyHistory>> GetRiderMonthlyHistoryAsync(
+    Task<Result<RiderMonthlyHistorys>> GetRiderMonthlyHistoryAsync(
     long riderIqamaNo,
     CancellationToken cancellationToken = default);
 }

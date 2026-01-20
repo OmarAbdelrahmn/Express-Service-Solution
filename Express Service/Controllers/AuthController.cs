@@ -1,6 +1,5 @@
 ﻿using Application.Contracts.Auth;
 using Application.Service.Auth;
-using Application.Services.Auth;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 

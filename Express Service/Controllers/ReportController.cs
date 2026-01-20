@@ -17,6 +17,18 @@ public class ReportController(IReportService service) : ControllerBase
 
     private readonly IReportService service = service;
 
+    [HttpGet("all-riders-history")]
+    [Authorize(Roles = "Master,Admin")]
+    public async Task<IActionResult> GetAllRidersHistory(
+    [FromQuery] DateOnly? startDate = null,
+    [FromQuery] DateOnly? endDate = null,
+    CancellationToken cancellationToken = default)
+    {
+        var result = await service.GetAllRidersWorkHistoryAsync(startDate, endDate, cancellationToken);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+
     [HttpGet("housing/detailed-daily-performance")]
     //[Authorize(Roles = "Master,Admin")]
     public async Task<IActionResult> GetHousingDetailedDailyPerformance(

@@ -37,6 +37,135 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
     private const int FIRST_CRITICAL_DAYS = 3;
     private const int LAST_CRITICAL_DAYS = 4;
 
+    public record RiderWorkHistorySummary(
+    long IqamaNo,
+    string RiderName,
+    string WorkingId,
+    int TotalMonthsWorked,
+    int TotalShifts,
+    int TotalOrders,
+    string HousingName,
+    string Status,
+    decimal AverageOrdersPerMonth,
+    DateOnly FirstWorkDate,
+    DateOnly LastWorkDate,
+    List<MonthlyShiftSummary> ActiveMonths
+);
+
+    public async Task<Result<List<RiderWorkHistorySummary>>> GetAllRidersWorkHistoryAsync(
+    DateOnly? startDate = null,
+    DateOnly? endDate = null,
+    CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var today = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3));
+
+            // Set default dates if not provided
+            var effectiveEndDate = endDate ?? today;
+
+            // Get all riders who have shifts
+            var ridersWithShiftsQuery = _dbcontext.RiderDetails
+                .Include(r => r.Employee)
+                .ThenInclude(c=>c.Housing)
+                .Where(r => r.RiderShifts.Any());
+
+            ridersWithShiftsQuery = ridersWithShiftsQuery.Where(r => !r.Employee.IsEmployee);
+
+            // Apply date filter if startDate is provided
+            if (startDate.HasValue)
+            {
+                ridersWithShiftsQuery = ridersWithShiftsQuery
+                    .Where(r => r.RiderShifts.Any(s => s.ShiftDate >= startDate.Value && s.ShiftDate <= effectiveEndDate));
+            }
+            else
+            {
+                ridersWithShiftsQuery = ridersWithShiftsQuery
+                    .Where(r => r.RiderShifts.Any(s => s.ShiftDate <= effectiveEndDate));
+            }
+
+            var ridersWithShifts = await ridersWithShiftsQuery
+                .Select(r => new
+                {
+                    Rider = r,
+                    Shifts = r.RiderShifts
+                        .Where(s => (!startDate.HasValue || s.ShiftDate >= startDate.Value) &&
+                                    s.ShiftDate <= effectiveEndDate)
+                        .OrderBy(s => s.ShiftDate)
+                        .ToList()
+                })
+                .AsNoTracking()
+                .ToListAsync(cancellationToken);
+
+            if (!ridersWithShifts.Any())
+            {
+                return Result.Success(new List<RiderWorkHistorySummary>());
+            }
+
+            var summaries = new List<RiderWorkHistorySummary>();
+
+            foreach (var item in ridersWithShifts)
+            {
+                var rider = item.Rider;
+                var shifts = item.Shifts;
+
+                if (!shifts.Any()) continue;
+
+                var firstShiftDate = shifts.First().ShiftDate;
+                var lastShiftDate = shifts.Last().ShiftDate;
+
+                // Determine the actual start date for monthly summaries
+                var actualStartDate = startDate ?? firstShiftDate;
+
+                // Use the effective end date
+                var actualEndDate = effectiveEndDate > lastShiftDate ? effectiveEndDate : lastShiftDate;
+
+                // Generate monthly summaries
+                var monthlyData = GenerateMonthlyShiftSummaries(shifts, actualStartDate, actualEndDate);
+
+                // Get active months (months with orders > 0)
+                var activeMonths = monthlyData
+                    .Where(m => m.TotalAcceptedOrders > 0)
+                    .ToList();
+
+                var totalMonthsWorked = activeMonths.Count;
+                var totalShifts = activeMonths.Sum(m => m.TotalShifts);
+                var totalOrders = activeMonths.Sum(m => m.TotalAcceptedOrders);
+
+                // Calculate average orders per active month
+                var avgOrdersPerMonth = totalMonthsWorked > 0
+                    ? (decimal)totalOrders / totalMonthsWorked
+                    : 0;
+
+                summaries.Add(new RiderWorkHistorySummary(
+                    IqamaNo: rider.EmployeeIqamaNo,
+                    RiderName: rider.Employee.NameAR,
+                    WorkingId: rider.WorkingId ?? "0",
+                    TotalMonthsWorked: totalMonthsWorked,
+                    TotalShifts: totalShifts,
+                    TotalOrders: totalOrders,
+                    HousingName: rider.Employee.Housing?.Name ?? "non",
+                    Status: rider.Employee.Status,
+                    AverageOrdersPerMonth: avgOrdersPerMonth,
+                    FirstWorkDate: firstShiftDate,
+                    LastWorkDate: lastShiftDate,
+                    ActiveMonths: activeMonths
+                ));
+            }
+
+            // Sort by total orders descending
+            summaries = summaries
+                .OrderByDescending(s => s.TotalOrders)
+                .ToList();
+
+            return Result.Success(summaries);
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<List<RiderWorkHistorySummary>>(
+                new Error($"Error generating riders work history: {ex.Message}", "server_error", 500));
+        }
+    }
 
     public async Task<Result<PeriodOrdersComparison>> ComparePeriodOrdersForCompanyAsync(
     int companyId,
@@ -1813,9 +1942,9 @@ public async Task<Result<HousingDetailedDailyPerformanceReport>> GetHousingDetai
     // Note: GetComprehensiveDashboardAsync already uses housing from shift data
     // via the GetHousingStatistics method which correctly filters shifts where
     // s.Rider?.Employee?.Housing != null
-    public async Task<Result<RiderMonthlyHistory>> GetRiderMonthlyHistoryAsync(
-        long riderIqamaNo,
-        CancellationToken cancellationToken = default)
+    public async Task<Result<RiderMonthlyHistorys>> GetRiderMonthlyHistoryAsync(
+     long riderIqamaNo,
+     CancellationToken cancellationToken = default)
     {
         try
         {
@@ -1826,7 +1955,7 @@ public async Task<Result<HousingDetailedDailyPerformanceReport>> GetHousingDetai
 
             if (rider == null)
             {
-                return Result.Failure<RiderMonthlyHistory>(
+                return Result.Failure<RiderMonthlyHistorys>(
                     new Error($"Rider with Iqama number {riderIqamaNo} not found", "not_found", 404));
             }
 
@@ -1839,7 +1968,7 @@ public async Task<Result<HousingDetailedDailyPerformanceReport>> GetHousingDetai
 
             if (!shifts.Any())
             {
-                return Result.Failure<RiderMonthlyHistory>(
+                return Result.Failure<RiderMonthlyHistorys>(
                     new Error("No shift history found for this rider", "no_data", 404));
             }
 
@@ -1853,13 +1982,32 @@ public async Task<Result<HousingDetailedDailyPerformanceReport>> GetHousingDetai
 
             var monthlyData = GenerateMonthlyShiftSummaries(shifts, firstShiftDate, endDate);
 
-            var history = new RiderMonthlyHistory(
+            // Get active months (months with orders > 0)
+            var activeMonths = monthlyData
+                .Where(m => m.TotalAcceptedOrders > 0)
+                .ToList();
+
+            var activeMonthNumbers = activeMonths
+                .Select(m => m.Month)
+                .ToList();
+
+            var activeMonthsCount = activeMonths.Count;
+
+            // Calculate average orders per active month
+            var avgOrdersPerActiveMonth = activeMonthsCount > 0
+                ? (decimal)activeMonths.Sum(m => m.TotalAcceptedOrders) / activeMonthsCount
+                : 0;
+
+            var history = new RiderMonthlyHistorys(
                 IqamaNo: riderIqamaNo,
                 RiderName: rider.Employee.NameAR,
                 WorkingId: rider.WorkingId ?? "0",
                 FirstShiftDate: firstShiftDate,
                 LastShiftDate: lastShiftDate,
                 TotalMonths: monthlyData.Count,
+                ActiveMonthsCount: activeMonthsCount,
+                AverageOrdersPerActiveMonth: avgOrdersPerActiveMonth,
+                ActiveMonthNumbers: activeMonthNumbers,
                 MonthlyData: monthlyData
             );
 
@@ -1867,11 +2015,10 @@ public async Task<Result<HousingDetailedDailyPerformanceReport>> GetHousingDetai
         }
         catch (Exception ex)
         {
-            return Result.Failure<RiderMonthlyHistory>(
+            return Result.Failure<RiderMonthlyHistorys>(
                 new Error($"Error generating rider monthly history: {ex.Message}", "server_error", 500));
         }
     }
-
     // Helper method for generating monthly summaries
     private List<MonthlyShiftSummary> GenerateMonthlyShiftSummaries(
         List<RiderShift> shifts,
