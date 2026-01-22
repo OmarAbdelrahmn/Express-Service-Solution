@@ -677,10 +677,16 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
                 dbcontext.Employees.Update(employee);
             }
 
+            var empname = await dbcontext.Employees
+                .Where(e => e.IqamaNo.ToString() == resolvedBy)
+                .Select(e => e.NameAR)
+                .FirstOrDefaultAsync();
+
+
             // Mark status change as resolved
             statusChange.IsResolved = true;
             statusChange.Resolution = resolution;
-            statusChange.ResolvedBy = resolvedBy;
+            statusChange.ResolvedBy = empname ?? resolvedBy ;
             statusChange.ResolvedAt = DateTime.UtcNow.AddHours(3);
             statusChange.AdminNotes = adminNotes ?? (resolution == "Rejected" ? "Request was rejected" : null);
 

@@ -97,9 +97,9 @@ public class RiderController(IRiderService service) : ControllerBase
 
     [HttpDelete("{IqamaNo:long}")]
     [Authorize(Roles = "Master,Admin")]
-    public async Task<IActionResult> DeleteRider(long IqamaNo)
+    public async Task<IActionResult> DeleteRider(long IqamaNo , string Reason)
     {
-        var result = await service.DeleteAsync(IqamaNo);
+        var result = await service.DeleteAsync(IqamaNo , Reason);
         
         return result.IsSuccess
             ? Ok(new Re("Rider Deleted Successfully")) : result.ToProblem();

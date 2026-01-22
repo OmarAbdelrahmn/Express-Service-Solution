@@ -88,6 +88,10 @@ public interface IReportService
         DateOnly startDate,
         DateOnly endDate,
         CancellationToken cancellationToken = default);
+    Task<Result<List<HousingRejectionReport>>> GetAllHousingsRejectionReportAsync2(
+        DateOnly startDate,
+        DateOnly endDate,
+        CancellationToken cancellationToken = default);
 
     Task<Result<RiderDailyDetailReport>> GetRiderDailyDetailReportAsync(
     string workingId,

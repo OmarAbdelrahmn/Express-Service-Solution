@@ -17,7 +17,7 @@ public interface IRiderService
     Task<Result<RiderResponse>> Getbyid(long Id);
     Task<Result> CreateAsync(RiderRequest Request);
     Task<Result<RiderResponse>> UpdateAsync(long IqamaNo, URiderRequest Request);
-    Task<Result> DeleteAsync(long IqamaNo, CancellationToken cancellationToken = default);
+    Task<Result> DeleteAsync(long IqamaNo, string Reason, CancellationToken cancellationToken = default);
     Task<List<RiderResponse>> SmartSearch(string keyword);
     Task<Result> ChangeWorkinId(string OldWorkinId, string NewWorkingId);
     Task<Result> AddETOR(long IqamaNo, EMTOR request );

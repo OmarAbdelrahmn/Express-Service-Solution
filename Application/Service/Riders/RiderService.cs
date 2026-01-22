@@ -202,7 +202,7 @@ public class RiderService(ApplicationDbcontext dbcontext,IRiderWorkingIdHistoryS
         }
     }
 
-    public async Task<Result> DeleteAsync(long IqamaNo, CancellationToken cancellationToken = default)
+    public async Task<Result> DeleteAsync(long IqamaNo,string Reason, CancellationToken cancellationToken = default)
     {
         using var transaction = await dbcontext.Database.BeginTransactionAsync(cancellationToken);
 
@@ -223,7 +223,7 @@ public class RiderService(ApplicationDbcontext dbcontext,IRiderWorkingIdHistoryS
             // ✅ Soft delete: Mark as deleted instead of removing
             employee.IsDeleted = true;
             employee.DeletedAt = DateTime.UtcNow.AddHours(3);
-            employee.Status = "deleted";
+            employee.Status = Reason;
 
             // ✅ Deactivate history records (preserve audit trail)
             if (employee.RiderDetails != null)

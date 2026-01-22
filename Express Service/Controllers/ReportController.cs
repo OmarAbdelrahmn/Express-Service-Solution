@@ -190,6 +190,15 @@ public class ReportController(IReportService service) : ControllerBase
             startDate, endDate);
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
+    //[HttpGet("rejection2")]
+    //public async Task<IActionResult> GetRejectionReport2(
+    //    [FromQuery] DateOnly startDate,
+    //    [FromQuery] DateOnly endDate)
+    //{
+    //    var result = await service.GetAllHousingsRejectionReportAsync2(
+    //        startDate, endDate);
+    //    return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    //}
 
     // ============================================
     // HOUSING-SPECIFIC REPORTS (Single Housing by Manager Iqama)
@@ -286,6 +295,15 @@ public class ReportController(IReportService service) : ControllerBase
         [FromQuery] DateOnly endDate)
     {
         var result = await service.GetAllHousingsRejectionReportAsync(
+            startDate, endDate);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+    [HttpGet("all-housings/rejection2")]
+    public async Task<IActionResult> GetAllHousingsRejection2(
+        [FromQuery] DateOnly startDate,
+        [FromQuery] DateOnly endDate)
+    {
+        var result = await service.GetAllHousingsRejectionReportAsync2(
             startDate, endDate);
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }

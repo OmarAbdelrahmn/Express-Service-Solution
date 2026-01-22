@@ -2099,6 +2099,118 @@ public async Task<Result<HousingDetailedDailyPerformanceReport>> GetHousingDetai
 
         return Result.Success(reports);
     }
+    public async Task<Result<List<HousingRejectionReport>>> GetAllHousingsRejectionReportAsync2(
+        DateOnly startDate,
+        DateOnly endDate,
+        CancellationToken cancellationToken = default)
+    {
+        var totalDays = endDate.DayNumber - startDate.DayNumber + 1;
+
+        // Get all shifts with housing data from shift
+        var shifts = await _dbcontext.RiderShifts
+            .Include(s => s.Rider)
+                .ThenInclude(r => r.Employee)
+                    .ThenInclude(e => e.Housing)
+            .Where(s => s.Rider.CompanyId == 2 &&
+                       s.ShiftDate >= startDate &&
+                       s.ShiftDate <= endDate &&
+                       s.Rider.Employee.Housing != null)
+            .ToListAsync(cancellationToken);
+
+        if (!shifts.Any())
+            return Result.Success(new List<HousingRejectionReport>());
+
+        // Group by housing from shift data
+        var housingGroups = shifts.GroupBy(s => new {
+            HousingId = s.Rider.Employee.Housing.Id,
+            HousingName = s.Rider.Employee.Housing.Name
+        });
+
+        var reports = new List<HousingRejectionReport>();
+
+        foreach (var housingGroup in housingGroups)
+        {
+            var housingShifts = housingGroup.ToList();
+            var riderGroups = housingShifts.GroupBy(s => s.RiderId);
+            var riderDetails = new List<RiderRejectionDetail>();
+
+            foreach (var group in riderGroups)
+            {
+                var rider = group.First().Rider;
+                if (rider?.Employee == null) continue;
+
+                var riderShifts = group.ToList();
+                var totalShifts = riderShifts.Count;
+                var totalOrders = riderShifts.Sum(s => s.AcceptedDailyOrders + s.RejectedDailyOrders);
+                var targetOrders = totalDays * 12;
+                var totalRejections = riderShifts.Sum(s => s.RejectedDailyOrders);
+                var totalRealRejections = riderShifts.Sum(s => s.RealRejectedDailyOrders);
+
+                var rejectionRate = totalOrders > 0
+                    ? Math.Round((decimal)totalRejections / totalOrders * 100, 2)
+                    : 0;
+
+                var realRejectionRate = totalOrders > 0
+                    ? Math.Round((decimal)totalRealRejections / totalOrders * 100, 2)
+                    : 0;
+
+                riderDetails.Add(new RiderRejectionDetail(
+                    RiderId: rider.Id,
+                    IqamaNo: rider.EmployeeIqamaNo,
+                    RiderNameAR: rider.Employee.NameAR,
+                    RiderNameEN: rider.Employee.NameEN,
+                    WorkingId: riderShifts.First().WorkingId,
+                    TotalShifts: totalShifts,
+                    TotalOrders: totalOrders,
+                    TargetOrders: targetOrders,
+                    TotalRejections: totalRejections,
+                    TotalRealRejections: totalRealRejections,
+                    RejectionRate: rejectionRate,
+                    RealRejectionRate: realRejectionRate
+                ));
+            }
+
+            riderDetails = riderDetails.OrderByDescending(r => r.TotalRealRejections).ToList();
+
+            var totalAllOrders = riderDetails.Sum(r => r.TotalOrders);
+            var totalAllRejections = riderDetails.Sum(r => r.TotalRejections);
+            var totalAllRealRejections = riderDetails.Sum(r => r.TotalRealRejections);
+
+            var overallRejectionRate = totalAllOrders > 0
+                ? Math.Round((decimal)totalAllRejections / totalAllOrders * 100, 2)
+                : 0;
+
+            var overallRealRejectionRate = totalAllOrders > 0
+                ? Math.Round((decimal)totalAllRealRejections / totalAllOrders * 100, 2)
+                : 0;
+
+            var totals = new RejectionTotals(
+                TotalRiders: riderDetails.Count,
+                TotalShifts: riderDetails.Sum(r => r.TotalShifts),
+                TotalOrders: totalAllOrders,
+                TotalTargetOrders: riderDetails.Sum(r => r.TargetOrders),
+                TotalRejections: totalAllRejections,
+                TotalRealRejections: totalAllRealRejections,
+                OverallRejectionRate: overallRejectionRate,
+                OverallRealRejectionRate: overallRealRejectionRate
+            );
+
+            var rejectionReport = new RejectionReport(
+                StartDate: startDate,
+                EndDate: endDate,
+                TotalDays: totalDays,
+                RiderDetails: riderDetails,
+                Totals: totals
+            );
+
+            reports.Add(new HousingRejectionReport(
+                HousingName: housingGroup.Key.HousingName,
+                RejectionReport: rejectionReport
+            ));
+        }
+
+        return Result.Success(reports);
+    }
 
     // Note: GetComprehensiveDashboardAsync already uses housing from shift data
     // via the GetHousingStatistics method which correctly filters shifts where
