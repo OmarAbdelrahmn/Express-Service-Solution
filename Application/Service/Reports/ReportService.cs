@@ -1,4 +1,5 @@
 ﻿using Application.Abstraction;
+using Application.Contracts.ReportCo;
 using Application.Service.Member;
 using Application.Service.Riders;
 using Domain;
@@ -37,6 +38,57 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
     private const int FIRST_CRITICAL_DAYS = 3;
     private const int LAST_CRITICAL_DAYS = 4;
 
+
+    public async Task<Result<IEnumerable<DailyCompanyShiftSummary>>> GetDailyShiftSummaryByCompaniesAsync(
+    List<int> companyIds,
+    CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            if (companyIds == null || !companyIds.Any())
+            {
+                return Result.Failure<IEnumerable<DailyCompanyShiftSummary>>(
+                    new Error("InvalidInput", "Company IDs list cannot be empty", 400));
+            }
+
+            // Get all shifts for the specified companies
+            var shifts = await dbcontext.RiderShifts
+                .Include(s => s.Company)
+                .Where(s => companyIds.Contains(s.CompanyId))
+                .OrderBy(s => s.ShiftDate)
+                .ThenBy(s => s.CompanyId)
+                .AsNoTracking()
+                .ToListAsync(cancellationToken);
+
+            if (!shifts.Any())
+            {
+                return Result.Failure<IEnumerable<DailyCompanyShiftSummary>>(
+                    new Error("NotFound", "No shifts found for the specified companies", 404));
+            }
+
+            // Group by date and company, then aggregate
+            var dailySummaries = shifts
+                .GroupBy(s => new { s.ShiftDate, s.CompanyId})
+                .Select(g => new DailyCompanyShiftSummary(
+                    g.Key.ShiftDate,
+                    g.Key.CompanyId,
+                    g.Sum(s => s.AcceptedDailyOrders),
+                    g.Sum(s => s.RejectedDailyOrders),
+                    g.Count(),
+                    g.Select(s => s.RiderId).Distinct().Count()
+                ))
+                .OrderBy(s => s.ShiftDate)
+                .ThenBy(s => s.CompanyId)
+                .ToList();
+
+            return Result.Success<IEnumerable<DailyCompanyShiftSummary>>(dailySummaries);
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<IEnumerable<DailyCompanyShiftSummary>>(
+                new Error("ServerError", $"Error retrieving daily shift summaries: {ex.Message}", 500));
+        }
+    }
     public record RiderWorkHistorySummary(
     long IqamaNo,
     string RiderName,
@@ -51,6 +103,188 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
     DateOnly LastWorkDate,
     List<MonthlyShiftSummary> ActiveMonths
 );
+
+    public async Task<Result<Company2StackedDeliveriesReport>> GetCompany2StackedDeliveriesReportAsync(
+    DateOnly startDate,
+    DateOnly endDate,
+    CancellationToken cancellationToken = default)
+    {
+        if (endDate < startDate)
+            return Result.Failure<Company2StackedDeliveriesReport>(
+                new Error("End date must be after start date", "invalid_input", 400));
+
+        try
+        {
+            var totalDays = endDate.DayNumber - startDate.DayNumber + 1;
+
+            // Get all shifts for Company 2 (Keta) in the date range
+            var shifts = await _dbcontext.RiderShifts
+                .Include(s => s.Rider)
+                    .ThenInclude(r => r.Employee)
+                        .ThenInclude(e => e.Housing)
+                .Where(s => s.CompanyId == 2 &&
+                           s.ShiftDate >= startDate &&
+                           s.ShiftDate <= endDate)
+                .AsNoTracking()
+                .ToListAsync(cancellationToken);
+
+            if (!shifts.Any())
+            {
+                return Result.Failure<Company2StackedDeliveriesReport>(
+                    new Error($"No shifts found for Company 2 (Keta) between {startDate:yyyy-MM-dd} and {endDate:yyyy-MM-dd}",
+                        "no_data", 404));
+            }
+
+            // Calculate totals
+            var totalShifts = shifts.Count;
+            var totalStackedDeliveries = shifts.Sum(s => s.StackedDeliveries);
+            var totalAcceptedOrders = shifts.Sum(s => s.AcceptedDailyOrders);
+            var totalRiders = shifts.Select(s => s.RiderId).Distinct().Count();
+
+            var stackedDeliveryRate = totalAcceptedOrders > 0
+                ? (decimal)totalStackedDeliveries / totalAcceptedOrders * 100
+                : 0;
+
+            var avgStackedPerRider = totalRiders > 0
+                ? (decimal)totalStackedDeliveries / totalRiders
+                : 0;
+
+            var avgStackedPerShift = totalShifts > 0
+                ? (decimal)totalStackedDeliveries / totalShifts
+                : 0;
+
+            var avgStackedPerDay = totalDays > 0
+                ? (decimal)totalStackedDeliveries / totalDays
+                : 0;
+
+            // Group by rider and calculate individual statistics
+            var riderGroups = shifts.GroupBy(s => s.RiderId);
+            var riderDetails = new List<Company2RiderStackedDetail>();
+
+            foreach (var group in riderGroups)
+            {
+                var rider = group.First().Rider;
+                if (rider?.Employee == null) continue;
+
+                var riderShifts = group.ToList();
+                var riderStackedTotal = riderShifts.Sum(s => s.StackedDeliveries);
+                var riderAcceptedTotal = riderShifts.Sum(s => s.AcceptedDailyOrders);
+                var riderShiftCount = riderShifts.Count;
+
+                var maxStackedShift = riderShifts.OrderByDescending(s => s.StackedDeliveries).First();
+                var maxStacked = maxStackedShift.StackedDeliveries;
+                var maxStackedDate = maxStackedShift.ShiftDate;
+
+                var stackedPercentage = riderAcceptedTotal > 0
+                    ? (decimal)riderStackedTotal / riderAcceptedTotal * 100
+                    : 0;
+
+                var avgStackedPerShiftRider = riderShiftCount > 0
+                    ? (decimal)riderStackedTotal / riderShiftCount
+                    : 0;
+
+                riderDetails.Add(new Company2RiderStackedDetail(
+                    RiderId: rider.Id,
+                    IqamaNo: rider.EmployeeIqamaNo,
+                    RiderNameAR: rider.Employee.NameAR,
+                    RiderNameEN: rider.Employee.NameEN,
+                    WorkingId: rider.WorkingId ?? "0",
+                    HousingName: rider.Employee.Housing?.Name ?? "غير محدد",
+                    TotalShifts: riderShiftCount,
+                    TotalStackedDeliveries: riderStackedTotal,
+                    TotalAcceptedOrders: riderAcceptedTotal,
+                    MaxStackedInDay: maxStacked,
+                    MaxStackedDate: maxStackedDate,
+                    StackedPercentage: stackedPercentage,
+                    AverageStackedPerShift: avgStackedPerShiftRider,
+                    Rank: 0 // Will be assigned after sorting
+                ));
+            }
+
+            // Sort by total stacked deliveries and assign ranks
+            riderDetails = riderDetails
+                .OrderByDescending(r => r.TotalStackedDeliveries)
+                .ToList();
+
+            for (int i = 0; i < riderDetails.Count; i++)
+            {
+                riderDetails[i] = riderDetails[i] with { Rank = i + 1 };
+            }
+
+            // Calculate housing breakdowns
+            var housingGroups = shifts
+                .Where(s => s.Rider?.Employee?.Housing != null)
+                .GroupBy(s => s.Rider.Employee.Housing.Name);
+
+            var housingBreakdowns = new List<HousingStackedBreakdown>();
+
+            foreach (var housingGroup in housingGroups)
+            {
+                var housingShifts = housingGroup.ToList();
+                var housingStackedTotal = housingShifts.Sum(s => s.StackedDeliveries);
+                var housingAcceptedTotal = housingShifts.Sum(s => s.AcceptedDailyOrders);
+                var housingRiderCount = housingShifts.Select(s => s.RiderId).Distinct().Count();
+
+                var housingStackedRate = housingAcceptedTotal > 0
+                    ? (decimal)housingStackedTotal / housingAcceptedTotal * 100
+                    : 0;
+
+                var avgStackedPerRiderHousing = housingRiderCount > 0
+                    ? (decimal)housingStackedTotal / housingRiderCount
+                    : 0;
+
+                housingBreakdowns.Add(new HousingStackedBreakdown(
+                    HousingName: housingGroup.Key,
+                    TotalRiders: housingRiderCount,
+                    TotalStackedDeliveries: housingStackedTotal,
+                    TotalAcceptedOrders: housingAcceptedTotal,
+                    StackedRate: housingStackedRate,
+                    AverageStackedPerRider: avgStackedPerRiderHousing
+                ));
+            }
+
+            // Sort housing by stacked rate
+            housingBreakdowns = housingBreakdowns
+                .OrderByDescending(h => h.StackedRate)
+                .ToList();
+
+            // Create summary
+            var topPerformer = riderDetails.FirstOrDefault();
+            var summary = new Company2StackedSummary(
+                TopStackedDeliveries: topPerformer?.TotalStackedDeliveries ?? 0,
+                TopPerformerName: topPerformer?.RiderNameEN ?? "N/A",
+                TopPerformerWorkingId: topPerformer?.WorkingId ?? "0",
+                CompanyStackedRate: stackedDeliveryRate,
+                TotalWorkingDays: shifts.Select(s => s.ShiftDate).Distinct().Count(),
+                HousingBreakdowns: housingBreakdowns
+            );
+
+            var report = new Company2StackedDeliveriesReport(
+                StartDate: startDate,
+                EndDate: endDate,
+                TotalDays: totalDays,
+                CompanyName: "Keta",
+                TotalRiders: totalRiders,
+                TotalShifts: totalShifts,
+                TotalStackedDeliveries: totalStackedDeliveries,
+                TotalAcceptedOrders: totalAcceptedOrders,
+                StackedDeliveryRate: stackedDeliveryRate,
+                AverageStackedPerRider: avgStackedPerRider,
+                AverageStackedPerShift: avgStackedPerShift,
+                AverageStackedPerDay: avgStackedPerDay,
+                RiderDetails: riderDetails,
+                Summary: summary
+            );
+
+            return Result.Success(report);
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<Company2StackedDeliveriesReport>(
+                new Error($"Error generating Company 2 stacked deliveries report: {ex.Message}",
+                    "server_error", 500));
+        }
+    }
 
     public async Task<Result<List<RiderWorkHistorySummary>>> GetAllRidersWorkHistoryAsync(
     DateOnly? startDate = null,

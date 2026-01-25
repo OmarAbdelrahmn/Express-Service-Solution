@@ -4,8 +4,67 @@
 //using System.Collections.Generic;
 //using System.Text;
 
-//namespace Application.Contracts.ReportCo;
+namespace Application.Contracts.ReportCo;
 
+public record DailyCompanyShiftSummary(
+    DateOnly ShiftDate,
+    int CompanyId,
+    int TotalAcceptedOrders,
+    int TotalRejectedOrders,
+    int TotalShifts,
+    int UniqueRiders
+);
+public record Company2StackedDeliveriesReport(
+    DateOnly StartDate,
+    DateOnly EndDate,
+    int TotalDays,
+    string CompanyName,
+    int TotalRiders,
+    int TotalShifts,
+    int TotalStackedDeliveries,
+    int TotalAcceptedOrders,
+    decimal StackedDeliveryRate,
+    decimal AverageStackedPerRider,
+    decimal AverageStackedPerShift,
+    decimal AverageStackedPerDay,
+    List<Company2RiderStackedDetail> RiderDetails,
+    Company2StackedSummary Summary
+);
+
+public record Company2RiderStackedDetail(
+    int RiderId,
+    long IqamaNo,
+    string RiderNameAR,
+    string RiderNameEN,
+    string WorkingId,
+    string HousingName,
+    int TotalShifts,
+    int TotalStackedDeliveries,
+    int TotalAcceptedOrders,
+    int MaxStackedInDay,
+    DateOnly? MaxStackedDate,
+    decimal StackedPercentage,
+    decimal AverageStackedPerShift,
+    int Rank
+);
+
+public record Company2StackedSummary(
+    int TopStackedDeliveries,
+    string TopPerformerName,
+    string TopPerformerWorkingId,
+    decimal CompanyStackedRate,
+    int TotalWorkingDays,
+    List<HousingStackedBreakdown> HousingBreakdowns
+);
+
+public record HousingStackedBreakdown(
+    string HousingName,
+    int TotalRiders,
+    int TotalStackedDeliveries,
+    int TotalAcceptedOrders,
+    decimal StackedRate,
+    decimal AverageStackedPerRider
+);
 //internal class ReporteCont
 //{
 //}

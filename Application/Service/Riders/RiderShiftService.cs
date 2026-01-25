@@ -1982,6 +1982,293 @@ public class RiderShiftService(ApplicationDbcontext dbcontext , IRiderWorkingIdH
     // public static readonly string[] ShiftDateColumns = 
     //     { "ShiftDate", "Shift_Date", "Shift Date", "Date", "WorkDate", "Work_Date", "تاريخ الوردية" };
 
+
+    // Add this method to RiderShiftService.cs
+
+    public async Task<Result<BulkUpdateResult>> UpdateStackedDeliveriesFromExcelAsync(
+        Stream excelStream,
+        CancellationToken cancellationToken = default)
+    {
+        var errors = new List<ImportError>();
+        var successfulUpdates = new List<UpdateDetail>();
+        var notFoundShifts = new List<NotFoundDetail>();
+        var totalRecords = 0;
+
+        try
+        {
+            using var workbook = new XLWorkbook(excelStream);
+            var worksheet = workbook.Worksheet(1);
+
+            // Find column indices for WorkingId, StackedDeliveries, and ShiftDate
+            var columnMapping = FindStackedUpdateColumnIndices(worksheet);
+            if (!columnMapping.IsValid)
+            {
+                return Result.Failure<BulkUpdateResult>(
+                    new Error("InvalidExcel", columnMapping.ErrorMessage!, 400));
+            }
+
+            var rows = worksheet.RowsUsed().Skip(1);
+            totalRecords = rows.Count();
+
+            var rowNumber = 1;
+
+            foreach (var row in rows)
+            {
+                rowNumber++;
+                try
+                {
+                    // Parse Excel row
+                    var updateData = ParseStackedUpdateExcelRow(row, columnMapping, rowNumber);
+
+                    if (!updateData.IsValid)
+                    {
+                        errors.Add(new ImportError(
+                            rowNumber,
+                            updateData.WorkingId ?? "N/A",
+                            updateData.ErrorMessage!));
+                        continue;
+                    }
+
+                    // Try to find shift with current WorkingId
+                    var shift = await dbcontext.RiderShifts
+                        .Include(s => s.Rider)
+                            .ThenInclude(r => r.Employee)
+                        .Include(s => s.Rider)
+                            .ThenInclude(r => r.Company)
+                        .FirstOrDefaultAsync(s =>
+                            s.WorkingId == updateData.WorkingId &&
+                            s.ShiftDate == updateData.ShiftDate,
+                            cancellationToken);
+
+                    if (shift != null)
+                    {
+                        // Direct match found - update it
+                        var oldStackedDeliveries = shift.StackedDeliveries;
+                        shift.StackedDeliveries = updateData.StackedDeliveries!.Value;
+
+                        await dbcontext.SaveChangesAsync(cancellationToken);
+
+                        successfulUpdates.Add(new UpdateDetail(
+                            rowNumber,
+                            updateData.WorkingId!,
+                            updateData.WorkingId!,
+                            shift.Rider.Employee.NameEN,
+                            updateData.ShiftDate!.Value,
+                            oldStackedDeliveries,
+                            updateData.StackedDeliveries.Value,
+                            shift.Rider.Company.Name,
+                            false));
+                    }
+                    else
+                    {
+                        // Shift not found with current WorkingId - check history
+                        var historyRecord = await dbcontext.Set<RiderWorkingIdHistory>()
+                            .Include(h => h.Employee)
+                            .Include(h => h.Company)
+                            .Where(h => h.WorkingId == updateData.WorkingId)
+                            .OrderByDescending(h => h.StartDate)
+                            .FirstOrDefaultAsync(cancellationToken);
+
+                        if (historyRecord == null)
+                        {
+                            notFoundShifts.Add(new NotFoundDetail(
+                                rowNumber,
+                                updateData.WorkingId!,
+                                updateData.ShiftDate!.Value,
+                                "WorkingId not found in current riders or history"));
+                            continue;
+                        }
+
+                        // Get the rider's current WorkingId
+                        var currentRider = await dbcontext.RiderDetails
+                            .Include(r => r.Employee)
+                            .Include(r => r.Company)
+                            .FirstOrDefaultAsync(r =>
+                                r.EmployeeIqamaNo == historyRecord.RiderIqamaNo,
+                                cancellationToken);
+
+                        if (currentRider == null)
+                        {
+                            notFoundShifts.Add(new NotFoundDetail(
+                                rowNumber,
+                                updateData.WorkingId!,
+                                updateData.ShiftDate!.Value,
+                                $"Rider with IqamaNo {historyRecord.RiderIqamaNo} not found"));
+                            continue;
+                        }
+
+                        // Now search for shift with the current WorkingId
+                        var shiftWithCurrentId = await dbcontext.RiderShifts
+                            .Include(s => s.Rider)
+                                .ThenInclude(r => r.Employee)
+                            .Include(s => s.Rider)
+                                .ThenInclude(r => r.Company)
+                            .FirstOrDefaultAsync(s =>
+                                s.WorkingId == currentRider.WorkingId &&
+                                s.ShiftDate == updateData.ShiftDate,
+                                cancellationToken);
+
+                        if (shiftWithCurrentId != null)
+                        {
+                            // Found shift with new WorkingId - update it
+                            var oldStackedDeliveries = shiftWithCurrentId.StackedDeliveries;
+                            shiftWithCurrentId.StackedDeliveries = updateData.StackedDeliveries!.Value;
+
+                            await dbcontext.SaveChangesAsync(cancellationToken);
+
+                            successfulUpdates.Add(new UpdateDetail(
+                                rowNumber,
+                                updateData.WorkingId!,
+                                currentRider.WorkingId!,
+                                currentRider.Employee.NameEN,
+                                updateData.ShiftDate!.Value,
+                                oldStackedDeliveries,
+                                updateData.StackedDeliveries.Value,
+                                currentRider.Company.Name,
+                                true));
+                        }
+                        else
+                        {
+                            notFoundShifts.Add(new NotFoundDetail(
+                                rowNumber,
+                                updateData.WorkingId!,
+                                updateData.ShiftDate!.Value,
+                                $"No shift found for date {updateData.ShiftDate}. " +
+                                $"WorkingId {updateData.WorkingId} belongs to {currentRider.Employee.NameEN} " +
+                                $"(Current ID: {currentRider.WorkingId})"));
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    errors.Add(new ImportError(
+                        rowNumber,
+                        "N/A",
+                        $"Error processing row: {ex.Message}"));
+                }
+            }
+
+            var result = new BulkUpdateResult(
+                totalRecords,
+                successfulUpdates.Count,
+                notFoundShifts.Count,
+                errors.Count,
+                successfulUpdates,
+                notFoundShifts,
+                errors);
+
+            return Result.Success(result);
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<BulkUpdateResult>(
+                new Error("ServerError", $"Error reading Excel file: {ex.Message}", 500));
+        }
+    }
+
+    private static StackedUpdateColumnMapping FindStackedUpdateColumnIndices(IXLWorksheet worksheet)
+    {
+        var headerRow = worksheet.FirstRowUsed();
+        if (headerRow == null)
+        {
+            return new StackedUpdateColumnMapping
+            {
+                IsValid = false,
+                ErrorMessage = "Excel file is empty or has no header row"
+            };
+        }
+
+        var mapping = new StackedUpdateColumnMapping();
+        var headerCells = headerRow.CellsUsed().ToList();
+
+        mapping.WorkingIdColumn = FindColumn(headerCells, ExcelColumnConfig.WorkingIdColumns);
+        mapping.StackedDeliveriesColumn = FindColumn(headerCells, ExcelColumnConfig.StackedDeliveriesColumns);
+        mapping.ShiftDateColumn = FindColumn(headerCells, ExcelColumnConfig.ShiftDateColumns);
+
+        var missingColumns = new List<string>();
+
+        if (mapping.WorkingIdColumn == 0)
+            missingColumns.Add($"WorkingId (tried: {string.Join(", ", ExcelColumnConfig.WorkingIdColumns)})");
+        if (mapping.StackedDeliveriesColumn == 0)
+            missingColumns.Add($"StackedDeliveries (tried: {string.Join(", ", ExcelColumnConfig.StackedDeliveriesColumns)})");
+        if (mapping.ShiftDateColumn == 0)
+            missingColumns.Add($"ShiftDate (tried: {string.Join(", ", ExcelColumnConfig.ShiftDateColumns)})");
+
+        if (missingColumns.Any())
+        {
+            mapping.IsValid = false;
+            mapping.ErrorMessage = $"Missing required columns: {string.Join(", ", missingColumns)}";
+            return mapping;
+        }
+
+        mapping.IsValid = true;
+        return mapping;
+    }
+
+    private static (
+        bool IsValid,
+        string? WorkingId,
+        DateOnly? ShiftDate,
+        int? StackedDeliveries,
+        string? ErrorMessage) ParseStackedUpdateExcelRow(
+        IXLRow row,
+        StackedUpdateColumnMapping mapping,
+        int rowNumber)
+    {
+        try
+        {
+            var workingIdCell = row.Cell(mapping.WorkingIdColumn).Value;
+            var workingId = workingIdCell.ToString()?.Trim();
+            if (string.IsNullOrWhiteSpace(workingId))
+                return (false, null, null, null, "Invalid Working ID");
+
+            // Parse shift date
+            var dateCell = row.Cell(mapping.ShiftDateColumn);
+            DateOnly? shiftDate;
+            try
+            {
+                if (dateCell.Value.IsDateTime)
+                {
+                    shiftDate = DateOnly.FromDateTime(dateCell.GetDateTime());
+                }
+                else
+                {
+                    var dateString = dateCell.Value.ToString()?.Trim();
+                    shiftDate = ParseDate(dateString);
+
+                    if (!shiftDate.HasValue)
+                    {
+                        return (false, workingId, null, null, $"Invalid Shift Date format: '{dateString}'");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                return (false, workingId, null, null, $"Error parsing Shift Date: {ex.Message}");
+            }
+
+            var stackedCell = row.Cell(mapping.StackedDeliveriesColumn).Value;
+            if (!int.TryParse(stackedCell.ToString(), out var stackedDeliveries) || stackedDeliveries < 0)
+                return (false, workingId, shiftDate, null, "Invalid Stacked Deliveries (must be >= 0)");
+
+            return (true, workingId, shiftDate, stackedDeliveries, null);
+        }
+        catch (Exception ex)
+        {
+            return (false, null, null, null, $"Error: {ex.Message}");
+        }
+    }
+
+    // Supporting class
+    public class StackedUpdateColumnMapping
+    {
+        public bool IsValid { get; set; }
+        public string? ErrorMessage { get; set; }
+        public int WorkingIdColumn { get; set; }
+        public int ShiftDateColumn { get; set; }
+        public int StackedDeliveriesColumn { get; set; }
+    }
+
 }
 
 

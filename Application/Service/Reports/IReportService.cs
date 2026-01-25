@@ -1,4 +1,5 @@
 ﻿using Application.Abstraction;
+using Application.Contracts.ReportCo;
 using Application.Service.Member;
 using Application.Service.Riders;
 using static Application.Service.Reports.ReportService;
@@ -8,6 +9,17 @@ namespace Application.Service.Reports;
 
 public interface IReportService
 {
+    Task<Result<IEnumerable<DailyCompanyShiftSummary>>> GetDailyShiftSummaryByCompaniesAsync(
+    List<int> companyIds,
+    CancellationToken cancellationToken = default);
+
+
+    Task<Result<Company2StackedDeliveriesReport>> GetCompany2StackedDeliveriesReportAsync(
+    DateOnly startDate,
+    DateOnly endDate,
+    CancellationToken cancellationToken = default);
+
+
     Task<Result<List<RiderWorkHistorySummary>>> GetAllRidersWorkHistoryAsync(
     DateOnly? startDate = null,
     DateOnly? endDate = null,

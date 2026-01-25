@@ -10,6 +10,9 @@ namespace Application.Service.Riders;
 
 public interface IRiderShiftService
 {
+    Task<Result<BulkUpdateResult>> UpdateStackedDeliveriesFromExcelAsync(
+    Stream excelStream,
+    CancellationToken cancellationToken = default);
     Task<Result<RiderShiftResponse>> CreateShiftAsync(CreateRiderShiftRequest request, CancellationToken cancellationToken = default);
     Task<Result<RiderShiftResponse>> GetShiftAsync(string WorkingId, DateOnly shiftDate, CancellationToken cancellationToken = default);
     Task<Result<IEnumerable<RiderShiftResponse>>> GetShiftsByRiderAsync(string WorkingId, CancellationToken cancellationToken = default);

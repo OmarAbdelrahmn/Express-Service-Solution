@@ -19,6 +19,21 @@ public class ShiftController(IRiderShiftService service) : ControllerBase
         var result = await service.CreateShiftAsync(request, cancellationToken);
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
+    [HttpPost("update-stacked")]
+    public async Task<IActionResult> UpdateStackedDeliveriesFromExcelAsync(
+    IFormFile excelFile,
+    CancellationToken cancellationToken)
+    {
+        if (excelFile == null || excelFile.Length == 0)
+        {
+            return BadRequest("No file uploaded.");
+        }
+
+        using var stream = excelFile.OpenReadStream();
+        var result = await service.UpdateStackedDeliveriesFromExcelAsync(stream, cancellationToken);
+
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
 
     [HttpGet("{WorkingId}")]
  

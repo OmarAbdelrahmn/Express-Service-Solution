@@ -1,4 +1,5 @@
 ﻿using Application.Service.export;
+using Application.Service.Import;
 using Application.Service.Reports;
 using Application.Service.Riders;
 using k8s.Models;
@@ -17,6 +18,19 @@ public class ReportController(IReportService service) : ControllerBase
 
     private readonly IReportService service = service;
 
+
+    [HttpGet("from-start")]
+    public async Task<IActionResult> GetDailyShiftSummaryByCompanies(
+    CancellationToken cancellationToken)
+    {
+        List<int> ids = [1 , 2];
+
+        var result = await service.GetDailyShiftSummaryByCompaniesAsync(ids , cancellationToken);
+
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+        
+    }
+
     [HttpGet("all-riders-history")]
     [Authorize(Roles = "Master,Admin")]
     public async Task<IActionResult> GetAllRidersHistory(
@@ -25,6 +39,20 @@ public class ReportController(IReportService service) : ControllerBase
     CancellationToken cancellationToken = default)
     {
         var result = await service.GetAllRidersWorkHistoryAsync(startDate, endDate, cancellationToken);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    [HttpGet("company2/stacked-deliveries")]
+    public async Task<IActionResult> GetCompany2StackedDeliveriesReportAsync(
+    [FromQuery] DateOnly startDate,
+    [FromQuery] DateOnly endDate,
+    CancellationToken cancellationToken)
+    {
+        var result = await service.GetCompany2StackedDeliveriesReportAsync(
+            startDate,
+            endDate,
+            cancellationToken);
+
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
 
