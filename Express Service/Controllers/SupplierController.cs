@@ -1,7 +1,5 @@
-﻿using Application.Contracts.RiderAccessoryCon;
-using Application.Contracts.SparePartCo;
-using Application.Service.RiderAccessory;
-using Application.Service.SparePart;
+﻿using Application.Contracts.SupplierCon;
+using Application.Service.SupplierSer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -10,12 +8,19 @@ namespace Express_Service.Controllers;
 [Route("api/[controller]")]
 [ApiController]
 [Authorize(Roles = "Master,Admin,Member")]
-public class SparePartController(ISparePartService service) : ControllerBase
+public class SupplierController(ISupplierService service) : ControllerBase
 {
     [HttpGet]
     public async Task<IActionResult> GetAll()
     {
         var response = await service.GetAllAsync();
+        return response.IsSuccess ? Ok(response.Value) : response.ToProblem();
+    }
+
+    [HttpGet("active")]
+    public async Task<IActionResult> GetActive()
+    {
+        var response = await service.GetActiveAsync();
         return response.IsSuccess ? Ok(response.Value) : response.ToProblem();
     }
 
@@ -28,7 +33,7 @@ public class SparePartController(ISparePartService service) : ControllerBase
 
     [HttpPost]
     [Authorize(Roles = "Master,Admin")]
-    public async Task<IActionResult> Create([FromBody] SparePartRequest request)
+    public async Task<IActionResult> Create([FromBody] SupplierRequest request)
     {
         var response = await service.CreateAsync(request);
         return response.IsSuccess ? Ok(response.Value) : response.ToProblem();
@@ -36,10 +41,20 @@ public class SparePartController(ISparePartService service) : ControllerBase
 
     [HttpPut("{id}")]
     [Authorize(Roles = "Master,Admin")]
-    public async Task<IActionResult> Update(int id, [FromBody] SparePartRequest request)
+    public async Task<IActionResult> Update(int id, [FromBody] SupplierRequest request)
     {
         var response = await service.UpdateAsync(id, request);
         return response.IsSuccess ? Ok(response.Value) : response.ToProblem();
+    }
+
+    [HttpPatch("{id}/toggle-active")]
+    [Authorize(Roles = "Master,Admin")]
+    public async Task<IActionResult> ToggleActive(int id)
+    {
+        var response = await service.ToggleActiveAsync(id);
+        return response.IsSuccess ?
+            Ok(new { message = "Supplier status toggled successfully" }) :
+            response.ToProblem();
     }
 
     [HttpDelete("{id}")]
@@ -47,7 +62,9 @@ public class SparePartController(ISparePartService service) : ControllerBase
     public async Task<IActionResult> Delete(int id)
     {
         var response = await service.DeleteAsync(id);
-        return response.IsSuccess ? Ok(new { message = "Deleted successfully" }) : response.ToProblem();
+        return response.IsSuccess ?
+            Ok(new { message = "Supplier deleted successfully" }) :
+            response.ToProblem();
     }
 
     [HttpGet("search")]
@@ -57,28 +74,6 @@ public class SparePartController(ISparePartService service) : ControllerBase
             return BadRequest("Search query cannot be empty");
 
         var response = await service.SearchAsync(q);
-        return response.IsSuccess ? Ok(response.Value) : response.ToProblem();
-    }
-
-    [HttpPost("{id}/usage")]
-    [Authorize(Roles = "Master,Admin")]
-    public async Task<IActionResult> RecordUsage(int id, [FromBody] SparePartUsageRequest request)
-    {
-        var response = await service.RecordUsageAsync(id, request);
-        return response.IsSuccess ? Ok(response.Value) : response.ToProblem();
-    }
-
-    [HttpGet("{id}/history")]
-    public async Task<IActionResult> GetUsageHistory(int id)
-    {
-        var response = await service.GetUsageHistoryAsync(id);
-        return response.IsSuccess ? Ok(response.Value) : response.ToProblem();
-    }
-
-    [HttpGet("vehicle/{vehicleNumber}/history")]
-    public async Task<IActionResult> GetVehicleHistory(string vehicleNumber)
-    {
-        var response = await service.GetVehicleUsageHistoryAsync(vehicleNumber);
         return response.IsSuccess ? Ok(response.Value) : response.ToProblem();
     }
 }

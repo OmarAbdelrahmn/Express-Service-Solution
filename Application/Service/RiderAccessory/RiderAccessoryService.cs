@@ -1,5 +1,4 @@
-﻿// Application/Service/RiderAccessory/RiderAccessoryService.cs
-using Application.Abstraction;
+﻿using Application.Abstraction;
 using Application.Abstraction.Errors;
 using Application.Contracts.RiderAccessoryCon;
 using Domain;

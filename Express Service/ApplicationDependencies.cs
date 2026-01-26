@@ -12,7 +12,9 @@ using Application.Service.Reports;
 using Application.Service.RiderAccessory;
 using Application.Service.Riders;
 using Application.Service.SparePart;
+using Application.Service.SupplierSer;
 using Application.Service.temp;
+using Application.Service.Transfer;
 using Application.Service.User;
 using DocumentFormat.OpenXml.Office2016.Drawing.ChartDrawing;
 using Domain;
@@ -59,8 +61,14 @@ public static class ApplicationDependencies
         Services.AddScoped<IMemberService, MemberService>();
         Services.AddScoped<IDeletedEmployeeImportService, DeletedEmployeeImportService>();
         Services.AddSingleton<IBackgroundImportService, BackgroundImportService>();
-        Services.AddSingleton<ISparePartService, SparePartService>();
-        Services.AddSingleton<IRiderAccessoryService, RiderAccessoryService>();
+        Services.AddScoped<ISparePartService, SparePartService>();
+        Services.AddScoped<IRiderAccessoryService, RiderAccessoryService>();
+        Services.AddScoped<ITransferService, TransferService>();
+        Services.AddScoped<IBillService, BillService>();
+        Services.AddScoped<ISupplierService,SupplierService>();
+ 
+
+
         Services.AddAuth(configuration)
                 .AddMappester()
                 .AddFluentValidation()
