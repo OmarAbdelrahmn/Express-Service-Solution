@@ -1213,5 +1213,19 @@ public class ImportController(IImportService service , IBackgroundImportService 
         return Ok(new { message = "WorkingId sync job cancellation requested" });
     }
 
-  
+
+
+    [HttpPost("spare-parts")]
+    public async Task<IActionResult> ImportSpareParts(IFormFile file)
+    {
+        var response = await service.ImportSparePartsAsync(file, "Omar");
+        return response.IsSuccess ? Ok(response.Value) : response.ToProblem();
+    }
+
+    [HttpPost("rider-accessories")]
+    public async Task<IActionResult> ImportRiderAccessories(IFormFile file)
+    {
+        var response = await service.ImportRiderAccessoriesAsync(file, "Omar");
+        return response.IsSuccess ? Ok(response.Value) : response.ToProblem();
+    }
 }

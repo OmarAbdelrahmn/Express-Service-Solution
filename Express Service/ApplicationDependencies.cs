@@ -9,7 +9,9 @@ using Application.Service.Hungerdisa;
 using Application.Service.Import;
 using Application.Service.Member;
 using Application.Service.Reports;
+using Application.Service.RiderAccessory;
 using Application.Service.Riders;
+using Application.Service.SparePart;
 using Application.Service.temp;
 using Application.Service.User;
 using DocumentFormat.OpenXml.Office2016.Drawing.ChartDrawing;
@@ -57,6 +59,8 @@ public static class ApplicationDependencies
         Services.AddScoped<IMemberService, MemberService>();
         Services.AddScoped<IDeletedEmployeeImportService, DeletedEmployeeImportService>();
         Services.AddSingleton<IBackgroundImportService, BackgroundImportService>();
+        Services.AddSingleton<ISparePartService, SparePartService>();
+        Services.AddSingleton<IRiderAccessoryService, RiderAccessoryService>();
         Services.AddAuth(configuration)
                 .AddMappester()
                 .AddFluentValidation()

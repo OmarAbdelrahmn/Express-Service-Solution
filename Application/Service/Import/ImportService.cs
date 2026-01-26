@@ -22,7 +22,542 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
 
 
     // Add this method to ImportService.cs class
+    public async Task<Result<SparePartImportResponse>> ImportSparePartsAsync(
+    IFormFile file,
+    string uploadedBy)
+    {
+        if (file == null || file.Length == 0)
+            return Result.Failure<SparePartImportResponse>(
+                new Error("InvalidFile", "File is empty or null", 400));
 
+        if (!file.FileName.EndsWith(".xlsx") && !file.FileName.EndsWith(".xls"))
+            return Result.Failure<SparePartImportResponse>(
+                new Error("InvalidFormat", "File must be Excel format", 400));
+
+        var results = new List<SparePartImportRowResult>();
+        var errors = new List<string>();
+        int successfulImports = 0;
+        int updatedRecords = 0;
+        int failedRecords = 0;
+
+        try
+        {
+            using var stream = file.OpenReadStream();
+            using var workbook = new XLWorkbook(stream);
+            var worksheet = workbook.Worksheet(1);
+
+            if (worksheet == null)
+                return Result.Failure<SparePartImportResponse>(
+                    new Error("InvalidWorksheet", "Could not read worksheet", 400));
+
+            var headerRow = FindSparePartHeaderRow(worksheet);
+            if (headerRow == null)
+                return Result.Failure<SparePartImportResponse>(
+                    new Error("EmptyFile", "No header row found", 400));
+
+            var columnMap = BuildSparePartColumnMapping(headerRow);
+            if (!columnMap.IsValid)
+                return Result.Failure<SparePartImportResponse>(
+                    new Error("InvalidColumns", columnMap.ErrorMessage!, 400));
+
+            var dataRows = worksheet.RowsUsed()
+                .Where(r => r.RowNumber() > headerRow.RowNumber())
+                .ToList();
+
+            var rowNumber = headerRow.RowNumber();
+
+            foreach (var row in dataRows)
+            {
+                rowNumber++;
+
+                using var transaction = await _dbcontext.Database.BeginTransactionAsync();
+                try
+                {
+                    var rowData = ParseSparePartRowData(row, columnMap, rowNumber);
+
+                    if (!rowData.IsValid)
+                    {
+                        failedRecords++;
+                        results.Add(new SparePartImportRowResult(
+                            rowNumber, false,
+                            rowData.Name ?? "N/A",
+                            rowData.Quantity,
+                            rowData.Price,
+                            rowData.Location ?? "N/A",
+                            false, false,
+                            new List<string>(),
+                            rowData.ErrorMessage
+                        ));
+                        continue;
+                    }
+
+                    var warnings = new List<string>();
+
+                    // Check if spare part exists
+                    var existing = await _dbcontext.SpareParts
+                        .FirstOrDefaultAsync(sp => sp.Name.ToLower() == rowData.Name!.ToLower());
+
+                    bool created = false;
+                    bool updated = false;
+
+                    if (existing == null)
+                    {
+                        var sparePart = new Domain.Entities.Spare.SparePart
+                        {
+                            Name = rowData.Name!,
+                            Quantity = rowData.Quantity,
+                            Price = rowData.Price,
+                            Location = rowData.Location!,
+                            CreatedAt = DateTime.UtcNow.AddHours(3)
+                        };
+
+                        await _dbcontext.SpareParts.AddAsync(sparePart);
+                        created = true;
+                        successfulImports++;
+                    }
+                    else
+                    {
+                        existing.Quantity += rowData.Quantity;
+                        existing.Price = rowData.Price;
+                        existing.Location = rowData.Location!;
+
+                        updated = true;
+                        updatedRecords++;
+                        warnings.Add($"Updated existing part, quantity increased by {rowData.Quantity}");
+                    }
+
+                    await _dbcontext.SaveChangesAsync();
+                    await transaction.CommitAsync();
+
+                    results.Add(new SparePartImportRowResult(
+                        rowNumber, true,
+                        rowData.Name!,
+                        rowData.Quantity,
+                        rowData.Price,
+                        rowData.Location!,
+                        created, updated,
+                        warnings,
+                        null
+                    ));
+                }
+                catch (Exception ex)
+                {
+                    await transaction.RollbackAsync();
+                    failedRecords++;
+                    errors.Add($"Row {rowNumber}: {ex.Message}");
+
+                    results.Add(new SparePartImportRowResult(
+                        rowNumber, false,
+                        "N/A", 0, 0, "N/A",
+                        false, false,
+                        new List<string>(),
+                        $"Exception: {ex.Message}"
+                    ));
+                }
+            }
+
+            var response = new SparePartImportResponse(
+                dataRows.Count,
+                successfulImports,
+                updatedRecords,
+                failedRecords,
+                results,
+                errors,
+                DateTime.UtcNow.AddHours(3)
+            );
+
+            return Result.Success(response);
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<SparePartImportResponse>(
+                new Error("ProcessingError", $"Failed to process file: {ex.Message}", 500));
+        }
+    }
+
+    public async Task<Result<RiderAccessoryImportResponse>> ImportRiderAccessoriesAsync(
+        IFormFile file,
+        string uploadedBy)
+    {
+        if (file == null || file.Length == 0)
+            return Result.Failure<RiderAccessoryImportResponse>(
+                new Error("InvalidFile", "File is empty or null", 400));
+
+        if (!file.FileName.EndsWith(".xlsx") && !file.FileName.EndsWith(".xls"))
+            return Result.Failure<RiderAccessoryImportResponse>(
+                new Error("InvalidFormat", "File must be Excel format", 400));
+
+        var results = new List<RiderAccessoryImportRowResult>();
+        var errors = new List<string>();
+        int successfulImports = 0;
+        int updatedRecords = 0;
+        int failedRecords = 0;
+
+        try
+        {
+            using var stream = file.OpenReadStream();
+            using var workbook = new XLWorkbook(stream);
+            var worksheet = workbook.Worksheet(1);
+
+            if (worksheet == null)
+                return Result.Failure<RiderAccessoryImportResponse>(
+                    new Error("InvalidWorksheet", "Could not read worksheet", 400));
+
+            var headerRow = FindAccessoryHeaderRow(worksheet);
+            if (headerRow == null)
+                return Result.Failure<RiderAccessoryImportResponse>(
+                    new Error("EmptyFile", "No header row found", 400));
+
+            var columnMap = BuildAccessoryColumnMapping(headerRow);
+            if (!columnMap.IsValid)
+                return Result.Failure<RiderAccessoryImportResponse>(
+                    new Error("InvalidColumns", columnMap.ErrorMessage!, 400));
+
+            var dataRows = worksheet.RowsUsed()
+                .Where(r => r.RowNumber() > headerRow.RowNumber())
+                .ToList();
+
+            var rowNumber = headerRow.RowNumber();
+
+            foreach (var row in dataRows)
+            {
+                rowNumber++;
+
+                using var transaction = await _dbcontext.Database.BeginTransactionAsync();
+                try
+                {
+                    var rowData = ParseAccessoryRowData(row, columnMap, rowNumber);
+
+                    if (!rowData.IsValid)
+                    {
+                        failedRecords++;
+                        results.Add(new RiderAccessoryImportRowResult(
+                            rowNumber, false,
+                            rowData.Name ?? "N/A",
+                            rowData.Quantity,
+                            rowData.Price,
+                            rowData.Location ?? "N/A",
+                            false, false,
+                            new List<string>(),
+                            rowData.ErrorMessage
+                        ));
+                        continue;
+                    }
+
+                    var warnings = new List<string>();
+
+                    // Check if accessory exists
+                    var existing = await _dbcontext.RiderAccessories
+                        .FirstOrDefaultAsync(a =>
+                            a.Name.ToLower() == rowData.Name!.ToLower());
+
+                    bool created = false;
+                    bool updated = false;
+
+                    if (existing == null)
+                    {
+                        var accessory = new Domain.Entities.Spare.RiderAccessory
+                        {
+                            Name = rowData.Name!,
+                            Quantity = rowData.Quantity,
+                            Price = rowData.Price,
+                            Location = rowData.Location!,
+                            CreatedAt = DateTime.UtcNow.AddHours(3)
+                        };
+
+                        await _dbcontext.RiderAccessories.AddAsync(accessory);
+                        created = true;
+                        successfulImports++;
+                    }
+                    else
+                    {
+                        existing.Quantity += rowData.Quantity;
+                        existing.Price = rowData.Price;
+                        existing.Location = rowData.Location!;
+
+                        updated = true;
+                        updatedRecords++;
+                        warnings.Add($"Updated existing accessory, quantity increased by {rowData.Quantity}");
+                    }
+
+                    await _dbcontext.SaveChangesAsync();
+                    await transaction.CommitAsync();
+
+                    results.Add(new RiderAccessoryImportRowResult(
+                        rowNumber, true,
+                        rowData.Name!,
+                        rowData.Quantity,
+                        rowData.Price,
+                        rowData.Location!,
+                        created, updated,
+                        warnings,
+                        null
+                    ));
+                }
+                catch (Exception ex)
+                {
+                    await transaction.RollbackAsync();
+                    failedRecords++;
+                    errors.Add($"Row {rowNumber}: {ex.Message}");
+
+                    results.Add(new RiderAccessoryImportRowResult(
+                        rowNumber, false,
+                        "N/A", 0, 0, "N/A",
+                        false, false,
+                        new List<string>(),
+                        $"Exception: {ex.Message}"
+                    ));
+                }
+            }
+
+            var response = new RiderAccessoryImportResponse(
+                dataRows.Count,
+                successfulImports,
+                updatedRecords,
+                failedRecords,
+                results,
+                errors,
+                DateTime.UtcNow.AddHours(3)
+            );
+
+            return Result.Success(response);
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<RiderAccessoryImportResponse>(
+                new Error("ProcessingError", $"Failed to process file: {ex.Message}", 500));
+        }
+    }
+
+    // Helper methods
+    private IXLRow? FindSparePartHeaderRow(IXLWorksheet worksheet)
+    {
+        var knownColumns = new[] { "Name", "الاسم", "Quantity", "الكمية", "Price", "السعر", "Location", "الموقع" };
+
+        for (int i = 1; i <= Math.Min(10, worksheet.RowsUsed().Count()); i++)
+        {
+            var row = worksheet.Row(i);
+            var cellValues = row.CellsUsed().Select(c => c.GetString().Trim()).ToList();
+
+            if (cellValues.Count(cv => knownColumns.Any(kc =>
+                cv.Equals(kc, StringComparison.OrdinalIgnoreCase))) >= 3)
+                return row;
+        }
+
+        return worksheet.Row(1);
+    }
+
+    private SparePartColumnMapping BuildSparePartColumnMapping(IXLRow headerRow)
+    {
+        var mapping = new SparePartColumnMapping();
+        var cells = headerRow.CellsUsed().ToList();
+
+        mapping.NameCol = FindColumn(cells, "Name", "الاسم", "Part Name");
+        mapping.QuantityCol = FindColumn(cells, "Quantity", "الكمية", "Qty");
+        mapping.PriceCol = FindColumn(cells, "Price", "السعر", "Cost");
+        mapping.LocationCol = FindColumn(cells, "Location", "الموقع", "Storage");
+
+        var missing = new List<string>();
+        if (mapping.NameCol == 0) missing.Add("Name");
+        if (mapping.QuantityCol == 0) missing.Add("Quantity");
+        if (mapping.PriceCol == 0) missing.Add("Price");
+        if (mapping.LocationCol == 0) missing.Add("Location");
+
+        mapping.IsValid = !missing.Any();
+        mapping.ErrorMessage = missing.Any() ? $"Missing: {string.Join(", ", missing)}" : null;
+
+        return mapping;
+    }
+
+    private SparePartRowData ParseSparePartRowData(IXLRow row, SparePartColumnMapping map, int rowNumber)
+    {
+        var data = new SparePartRowData { RowNumber = rowNumber };
+
+        try
+        {
+            data.Name = GetCellValue(row, map.NameCol)?.Trim();
+            if (string.IsNullOrWhiteSpace(data.Name))
+            {
+                data.IsValid = false;
+                data.ErrorMessage = "Name is required";
+                return data;
+            }
+
+            var qtyStr = GetCellValue(row, map.QuantityCol);
+            if (!TryParseInt(qtyStr, out int qty) || qty < 0)
+            {
+                data.IsValid = false;
+                data.ErrorMessage = $"Invalid quantity: {qtyStr}";
+                return data;
+            }
+            data.Quantity = qty;
+
+            var priceStr = GetCellValue(row, map.PriceCol);
+            if (!decimal.TryParse(priceStr, out decimal price) || price < 0)
+            {
+                data.IsValid = false;
+                data.ErrorMessage = $"Invalid price: {priceStr}";
+                return data;
+            }
+            data.Price = price;
+
+            data.Location = GetCellValue(row, map.LocationCol)?.Trim();
+            if (string.IsNullOrWhiteSpace(data.Location))
+            {
+                data.IsValid = false;
+                data.ErrorMessage = "Location is required";
+                return data;
+            }
+
+            data.IsValid = true;
+        }
+        catch (Exception ex)
+        {
+            data.IsValid = false;
+            data.ErrorMessage = $"Error parsing row: {ex.Message}";
+        }
+
+        return data;
+    }
+
+    private IXLRow? FindAccessoryHeaderRow(IXLWorksheet worksheet)
+    {
+        var knownColumns = new[] { "Name", "الاسم", "Type", "النوع", "Quantity", "الكمية", "Price", "السعر" };
+
+        for (int i = 1; i <= Math.Min(10, worksheet.RowsUsed().Count()); i++)
+        {
+            var row = worksheet.Row(i);
+            var cellValues = row.CellsUsed().Select(c => c.GetString().Trim()).ToList();
+
+            if (cellValues.Count(cv => knownColumns.Any(kc =>
+                cv.Equals(kc, StringComparison.OrdinalIgnoreCase))) >= 3)
+                return row;
+        }
+
+        return worksheet.Row(1);
+    }
+
+    private AccessoryColumnMapping BuildAccessoryColumnMapping(IXLRow headerRow)
+    {
+        var mapping = new AccessoryColumnMapping();
+        var cells = headerRow.CellsUsed().ToList();
+
+        mapping.NameCol = FindColumn(cells, "Name", "الاسم", "Accessory Name");
+        mapping.TypeCol = FindColumn(cells, "Type", "النوع", "Category");
+        mapping.QuantityCol = FindColumn(cells, "Quantity", "الكمية", "Qty");
+        mapping.PriceCol = FindColumn(cells, "Price", "السعر", "Cost");
+        mapping.LocationCol = FindColumn(cells, "Location", "الموقع", "Storage");
+
+        var missing = new List<string>();
+        if (mapping.NameCol == 0) missing.Add("Name");
+        if (mapping.TypeCol == 0) missing.Add("Type");
+        if (mapping.QuantityCol == 0) missing.Add("Quantity");
+        if (mapping.PriceCol == 0) missing.Add("Price");
+        if (mapping.LocationCol == 0) missing.Add("Location");
+
+        mapping.IsValid = !missing.Any();
+        mapping.ErrorMessage = missing.Any() ? $"Missing: {string.Join(", ", missing)}" : null;
+
+        return mapping;
+    }
+
+    private AccessoryRowData ParseAccessoryRowData(IXLRow row, AccessoryColumnMapping map, int rowNumber)
+    {
+        var data = new AccessoryRowData { RowNumber = rowNumber };
+
+        try
+        {
+            data.Name = GetCellValue(row, map.NameCol)?.Trim();
+            if (string.IsNullOrWhiteSpace(data.Name))
+            {
+                data.IsValid = false;
+                data.ErrorMessage = "Name is required";
+                return data;
+            }
+
+            var qtyStr = GetCellValue(row, map.QuantityCol);
+            if (!TryParseInt(qtyStr, out int qty) || qty < 0)
+            {
+                data.IsValid = false;
+                data.ErrorMessage = $"Invalid quantity: {qtyStr}";
+                return data;
+            }
+            data.Quantity = qty;
+
+            var priceStr = GetCellValue(row, map.PriceCol);
+            if (!decimal.TryParse(priceStr, out decimal price) || price < 0)
+            {
+                data.IsValid = false;
+                data.ErrorMessage = $"Invalid price: {priceStr}";
+                return data;
+            }
+            data.Price = price;
+
+            data.Location = GetCellValue(row, map.LocationCol)?.Trim();
+            if (string.IsNullOrWhiteSpace(data.Location))
+            {
+                data.IsValid = false;
+                data.ErrorMessage = "Location is required";
+                return data;
+            }
+
+            data.IsValid = true;
+        }
+        catch (Exception ex)
+        {
+            data.IsValid = false;
+            data.ErrorMessage = $"Error parsing row: {ex.Message}";
+        }
+
+        return data;
+    }
+
+    // Internal classes
+    internal class SparePartColumnMapping
+    {
+        public bool IsValid { get; set; }
+        public string? ErrorMessage { get; set; }
+        public int NameCol { get; set; }
+        public int QuantityCol { get; set; }
+        public int PriceCol { get; set; }
+        public int LocationCol { get; set; }
+        public int VehicleTypeCol { get; set; }
+    }
+
+    internal class SparePartRowData
+    {
+        public int RowNumber { get; set; }
+        public bool IsValid { get; set; }
+        public string? ErrorMessage { get; set; }
+        public string? Name { get; set; }
+        public int Quantity { get; set; }
+        public decimal Price { get; set; }
+        public string? Location { get; set; }
+        public string? VehicleType { get; set; }
+    }
+
+    internal class AccessoryColumnMapping
+    {
+        public bool IsValid { get; set; }
+        public string? ErrorMessage { get; set; }
+        public int NameCol { get; set; }
+        public int TypeCol { get; set; }
+        public int QuantityCol { get; set; }
+        public int PriceCol { get; set; }
+        public int LocationCol { get; set; }
+    }
+
+    internal class AccessoryRowData
+    {
+        public int RowNumber { get; set; }
+        public bool IsValid { get; set; }
+        public string? ErrorMessage { get; set; }
+        public string? Name { get; set; }
+        public string? Type { get; set; }
+        public int Quantity { get; set; }
+        public decimal Price { get; set; }
+        public string? Location { get; set; }
+    }
     public async Task<Result<VehicleRelocationImportResponse>> ImportVehicleRelocationsAsync(
         IFormFile file,
         string uploadedBy)

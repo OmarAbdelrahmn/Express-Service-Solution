@@ -1,4 +1,5 @@
 ﻿using Domain.Entities;
+using Domain.Entities.Spare;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
@@ -30,6 +31,10 @@ public class ApplicationDbcontext(DbContextOptions<ApplicationDbcontext> options
     public required DbSet<TempEmployeeStatusChange> TempEmployeeStatusChanges { get; set; }
     public required DbSet<TempVehicleOperation> TempVehicleOperations { get; set; }
     public required DbSet<RiderWorkingIdHistory> RiderWorkingIdHistories { get; set; }
+    public required DbSet<SparePart> SpareParts { get; set; }
+    public required DbSet<RiderAccessory>RiderAccessories{ get; set; }
+    public required DbSet<RiderAccessoryUsage> RiderAccessoryUsages{ get; set; }
+    public required DbSet<SparePartUsage> SparePartUsages  { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

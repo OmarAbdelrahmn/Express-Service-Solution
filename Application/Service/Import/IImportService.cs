@@ -10,6 +10,10 @@ namespace Application.Service.Import;
 
 public interface IImportService
 {
+    Task<Result<SparePartImportResponse>> ImportSparePartsAsync(IFormFile file, string uploadedBy);
+    Task<Result<RiderAccessoryImportResponse>> ImportRiderAccessoriesAsync(IFormFile file, string uploadedBy);
+
+
     Task<Result<VehicleRelocationImportResponse>> ImportVehicleRelocationsAsync(
     IFormFile file,
     string uploadedBy);
@@ -63,6 +67,52 @@ public interface IImportService
 }
 // Application/DTOs/VehicleUsageCheckDtos.cs
 // Application/DTOs/VehicleUsageCheckDtos.cs
+
+public record SparePartImportResponse(
+    int TotalRecords,
+    int SuccessfulImports,
+    int UpdatedRecords,
+    int FailedRecords,
+    List<SparePartImportRowResult> Results,
+    List<string> Errors,
+    DateTime ProcessedAt
+);
+
+public record SparePartImportRowResult(
+    int RowNumber,
+    bool Success,
+    string Name,
+    int Quantity,
+    decimal Price,
+    string Location,
+    bool Created,
+    bool Updated,
+    List<string> Warnings,
+    string? ErrorMessage
+);
+
+public record RiderAccessoryImportResponse(
+    int TotalRecords,
+    int SuccessfulImports,
+    int UpdatedRecords,
+    int FailedRecords,
+    List<RiderAccessoryImportRowResult> Results,
+    List<string> Errors,
+    DateTime ProcessedAt
+);
+
+public record RiderAccessoryImportRowResult(
+    int RowNumber,
+    bool Success,
+    string Name,
+    int Quantity,
+    decimal Price,
+    string Location,
+    bool Created,
+    bool Updated,
+    List<string> Warnings,
+    string? ErrorMessage
+);
 
 public record RiderVerificationResponse(
     int TotalRecordsProcessed,
