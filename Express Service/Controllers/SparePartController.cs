@@ -18,6 +18,13 @@ public class SparePartController(ISparePartService service) : ControllerBase
         var response = await service.GetAllAsync();
         return response.IsSuccess ? Ok(response.Value) : response.ToProblem();
     }
+    
+    [HttpGet("2")]
+    public async Task<IActionResult> GetAll2()
+    {
+        var response = await service.GetAllAsync2();
+        return response.IsSuccess ? Ok(response.Value) : response.ToProblem();
+    }
 
     [HttpGet("{id}")]
     public async Task<IActionResult> GetById(int id)
@@ -27,7 +34,7 @@ public class SparePartController(ISparePartService service) : ControllerBase
     }
 
     [HttpPost]
-    [Authorize(Roles = "Master,Admin")]
+    //[Authorize(Roles = "Master,Admin")]
     public async Task<IActionResult> Create([FromBody] SparePartRequest request)
     {
         var response = await service.CreateAsync(request);

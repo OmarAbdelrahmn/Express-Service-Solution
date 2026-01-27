@@ -9,6 +9,7 @@ namespace Application.Service.SparePart;
 public interface ISparePartService
 {
     Task<Result<IEnumerable<SparePartResponse>>> GetAllAsync();
+    Task<Result<IEnumerable<SparePartResponse>>> GetAllAsync2();
     Task<Result<SparePartResponse>> GetByIdAsync(int id);
     Task<Result<SparePartResponse>> CreateAsync(SparePartRequest request);
     Task<Result<SparePartResponse>> UpdateAsync(int id, SparePartRequest request);

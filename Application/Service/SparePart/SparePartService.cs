@@ -23,6 +23,17 @@ public class SparePartService(ApplicationDbcontext dbcontext) : ISparePartServic
         var response = spareParts.Select(MapToResponse);
         return Result.Success<IEnumerable<SparePartResponse>>(response);
     }
+    public async Task<Result<IEnumerable<SparePartResponse>>> GetAllAsync2()
+    {
+        var spareParts = await _dbcontext.SpareParts
+            .Where(c=>c.Location=="الشركة")
+            .AsNoTracking()
+            .OrderBy(sp => sp.Name)
+            .ToListAsync();
+
+        var response = spareParts.Select(MapToResponse);
+        return Result.Success<IEnumerable<SparePartResponse>>(response);
+    }
 
     public async Task<Result<SparePartResponse>> GetByIdAsync(int id)
     {

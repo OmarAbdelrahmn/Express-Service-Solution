@@ -236,7 +236,7 @@ namespace Domain.Migrations
                     b.HasIndex("Name")
                         .IsUnique();
 
-                    b.ToTable("Companies");
+                    b.ToTable("Companies", (string)null);
                 });
 
             modelBuilder.Entity("Domain.Entities.DeletedEmployees", b =>
@@ -325,7 +325,7 @@ namespace Domain.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("DeletedEmployees");
+                    b.ToTable("DeletedEmployees", (string)null);
                 });
 
             modelBuilder.Entity("Domain.Entities.EmployeeDocuments", b =>
@@ -374,7 +374,7 @@ namespace Domain.Migrations
                     b.HasIndex("EmployeeIqamaNo")
                         .IsUnique();
 
-                    b.ToTable("EmployeeDocuments");
+                    b.ToTable("EmployeeDocuments", (string)null);
                 });
 
             modelBuilder.Entity("Domain.Entities.Employees", b =>
@@ -471,7 +471,7 @@ namespace Domain.Migrations
                     b.HasIndex("Status")
                         .HasDatabaseName("IX_Employees_Status");
 
-                    b.ToTable("Employees");
+                    b.ToTable("Employees", (string)null);
                 });
 
             modelBuilder.Entity("Domain.Entities.Housing", b =>
@@ -503,7 +503,7 @@ namespace Domain.Migrations
                     b.HasIndex("Name")
                         .IsUnique();
 
-                    b.ToTable("Housings");
+                    b.ToTable("Housings", (string)null);
                 });
 
             modelBuilder.Entity("Domain.Entities.HungerDisability", b =>
@@ -591,7 +591,7 @@ namespace Domain.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("RiderCompanyHistory");
+                    b.ToTable("RiderCompanyHistory", (string)null);
                 });
 
             modelBuilder.Entity("Domain.Entities.RiderDetails", b =>
@@ -636,7 +636,7 @@ namespace Domain.Migrations
 
                     b.HasIndex("WorkingId");
 
-                    b.ToTable("RiderDetails");
+                    b.ToTable("RiderDetails", (string)null);
                 });
 
             modelBuilder.Entity("Domain.Entities.RiderShift", b =>
@@ -692,7 +692,7 @@ namespace Domain.Migrations
 
                     b.HasIndex("WorkingId");
 
-                    b.ToTable("RiderShifts");
+                    b.ToTable("RiderShifts", (string)null);
                 });
 
             modelBuilder.Entity("Domain.Entities.RiderShiftSubstitution", b =>
@@ -751,7 +751,7 @@ namespace Domain.Migrations
 
                     b.HasIndex("SubstituteWorkingId", "IsActive");
 
-                    b.ToTable("RiderShiftSubstitutions");
+                    b.ToTable("RiderShiftSubstitutions", (string)null);
                 });
 
             modelBuilder.Entity("Domain.Entities.RiderVehicleStatus", b =>
@@ -808,7 +808,7 @@ namespace Domain.Migrations
 
                     b.HasIndex("VehicleNumber", "IsActive", "StatusType");
 
-                    b.ToTable("RiderVehicleStatus");
+                    b.ToTable("RiderVehicleStatus", (string)null);
                 });
 
             modelBuilder.Entity("Domain.Entities.RiderWorkingIdHistory", b =>
@@ -854,7 +854,7 @@ namespace Domain.Migrations
 
                     b.HasIndex("WorkingId", "IsActive");
 
-                    b.ToTable("RiderWorkingIdHistories");
+                    b.ToTable("RiderWorkingIdHistories", (string)null);
                 });
 
             modelBuilder.Entity("Domain.Entities.Spare.Bill", b =>
@@ -897,7 +897,7 @@ namespace Domain.Migrations
 
                     b.HasIndex("SupplierId");
 
-                    b.ToTable("Bills");
+                    b.ToTable("Bills", (string)null);
                 });
 
             modelBuilder.Entity("Domain.Entities.Spare.BillItem", b =>
@@ -943,7 +943,7 @@ namespace Domain.Migrations
 
                     b.HasIndex("BillId");
 
-                    b.ToTable("BillItems");
+                    b.ToTable("BillItems", (string)null);
                 });
 
             modelBuilder.Entity("Domain.Entities.Spare.RiderAccessory", b =>
@@ -979,7 +979,7 @@ namespace Domain.Migrations
 
                     b.HasIndex("Name");
 
-                    b.ToTable("RiderAccessories");
+                    b.ToTable("RiderAccessories", (string)null);
                 });
 
             modelBuilder.Entity("Domain.Entities.Spare.RiderAccessoryUsage", b =>
@@ -1007,7 +1007,7 @@ namespace Domain.Migrations
 
                     b.HasIndex("RiderId");
 
-                    b.ToTable("RiderAccessoryUsages");
+                    b.ToTable("RiderAccessoryUsages", (string)null);
                 });
 
             modelBuilder.Entity("Domain.Entities.Spare.SparePart", b =>
@@ -1043,7 +1043,7 @@ namespace Domain.Migrations
 
                     b.HasIndex("Name");
 
-                    b.ToTable("SpareParts");
+                    b.ToTable("SpareParts", (string)null);
                 });
 
             modelBuilder.Entity("Domain.Entities.Spare.SparePartUsage", b =>
@@ -1075,7 +1075,7 @@ namespace Domain.Migrations
 
                     b.HasIndex("VehicleNumber");
 
-                    b.ToTable("SparePartUsages");
+                    b.ToTable("SparePartUsages", (string)null);
                 });
 
             modelBuilder.Entity("Domain.Entities.Spare.Supplier", b =>
@@ -1124,7 +1124,7 @@ namespace Domain.Migrations
                     b.HasIndex("Name")
                         .IsUnique();
 
-                    b.ToTable("Suppliers");
+                    b.ToTable("Suppliers", (string)null);
                 });
 
             modelBuilder.Entity("Domain.Entities.Spare.Transfer", b =>
@@ -1162,7 +1162,7 @@ namespace Domain.Migrations
 
                     b.HasIndex("TransferredAt");
 
-                    b.ToTable("Transfers");
+                    b.ToTable("Transfers", (string)null);
                 });
 
             modelBuilder.Entity("Domain.Entities.Spare.TransferItem", b =>
@@ -1194,7 +1194,7 @@ namespace Domain.Migrations
 
                     b.HasIndex("TransferId", "ItemType");
 
-                    b.ToTable("TransferItems");
+                    b.ToTable("TransferItems", (string)null);
                 });
 
             modelBuilder.Entity("Domain.Entities.TempEmployeeStatusChange", b =>
@@ -1249,7 +1249,7 @@ namespace Domain.Migrations
 
                     b.HasIndex("RequestedAt");
 
-                    b.ToTable("TempEmployeeStatusChanges");
+                    b.ToTable("TempEmployeeStatusChanges", (string)null);
                 });
 
             modelBuilder.Entity("Domain.Entities.TempEmployeeUpdate", b =>
@@ -1382,7 +1382,7 @@ namespace Domain.Migrations
 
                     b.HasIndex("UploadedAt");
 
-                    b.ToTable("TempEmployeeUpdates");
+                    b.ToTable("TempEmployeeUpdates", (string)null);
                 });
 
             modelBuilder.Entity("Domain.Entities.TempRiderShiftComparison", b =>
@@ -1479,7 +1479,7 @@ namespace Domain.Migrations
 
                     b.HasIndex("RiderId", "WorkingId", "ShiftDate");
 
-                    b.ToTable("TempRiderShiftComparisons");
+                    b.ToTable("TempRiderShiftComparisons", (string)null);
                 });
 
             modelBuilder.Entity("Domain.Entities.TempVehicleOperation", b =>
@@ -1560,7 +1560,7 @@ namespace Domain.Migrations
 
                     b.HasIndex("RiderIqamaNo", "IsResolved");
 
-                    b.ToTable("TempVehicleOperations");
+                    b.ToTable("TempVehicleOperations", (string)null);
                 });
 
             modelBuilder.Entity("Domain.Entities.Vehicle", b =>
@@ -1627,7 +1627,7 @@ namespace Domain.Migrations
 
                     b.HasIndex("VehicleNumber");
 
-                    b.ToTable("Vehicles");
+                    b.ToTable("Vehicles", (string)null);
                 });
 
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRoleClaim<string>", b =>

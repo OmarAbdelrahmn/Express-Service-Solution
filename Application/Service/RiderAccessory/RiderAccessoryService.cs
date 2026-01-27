@@ -23,6 +23,19 @@ public class RiderAccessoryService(ApplicationDbcontext dbcontext) : IRiderAcces
         var response = accessories.Select(MapToResponse);
         return Result.Success<IEnumerable<RiderAccessoryResponse>>(response);
     }
+  
+    public async Task<Result<IEnumerable<RiderAccessoryResponse>>> GetAllAsync2()
+    {
+        var accessories = await _dbcontext.RiderAccessories
+            .Where(a=>a.Location== "الشركة")
+            .Include(a => a.RiderAccessoryUsages)
+            .AsNoTracking()
+            .OrderBy(a => a.Name)
+            .ToListAsync();
+
+        var response = accessories.Select(MapToResponse);
+        return Result.Success<IEnumerable<RiderAccessoryResponse>>(response);
+    }
 
     public async Task<Result<RiderAccessoryResponse>> GetByIdAsync(int id)
     {
