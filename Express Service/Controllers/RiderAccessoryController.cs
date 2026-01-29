@@ -1,5 +1,6 @@
 ﻿
 using Application.Contracts.RiderAccessoryCon;
+using Application.Contracts.SparePartCo;
 using Application.Service.RiderAccessory;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -84,6 +85,16 @@ public class RiderAccessoryController(IRiderAccessoryService service) : Controll
     public async Task<IActionResult> GetAccessoryHistory(int id)
     {
         var response = await service.GetAccessoryHistoryAsync(id);
+        return response.IsSuccess ? Ok(response.Value) : response.ToProblem();
+    }
+
+    [HttpPost("accessories")]
+    public async Task<IActionResult> RecordBatchAccessoryUsage([FromBody] BatchRiderAccessoryUsageRequest request)
+    {
+        if (request.Usages == null || !request.Usages.Any())
+            return BadRequest("At least one usage record is required");
+
+        var response = await service.RecordBatchRiderAccessoryUsageAsync(request);
         return response.IsSuccess ? Ok(response.Value) : response.ToProblem();
     }
 }

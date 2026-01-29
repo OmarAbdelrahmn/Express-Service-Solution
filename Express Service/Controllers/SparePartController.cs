@@ -88,4 +88,14 @@ public class SparePartController(ISparePartService service) : ControllerBase
         var response = await service.GetVehicleUsageHistoryAsync(vehicleNumber);
         return response.IsSuccess ? Ok(response.Value) : response.ToProblem();
     }
+
+    [HttpPost("spare-parts")]
+    public async Task<IActionResult> RecordBatchSparePartUsage([FromBody] BatchSparePartUsageRequest request)
+    {
+        if (request.Usages == null || !request.Usages.Any())
+            return BadRequest("At least one usage record is required");
+
+        var response = await service.RecordBatchSparePartUsageAsync(request);
+        return response.IsSuccess ? Ok(response.Value) : response.ToProblem();
+    }
 }
