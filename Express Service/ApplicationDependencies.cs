@@ -9,6 +9,7 @@ using Application.Service.Hungerdisa;
 using Application.Service.Import;
 using Application.Service.Member;
 using Application.Service.Reports;
+using Application.Service.Return;
 using Application.Service.RiderAccessory;
 using Application.Service.Riders;
 using Application.Service.SparePart;
@@ -66,6 +67,7 @@ public static class ApplicationDependencies
         Services.AddScoped<ITransferService, TransferService>();
         Services.AddScoped<IBillService, BillService>();
         Services.AddScoped<ISupplierService,SupplierService>();
+        Services.AddScoped<IReturnService,ReturnService>();
  
 
 

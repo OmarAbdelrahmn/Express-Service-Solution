@@ -637,7 +637,9 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
                 .ThenInclude(r => r.Employee)
             .Where(s => riderIds.Contains(s.RiderId) &&
                        s.ShiftDate >= startDate &&
-                       s.ShiftDate <= endDate)
+                       s.ShiftDate <= endDate
+                       && s.CompanyId == 1
+                       )
             .ToListAsync();
 
         var riderGroups = shifts.GroupBy(s => s.RiderId);
@@ -1213,7 +1215,9 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
                 .ThenInclude(r => r.Employee)
             .Where(s => riderIds.Contains(s.RiderId) &&
                        s.ShiftDate >= startDate &&
-                       s.ShiftDate <= endDate)
+                       s.ShiftDate <= endDate
+                       && s.CompanyId == 1
+                       )
             .ToListAsync(cancellationToken);
 
         var riderGroups = shifts.GroupBy(s => s.RiderId);

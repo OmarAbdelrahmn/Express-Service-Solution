@@ -13,6 +13,117 @@ public class SparePartService(ApplicationDbcontext dbcontext) : ISparePartServic
 {
     private readonly ApplicationDbcontext _dbcontext = dbcontext;
 
+
+    public async Task<Result<BatchUsageResponse>> RecordBatchSparePartUsageAsync(
+        BatchSparePartUsageRequest request)
+    {
+        var details = new List<UsageResultDetail>();
+        int successCount = 0;
+        int failureCount = 0;
+
+        using var transaction = await _dbcontext.Database.BeginTransactionAsync();
+
+        try
+        {
+            foreach (var usage in request.Usages)
+            {
+                try
+                {
+                    var sparePart = await _dbcontext.SpareParts.FindAsync(usage.SparePartId);
+
+                    if (sparePart == null)
+                    {
+                        details.Add(new UsageResultDetail(
+                            false,
+                            $"ID: {usage.SparePartId}",
+                            usage.VehicleNumber,
+                            "Spare part not found"
+                        ));
+                        failureCount++;
+                        continue;
+                    }
+
+                    if (sparePart.Quantity < usage.QuantityUsed)
+                    {
+                        details.Add(new UsageResultDetail(
+                            false,
+                            sparePart.Name,
+                            usage.VehicleNumber,
+                            $"Insufficient quantity. Available: {sparePart.Quantity}, Requested: {usage.QuantityUsed}"
+                        ));
+                        failureCount++;
+                        continue;
+                    }
+
+                    var vehicle = await _dbcontext.Vehicles
+                        .FirstOrDefaultAsync(v => v.VehicleNumber == usage.VehicleNumber);
+
+                    if (vehicle == null)
+                    {
+                        details.Add(new UsageResultDetail(
+                            false,
+                            sparePart.Name,
+                            usage.VehicleNumber,
+                            "Vehicle not found"
+                        ));
+                        failureCount++;
+                        continue;
+                    }
+
+                    // Record usage
+                    var sparePartUsage = new SparePartUsage
+                    {
+                        SparePartId = usage.SparePartId,
+                        VehicleNumber = usage.VehicleNumber,
+                        QuantityUsed = usage.QuantityUsed,
+                        UsedAt = DateTime.UtcNow.AddHours(3)
+                    };
+
+                    await _dbcontext.SparePartUsages.AddAsync(sparePartUsage);
+
+                    // Update quantity
+                    sparePart.Quantity -= usage.QuantityUsed;
+
+                    details.Add(new UsageResultDetail(
+                        true,
+                        sparePart.Name,
+                        usage.VehicleNumber,
+                        $"Successfully recorded {usage.QuantityUsed} units"
+                    ));
+                    successCount++;
+                }
+                catch (Exception ex)
+                {
+                    details.Add(new UsageResultDetail(
+                        false,
+                        $"ID: {usage.SparePartId}",
+                        usage.VehicleNumber,
+                        $"Error: {ex.Message}"
+                    ));
+                    failureCount++;
+                }
+            }
+
+            await _dbcontext.SaveChangesAsync();
+            await transaction.CommitAsync();
+
+            var response = new BatchUsageResponse(
+                request.Usages.Count,
+                successCount,
+                failureCount,
+                details
+            );
+
+            return Result.Success(response);
+        }
+        catch (Exception ex)
+        {
+            await transaction.RollbackAsync();
+            return Result.Failure<BatchUsageResponse>(
+                new Error("BatchError", $"Batch operation failed: {ex.Message}", 500));
+        }
+    }
+
     public async Task<Result<IEnumerable<SparePartResponse>>> GetAllAsync()
     {
         var spareParts = await _dbcontext.SpareParts

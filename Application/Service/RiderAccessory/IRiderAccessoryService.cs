@@ -1,5 +1,6 @@
 ﻿using Application.Abstraction;
 using Application.Contracts.RiderAccessoryCon;
+using Application.Contracts.SparePartCo;
 using System;
 using System.Collections.Generic;
 using System.Text;
@@ -18,4 +19,7 @@ public interface IRiderAccessoryService
     Task<Result<RiderAccessoryUsageResponse>> IssueToRiderAsync(int accessoryId, IssueAccessoryRequest request);
     Task<Result<IEnumerable<RiderAccessoryUsageResponse>>> GetRiderAccessoriesAsync(int riderId);
     Task<Result<IEnumerable<RiderAccessoryUsageResponse>>> GetAccessoryHistoryAsync(int accessoryId);
+
+    Task<Result<BatchUsageResponse>> RecordBatchRiderAccessoryUsageAsync(BatchRiderAccessoryUsageRequest request);
+
 }

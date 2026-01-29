@@ -40,6 +40,8 @@ public class ApplicationDbcontext(DbContextOptions<ApplicationDbcontext> options
     public required DbSet<BillItem> BillItems{ get; set; }
     public required DbSet<Transfer> Transfers { get; set; }
     public required DbSet<TransferItem> TransferItems { get; set; }
+    public required DbSet<Return> Returns { get; set; }
+    public required DbSet<ReturnItem> ReturnItems { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

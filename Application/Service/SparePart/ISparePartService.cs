@@ -18,4 +18,7 @@ public interface ISparePartService
     Task<Result<SparePartResponse>> RecordUsageAsync(int sparePartId, SparePartUsageRequest request);
     Task<Result<IEnumerable<SparePartUsageResponse>>> GetUsageHistoryAsync(int sparePartId);
     Task<Result<IEnumerable<SparePartUsageResponse>>> GetVehicleUsageHistoryAsync(string vehicleNumber);
+
+    Task<Result<BatchUsageResponse>> RecordBatchSparePartUsageAsync(BatchSparePartUsageRequest request);
+
 }

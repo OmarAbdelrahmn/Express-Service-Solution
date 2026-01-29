@@ -1,6 +1,7 @@
 ﻿using Application.Abstraction;
 using Application.Abstraction.Errors;
 using Application.Contracts.RiderAccessoryCon;
+using Application.Contracts.SparePartCo;
 using Domain;
 using Domain.Entities;
 using Domain.Entities.Spare;
@@ -11,6 +12,133 @@ namespace Application.Service.RiderAccessory;
 public class RiderAccessoryService(ApplicationDbcontext dbcontext) : IRiderAccessoryService
 {
     private readonly ApplicationDbcontext _dbcontext = dbcontext;
+
+    public async Task<Result<BatchUsageResponse>> RecordBatchRiderAccessoryUsageAsync(
+       BatchRiderAccessoryUsageRequest request)
+    {
+        var details = new List<UsageResultDetail>();
+        int successCount = 0;
+        int failureCount = 0;
+
+        using var transaction = await _dbcontext.Database.BeginTransactionAsync();
+
+        try
+        {
+            foreach (var usage in request.Usages)
+            {
+                try
+                {
+                    var accessory = await _dbcontext.RiderAccessories.FindAsync(usage.AccessoryId);
+
+                    if (accessory == null)
+                    {
+                        details.Add(new UsageResultDetail(
+                            false,
+                            $"ID: {usage.AccessoryId}",
+                            $"Rider ID: {usage.RiderId}",
+                            "Accessory not found"
+                        ));
+                        failureCount++;
+                        continue;
+                    }
+
+                    if (accessory.Quantity <= 0)
+                    {
+                        details.Add(new UsageResultDetail(
+                            false,
+                            accessory.Name,
+                            $"Rider ID: {usage.RiderId}",
+                            "Accessory is out of stock"
+                        ));
+                        failureCount++;
+                        continue;
+                    }
+
+                    var rider = await _dbcontext.RiderDetails
+                        .Include(r => r.Employee)
+                        .FirstOrDefaultAsync(r => r.Id == usage.RiderId);
+
+                    if (rider == null)
+                    {
+                        details.Add(new UsageResultDetail(
+                            false,
+                            accessory.Name,
+                            $"Rider ID: {usage.RiderId}",
+                            "Rider not found"
+                        ));
+                        failureCount++;
+                        continue;
+                    }
+
+                    // Check if rider already has this accessory
+                    var existingUsage = await _dbcontext.RiderAccessoryUsages
+                        .AnyAsync(u => u.RiderAccessoryId == usage.AccessoryId &&
+                                      u.RiderId == usage.RiderId);
+
+                    if (existingUsage)
+                    {
+                        details.Add(new UsageResultDetail(
+                            false,
+                            accessory.Name,
+                            rider.Employee.NameEN,
+                            "Rider already has this accessory"
+                        ));
+                        failureCount++;
+                        continue;
+                    }
+
+                    // Create usage record
+                    var accessoryUsage = new RiderAccessoryUsage
+                    {
+                        RiderAccessoryId = usage.AccessoryId,
+                        RiderId = usage.RiderId,
+                        IssuedAt = DateTime.UtcNow.AddHours(3)
+                    };
+
+                    await _dbcontext.RiderAccessoryUsages.AddAsync(accessoryUsage);
+
+                    // Update quantity
+                    accessory.Quantity--;
+
+                    details.Add(new UsageResultDetail(
+                        true,
+                        accessory.Name,
+                        rider.Employee.NameEN,
+                        "Successfully issued accessory"
+                    ));
+                    successCount++;
+                }
+                catch (Exception ex)
+                {
+                    details.Add(new UsageResultDetail(
+                        false,
+                        $"ID: {usage.AccessoryId}",
+                        $"Rider ID: {usage.RiderId}",
+                        $"Error: {ex.Message}"
+                    ));
+                    failureCount++;
+                }
+            }
+
+            await _dbcontext.SaveChangesAsync();
+            await transaction.CommitAsync();
+
+            var response = new BatchUsageResponse(
+                request.Usages.Count,
+                successCount,
+                failureCount,
+                details
+            );
+
+            return Result.Success(response);
+        }
+        catch (Exception ex)
+        {
+            await transaction.RollbackAsync();
+            return Result.Failure<BatchUsageResponse>(
+                new Error("BatchError", $"Batch operation failed: {ex.Message}", 500));
+        }
+    }
 
     public async Task<Result<IEnumerable<RiderAccessoryResponse>>> GetAllAsync()
     {
