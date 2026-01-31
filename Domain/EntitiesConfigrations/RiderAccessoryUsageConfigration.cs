@@ -20,6 +20,9 @@ public class RiderAccessoryUsageConfigration : IEntityTypeConfiguration<RiderAcc
             .WithMany(ra => ra.RiderAccessoryUsages)
             .HasForeignKey(rau => rau.RiderAccessoryId);
 
+        builder.Property(c => c.Cost).HasColumnType("decimal(18,2)");
+
+
         builder.HasOne(rau => rau.Rider)
             .WithMany()
             .HasForeignKey(rau => rau.RiderId)

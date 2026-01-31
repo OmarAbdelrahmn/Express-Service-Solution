@@ -1,5 +1,4 @@
-﻿// Application/Service/SparePart/SparePartService.cs
-using Application.Abstraction;
+﻿using Application.Abstraction;
 using Application.Abstraction.Errors;
 using Application.Contracts.SparePartCo;
 using Domain;
@@ -76,7 +75,8 @@ public class SparePartService(ApplicationDbcontext dbcontext) : ISparePartServic
                         SparePartId = usage.SparePartId,
                         VehicleNumber = usage.VehicleNumber,
                         QuantityUsed = usage.QuantityUsed,
-                        UsedAt = DateTime.UtcNow.AddHours(3)
+                        UsedAt = DateTime.UtcNow.AddHours(3),
+                        Cost = sparePart.Price * usage.QuantityUsed
                     };
 
                     await _dbcontext.SparePartUsages.AddAsync(sparePartUsage);
@@ -288,7 +288,8 @@ public class SparePartService(ApplicationDbcontext dbcontext) : ISparePartServic
             u.SparePart.Name,
             u.VehicleNumber,
             u.QuantityUsed,
-            u.UsedAt
+            u.UsedAt,
+            u.Cost
         ));
 
         return Result.Success<IEnumerable<SparePartUsageResponse>>(response);
@@ -309,7 +310,8 @@ public class SparePartService(ApplicationDbcontext dbcontext) : ISparePartServic
             u.SparePart.Name,
             u.VehicleNumber,
             u.QuantityUsed,
-            u.UsedAt
+            u.UsedAt,
+            u.Cost
         ));
 
         return Result.Success<IEnumerable<SparePartUsageResponse>>(response);

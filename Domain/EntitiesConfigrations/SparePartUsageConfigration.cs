@@ -18,6 +18,8 @@ public class SparePartUsageConfigration : IEntityTypeConfiguration<SparePartUsag
             .WithMany(sp => sp.SparePartUsages)
             .HasForeignKey(spu => spu.SparePartId);
 
+        builder.Property(c=>c.Cost).HasColumnType("decimal(18,2)");
+
         builder.HasOne(spu => spu.Vehicle)
             .WithMany()
             .HasForeignKey(spu => spu.VehicleNumber)

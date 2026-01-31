@@ -1,5 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations.Schema;
+using System.Runtime.CompilerServices;
 using System.Text;
 
 namespace Domain.Entities.Spare;
@@ -13,5 +15,7 @@ public class RiderAccessoryUsage
     public int RiderId { get; set; }
     public RiderDetails Rider { get; set; } = default!;
 
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal? Cost { get; set; }
     public DateTime IssuedAt { get; set; } = DateTime.UtcNow.AddHours(3);
 }

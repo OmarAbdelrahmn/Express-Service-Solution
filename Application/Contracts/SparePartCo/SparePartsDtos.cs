@@ -101,7 +101,8 @@ public record SparePartUsageResponse(
     string SparePartName,
     string VehicleNumber,
     int QuantityUsed,
-    DateTime UsedAt
+    DateTime UsedAt,
+    decimal? Cost
 );
 
 

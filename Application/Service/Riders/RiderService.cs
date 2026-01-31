@@ -764,7 +764,8 @@ public class RiderService(ApplicationDbcontext dbcontext,IRiderWorkingIdHistoryS
             EmployeeIqamaNo: employee.IqamaNo,
             TshirtSize: employee.RiderDetails?.TshirtSize ?? "N/A",
             LicenseNumber: employee.RiderDetails?.LicenseNumber ?? "N/A",
-            CompanyName: employee.RiderDetails?.Company?.Name ?? "N/A"
+            CompanyName: employee.RiderDetails?.Company?.Name ?? "N/A",
+            RiderId : employee.RiderDetails?.Id
         );
     }
 }

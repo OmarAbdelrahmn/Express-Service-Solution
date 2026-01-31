@@ -39,5 +39,6 @@ public record RiderAccessoryUsageResponse(
     int RiderId,
     string RiderNameEN,
     string RiderNameAR,
-    DateTime IssuedAt
+    DateTime IssuedAt,
+    decimal? Cost
 );

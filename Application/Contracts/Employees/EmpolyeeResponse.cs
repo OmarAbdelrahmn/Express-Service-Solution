@@ -82,6 +82,7 @@ public record RiderResponse(
     long EmployeeIqamaNo,
     string? TshirtSize, 
     string? LicenseNumber, 
-    string? CompanyName 
+    string? CompanyName ,
+    int? RiderId
     );
 

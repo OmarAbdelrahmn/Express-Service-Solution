@@ -71,28 +71,29 @@ public class RiderAccessoryService(ApplicationDbcontext dbcontext) : IRiderAcces
                     }
 
                     // Check if rider already has this accessory
-                    var existingUsage = await _dbcontext.RiderAccessoryUsages
-                        .AnyAsync(u => u.RiderAccessoryId == usage.AccessoryId &&
-                                      u.RiderId == usage.RiderId);
+                    //var existingUsage = await _dbcontext.RiderAccessoryUsages
+                    //    .AnyAsync(u => u.RiderAccessoryId == usage.AccessoryId &&
+                    //                  u.RiderId == usage.RiderId);
 
-                    if (existingUsage)
-                    {
-                        details.Add(new UsageResultDetail(
-                            false,
-                            accessory.Name,
-                            rider.Employee.NameEN,
-                            "Rider already has this accessory"
-                        ));
-                        failureCount++;
-                        continue;
-                    }
+                    //if (existingUsage)
+                    //{
+                    //    details.Add(new UsageResultDetail(
+                    //        false,
+                    //        accessory.Name,
+                    //        rider.Employee.NameEN,
+                    //        "Rider already has this accessory"
+                    //    ));
+                    //    failureCount++;
+                    //    continue;
+                    //}
 
                     // Create usage record
                     var accessoryUsage = new RiderAccessoryUsage
                     {
                         RiderAccessoryId = usage.AccessoryId,
                         RiderId = usage.RiderId,
-                        IssuedAt = DateTime.UtcNow.AddHours(3)
+                        IssuedAt = DateTime.UtcNow.AddHours(3),
+                       Cost = accessory.Price
                     };
 
                     await _dbcontext.RiderAccessoryUsages.AddAsync(accessoryUsage);
@@ -365,7 +366,8 @@ public class RiderAccessoryService(ApplicationDbcontext dbcontext) : IRiderAcces
             usage.RiderId,
             usage.Rider.Employee.NameEN,
             usage.Rider.Employee.NameAR,
-            usage.IssuedAt
+            usage.IssuedAt,
+            usage.Cost
         );
     }
 }
