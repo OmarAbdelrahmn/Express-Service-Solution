@@ -1,10 +1,13 @@
 ﻿using Application.Abstraction;
 using Application.Abstraction.Errors;
 using Application.Authentication;
+using Application.Contracts.RiderAccessoryCon;
+using Application.Contracts.SparePartCo;
 using Application.Service.Empolyee;
 using Application.Service.Reports;
 using Domain;
 using Domain.Entities;
+using Domain.Entities.Spare;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using System;
@@ -22,6 +25,8 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
     private readonly ApplicationDbcontext context = context;
     private readonly IReportService reportService = reportService;
 
+
+    #region member service
     private const float TARGET_HOURS_PER_DAY = 9f;
     private const int TARGET_ORDERS_PER_DAY = 14;
 
@@ -3095,7 +3100,1013 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
             Warnings: warnings
         );
     }
+
+    #endregion
+
+    #region Helper Methods
+
+    private async Task<bool> IsVehicleInHousing(Housing housing, string vehicleNumber)
+    {
+        var employeeIqamas = housing.Employees
+            .Where(e => !e.IsDeleted)
+            .Select(e => e.IqamaNo)
+            .ToList();
+
+        // Check if vehicle is assigned to any rider in this housing
+        var isAssigned = await context.RiderDetails
+            .AnyAsync(r => employeeIqamas.Contains(r.EmployeeIqamaNo)
+                && r.VehicleNumber == vehicleNumber);
+
+        if (isAssigned)
+            return true;
+
+        // Check if vehicle location matches housing
+        var vehicle = await context.Vehicles
+            .FirstOrDefaultAsync(v => v.VehicleNumber == vehicleNumber);
+
+        if (vehicle != null && !string.IsNullOrEmpty(vehicle.Location))
+        {
+            return vehicle.Location.Contains(housing.Name, StringComparison.OrdinalIgnoreCase);
+        }
+
+        return false;
+    }
+
+    private async Task<bool> IsRiderInHousing(Housing housing, int riderId)
+    {
+        var employeeIqamas = housing.Employees
+            .Where(e => !e.IsDeleted)
+            .Select(e => e.IqamaNo)
+            .ToList();
+
+        return await context.RiderDetails
+            .AnyAsync(r => r.Id == riderId && employeeIqamas.Contains(r.EmployeeIqamaNo));
+    }
+
+    #endregion
+
+    #region Spare Parts Management
+
+    public async Task<Result<IEnumerable<SparePartResponse>>> GetHousingSparePartsAsync(long managerIqamaNo)
+    {
+        var housingResult = await GetManagedHousing(managerIqamaNo);
+        if (housingResult.IsFailure)
+            return Result.Failure<IEnumerable<SparePartResponse>>(housingResult.Error);
+
+        var housing = housingResult.Value;
+
+        var spareParts = await context.SpareParts
+            .Where(sp => sp.Location == housing.Name)
+            .AsNoTracking()
+            .OrderBy(sp => sp.Name)
+            .ToListAsync();
+
+        var response = spareParts.Select(sp => new SparePartResponse(
+            sp.Id,
+            sp.Name,
+            sp.Quantity,
+            sp.Price,
+            sp.Location,
+            sp.CreatedAt
+        ));
+
+        return Result.Success(response);
+    }
+
+    public async Task<Result<SparePartResponse>> GetSparePartByIdAsync(long managerIqamaNo, int id)
+    {
+        var housingResult = await GetManagedHousing(managerIqamaNo);
+        if (housingResult.IsFailure)
+            return Result.Failure<SparePartResponse>(housingResult.Error);
+
+        var housing = housingResult.Value;
+
+        var sparePart = await context.SpareParts
+            .AsNoTracking()
+            .FirstOrDefaultAsync(sp => sp.Id == id && sp.Location == housing.Name);
+
+        if (sparePart == null)
+            return Result.Failure<SparePartResponse>(
+                new Error("NotFound", "Spare part not found in your housing inventory", 404));
+
+        return Result.Success(new SparePartResponse(
+            sparePart.Id,
+            sparePart.Name,
+            sparePart.Quantity,
+            sparePart.Price,
+            sparePart.Location,
+            sparePart.CreatedAt
+        ));
+    }
+
+    public async Task<Result<IEnumerable<SparePartResponse>>> SearchSparePartsAsync(
+        long managerIqamaNo,
+        string keyword)
+    {
+        var housingResult = await GetManagedHousing(managerIqamaNo);
+        if (housingResult.IsFailure)
+            return Result.Failure<IEnumerable<SparePartResponse>>(housingResult.Error);
+
+        var housing = housingResult.Value;
+        keyword = keyword.ToLower();
+
+        var spareParts = await context.SpareParts
+            .Where(sp => sp.Location == housing.Name
+                && sp.Name.ToLower().Contains(keyword))
+            .AsNoTracking()
+            .ToListAsync();
+
+        var response = spareParts.Select(sp => new SparePartResponse(
+            sp.Id,
+            sp.Name,
+            sp.Quantity,
+            sp.Price,
+            sp.Location,
+            sp.CreatedAt
+        ));
+
+        return Result.Success(response);
+    }
+
+    #endregion
+
+    #region Spare Parts Usage
+
+    public async Task<Result<BatchUsageResponse>> RecordBatchSparePartUsageAsync(
+        long managerIqamaNo,
+        MemberBatchSparePartUsageRequest request)
+    {
+        var housingResult = await GetManagedHousing(managerIqamaNo);
+        if (housingResult.IsFailure)
+            return Result.Failure<BatchUsageResponse>(housingResult.Error);
+
+        var housing = housingResult.Value;
+        var details = new List<UsageResultDetail>();
+        int successCount = 0;
+        int failureCount = 0;
+
+        using var transaction = await context.Database.BeginTransactionAsync();
+
+        try
+        {
+            foreach (var usage in request.Usages)
+            {
+                try
+                {
+                    // Validate spare part exists and belongs to housing
+                    var sparePart = await context.SpareParts
+                        .FirstOrDefaultAsync(sp => sp.Id == usage.SparePartId
+                            && sp.Location == housing.Name);
+
+                    if (sparePart == null)
+                    {
+                        details.Add(new UsageResultDetail(
+                            false,
+                            $"ID: {usage.SparePartId}",
+                            usage.VehicleNumber,
+                            "Spare part not found in your housing inventory"
+                        ));
+                        failureCount++;
+                        continue;
+                    }
+
+                    if (sparePart.Quantity < usage.QuantityUsed)
+                    {
+                        details.Add(new UsageResultDetail(
+                            false,
+                            sparePart.Name,
+                            usage.VehicleNumber,
+                            $"Insufficient quantity. Available: {sparePart.Quantity}, Requested: {usage.QuantityUsed}"
+                        ));
+                        failureCount++;
+                        continue;
+                    }
+
+                    // Validate vehicle exists
+                    var vehicle = await context.Vehicles
+                        .FirstOrDefaultAsync(v => v.VehicleNumber == usage.VehicleNumber);
+
+                    if (vehicle == null)
+                    {
+                        details.Add(new UsageResultDetail(
+                            false,
+                            sparePart.Name,
+                            usage.VehicleNumber,
+                            "Vehicle not found"
+                        ));
+                        failureCount++;
+                        continue;
+                    }
+
+                    // Validate vehicle belongs to housing
+                    if (!await IsVehicleInHousing(housing, usage.VehicleNumber))
+                    {
+                        details.Add(new UsageResultDetail(
+                            false,
+                            sparePart.Name,
+                            usage.VehicleNumber,
+                            "Vehicle does not belong to your housing"
+                        ));
+                        failureCount++;
+                        continue;
+                    }
+
+                    // Record usage
+                    var sparePartUsage = new SparePartUsage
+                    {
+                        SparePartId = usage.SparePartId,
+                        VehicleNumber = usage.VehicleNumber,
+                        QuantityUsed = usage.QuantityUsed,
+                        UsedAt = DateTime.UtcNow.AddHours(3),
+                        Cost = sparePart.Price * usage.QuantityUsed
+                    };
+
+                    await context.SparePartUsages.AddAsync(sparePartUsage);
+
+                    // Update quantity
+                    sparePart.Quantity -= usage.QuantityUsed;
+
+                    details.Add(new UsageResultDetail(
+                        true,
+                        sparePart.Name,
+                        usage.VehicleNumber,
+                        $"Successfully recorded {usage.QuantityUsed} units"
+                    ));
+                    successCount++;
+                }
+                catch (Exception ex)
+                {
+                    details.Add(new UsageResultDetail(
+                        false,
+                        $"ID: {usage.SparePartId}",
+                        usage.VehicleNumber,
+                        $"Error: {ex.Message}"
+                    ));
+                    failureCount++;
+                }
+            }
+
+            await context.SaveChangesAsync();
+            await transaction.CommitAsync();
+
+            var response = new BatchUsageResponse(
+                request.Usages.Count,
+                successCount,
+                failureCount,
+                details
+            );
+
+            return Result.Success(response);
+        }
+        catch (Exception ex)
+        {
+            await transaction.RollbackAsync();
+            return Result.Failure<BatchUsageResponse>(
+                new Error("BatchError", $"Batch operation failed: {ex.Message}", 500));
+        }
+    }
+
+    public async Task<Result<IEnumerable<SparePartUsageResponse>>> GetSparePartUsageHistoryAsync(
+        long managerIqamaNo,
+        int sparePartId)
+    {
+        var housingResult = await GetManagedHousing(managerIqamaNo);
+        if (housingResult.IsFailure)
+            return Result.Failure<IEnumerable<SparePartUsageResponse>>(housingResult.Error);
+
+        var housing = housingResult.Value;
+
+        // Verify spare part belongs to housing
+        var sparePart = await context.SpareParts
+            .FirstOrDefaultAsync(sp => sp.Id == sparePartId && sp.Location == housing.Name);
+
+        if (sparePart == null)
+            return Result.Failure<IEnumerable<SparePartUsageResponse>>(
+                new Error("NotFound", "Spare part not found in your housing inventory", 404));
+
+        // Get all housing vehicles
+        var employeeIqamas = housing.Employees
+            .Where(e => !e.IsDeleted)
+            .Select(e => e.IqamaNo)
+            .ToList();
+
+        var housingVehicleNumbers = await context.RiderDetails
+            .Where(r => employeeIqamas.Contains(r.EmployeeIqamaNo)
+                && !string.IsNullOrEmpty(r.VehicleNumber))
+            .Select(r => r.VehicleNumber!)
+            .Distinct()
+            .ToListAsync();
+
+        // Also include vehicles by location
+        var locationVehicles = await context.Vehicles
+            .Where(v => v.Location.Contains(housing.Name))
+            .Select(v => v.VehicleNumber)
+            .ToListAsync();
+
+        housingVehicleNumbers.AddRange(locationVehicles);
+        housingVehicleNumbers = housingVehicleNumbers.Distinct().ToList();
+
+        // Get usage history for this spare part on housing vehicles
+        var usages = await context.SparePartUsages
+            .Include(u => u.SparePart)
+            .Where(u => u.SparePartId == sparePartId
+                && housingVehicleNumbers.Contains(u.VehicleNumber))
+            .OrderByDescending(u => u.UsedAt)
+            .AsNoTracking()
+            .ToListAsync();
+
+        var response = usages.Select(u => new SparePartUsageResponse(
+            u.Id,
+            u.SparePartId,
+            u.SparePart.Name,
+            u.VehicleNumber,
+            u.QuantityUsed,
+            u.UsedAt,
+            u.Cost
+        ));
+
+        return Result.Success(response);
+    }
+
+    public async Task<Result<IEnumerable<SparePartUsageResponse>>> GetVehicleSparePartHistoryAsync(
+        long managerIqamaNo,
+        string vehicleNumber)
+    {
+        var housingResult = await GetManagedHousing(managerIqamaNo);
+        if (housingResult.IsFailure)
+            return Result.Failure<IEnumerable<SparePartUsageResponse>>(housingResult.Error);
+
+        var housing = housingResult.Value;
+
+        // Validate vehicle belongs to housing
+        if (!await IsVehicleInHousing(housing, vehicleNumber))
+            return Result.Failure<IEnumerable<SparePartUsageResponse>>(
+                new Error("Unauthorized", "Vehicle does not belong to your housing", 403));
+
+        var usages = await context.SparePartUsages
+            .Include(u => u.SparePart)
+            .Where(u => u.VehicleNumber == vehicleNumber)
+            .OrderByDescending(u => u.UsedAt)
+            .AsNoTracking()
+            .ToListAsync();
+
+        var response = usages.Select(u => new SparePartUsageResponse(
+            u.Id,
+            u.SparePartId,
+            u.SparePart.Name,
+            u.VehicleNumber,
+            u.QuantityUsed,
+            u.UsedAt,
+            u.Cost
+        ));
+
+        return Result.Success(response);
+    }
+
+    #endregion
+
+    #region Rider Accessories Management
+
+    public async Task<Result<IEnumerable<RiderAccessoryResponse>>> GetHousingAccessoriesAsync(
+        long managerIqamaNo)
+    {
+        var housingResult = await GetManagedHousing(managerIqamaNo);
+        if (housingResult.IsFailure)
+            return Result.Failure<IEnumerable<RiderAccessoryResponse>>(housingResult.Error);
+
+        var housing = housingResult.Value;
+
+        var accessories = await context.RiderAccessories
+            .Include(a => a.RiderAccessoryUsages)
+            .Where(a => a.Location == housing.Name)
+            .AsNoTracking()
+            .OrderBy(a => a.Name)
+            .ToListAsync();
+
+        var response = accessories.Select(a => new RiderAccessoryResponse(
+            a.Id,
+            a.Name,
+            a.Quantity,
+            a.Quantity, // Available = Total for housing inventory
+            a.Price,
+            a.Location,
+            a.CreatedAt
+        ));
+
+        return Result.Success(response);
+    }
+
+    public async Task<Result<RiderAccessoryResponse>> GetAccessoryByIdAsync(
+        long managerIqamaNo,
+        int id)
+    {
+        var housingResult = await GetManagedHousing(managerIqamaNo);
+        if (housingResult.IsFailure)
+            return Result.Failure<RiderAccessoryResponse>(housingResult.Error);
+
+        var housing = housingResult.Value;
+
+        var accessory = await context.RiderAccessories
+            .Include(a => a.RiderAccessoryUsages)
+            .AsNoTracking()
+            .FirstOrDefaultAsync(a => a.Id == id && a.Location == housing.Name);
+
+        if (accessory == null)
+            return Result.Failure<RiderAccessoryResponse>(
+                new Error("NotFound", "Accessory not found in your housing inventory", 404));
+
+        return Result.Success(new RiderAccessoryResponse(
+            accessory.Id,
+            accessory.Name,
+            accessory.Quantity,
+            accessory.Quantity,
+            accessory.Price,
+            accessory.Location,
+            accessory.CreatedAt
+        ));
+    }
+
+    public async Task<Result<IEnumerable<RiderAccessoryResponse>>> SearchAccessoriesAsync(
+        long managerIqamaNo,
+        string keyword)
+    {
+        var housingResult = await GetManagedHousing(managerIqamaNo);
+        if (housingResult.IsFailure)
+            return Result.Failure<IEnumerable<RiderAccessoryResponse>>(housingResult.Error);
+
+        var housing = housingResult.Value;
+        keyword = keyword.ToLower();
+
+        var accessories = await context.RiderAccessories
+            .Include(a => a.RiderAccessoryUsages)
+            .Where(a => a.Location == housing.Name
+                && a.Name.ToLower().Contains(keyword))
+            .AsNoTracking()
+            .ToListAsync();
+
+        var response = accessories.Select(a => new RiderAccessoryResponse(
+            a.Id,
+            a.Name,
+            a.Quantity,
+            a.Quantity,
+            a.Price,
+            a.Location,
+            a.CreatedAt
+        ));
+
+        return Result.Success(response);
+    }
+
+    #endregion
+
+    #region Rider Accessories Usage
+
+    public async Task<Result<BatchUsageResponse>> RecordBatchAccessoryUsageAsync(
+        long managerIqamaNo,
+        MemberBatchAccessoryUsageRequest request)
+    {
+        var housingResult = await GetManagedHousing(managerIqamaNo);
+        if (housingResult.IsFailure)
+            return Result.Failure<BatchUsageResponse>(housingResult.Error);
+
+        var housing = housingResult.Value;
+        var details = new List<UsageResultDetail>();
+        int successCount = 0;
+        int failureCount = 0;
+
+        using var transaction = await context.Database.BeginTransactionAsync();
+
+        try
+        {
+            foreach (var usage in request.Usages)
+            {
+                try
+                {
+                    // Validate accessory exists and belongs to housing
+                    var accessory = await context.RiderAccessories
+                        .FirstOrDefaultAsync(a => a.Id == usage.AccessoryId
+                            && a.Location == housing.Name);
+
+                    if (accessory == null)
+                    {
+                        details.Add(new UsageResultDetail(
+                            false,
+                            $"ID: {usage.AccessoryId}",
+                            $"Rider ID: {usage.RiderId}",
+                            "Accessory not found in your housing inventory"
+                        ));
+                        failureCount++;
+                        continue;
+                    }
+
+                    if (accessory.Quantity <= 0)
+                    {
+                        details.Add(new UsageResultDetail(
+                            false,
+                            accessory.Name,
+                            $"Rider ID: {usage.RiderId}",
+                            "Accessory is out of stock"
+                        ));
+                        failureCount++;
+                        continue;
+                    }
+
+                    // Validate rider belongs to housing
+                    if (!await IsRiderInHousing(housing, usage.RiderId))
+                    {
+                        details.Add(new UsageResultDetail(
+                            false,
+                            accessory.Name,
+                            $"Rider ID: {usage.RiderId}",
+                            "Rider does not belong to your housing"
+                        ));
+                        failureCount++;
+                        continue;
+                    }
+
+                    var rider = await context.RiderDetails
+                        .Include(r => r.Employee)
+                        .FirstOrDefaultAsync(r => r.Id == usage.RiderId);
+
+                    // Create usage record
+                    var accessoryUsage = new RiderAccessoryUsage
+                    {
+                        RiderAccessoryId = usage.AccessoryId,
+                        RiderId = usage.RiderId,
+                        IssuedAt = DateTime.UtcNow.AddHours(3),
+                        Cost = accessory.Price
+                    };
+
+                    await context.RiderAccessoryUsages.AddAsync(accessoryUsage);
+
+                    // Update quantity
+                    accessory.Quantity--;
+
+                    details.Add(new UsageResultDetail(
+                        true,
+                        accessory.Name,
+                        rider!.Employee.NameEN,
+                        "Successfully issued accessory"
+                    ));
+                    successCount++;
+                }
+                catch (Exception ex)
+                {
+                    details.Add(new UsageResultDetail(
+                        false,
+                        $"ID: {usage.AccessoryId}",
+                        $"Rider ID: {usage.RiderId}",
+                        $"Error: {ex.Message}"
+                    ));
+                    failureCount++;
+                }
+            }
+
+            await context.SaveChangesAsync();
+            await transaction.CommitAsync();
+
+            var response = new BatchUsageResponse(
+                request.Usages.Count,
+                successCount,
+                failureCount,
+                details
+            );
+
+            return Result.Success(response);
+        }
+        catch (Exception ex)
+        {
+            await transaction.RollbackAsync();
+            return Result.Failure<BatchUsageResponse>(
+                new Error("BatchError", $"Batch operation failed: {ex.Message}", 500));
+        }
+    }
+
+    public async Task<Result<IEnumerable<RiderAccessoryUsageResponse>>> GetAccessoryUsageHistoryAsync(
+        long managerIqamaNo,
+        int accessoryId)
+    {
+        var housingResult = await GetManagedHousing(managerIqamaNo);
+        if (housingResult.IsFailure)
+            return Result.Failure<IEnumerable<RiderAccessoryUsageResponse>>(housingResult.Error);
+
+        var housing = housingResult.Value;
+
+        // Verify accessory belongs to housing
+        var accessory = await context.RiderAccessories
+            .FirstOrDefaultAsync(a => a.Id == accessoryId && a.Location == housing.Name);
+
+        if (accessory == null)
+            return Result.Failure<IEnumerable<RiderAccessoryUsageResponse>>(
+                new Error("NotFound", "Accessory not found in your housing inventory", 404));
+
+        // Get all housing riders
+        var employeeIqamas = housing.Employees
+            .Where(e => !e.IsDeleted)
+            .Select(e => e.IqamaNo)
+            .ToList();
+
+        var housingRiderIds = await context.RiderDetails
+            .Where(r => employeeIqamas.Contains(r.EmployeeIqamaNo))
+            .Select(r => r.Id)
+            .ToListAsync();
+
+        // Get usage history for this accessory with housing riders
+        var usages = await context.RiderAccessoryUsages
+            .Include(u => u.RiderAccessory)
+            .Include(u => u.Rider)
+                .ThenInclude(r => r.Employee)
+            .Where(u => u.RiderAccessoryId == accessoryId
+                && housingRiderIds.Contains(u.RiderId))
+            .OrderByDescending(u => u.IssuedAt)
+            .AsNoTracking()
+            .ToListAsync();
+
+        var response = usages.Select(u => new RiderAccessoryUsageResponse(
+            u.Id,
+            u.RiderAccessoryId,
+            u.RiderAccessory.Name,
+            u.RiderId,
+            u.Rider.Employee.NameEN,
+            u.Rider.Employee.NameAR,
+            u.IssuedAt,
+            u.Cost
+        ));
+
+        return Result.Success(response);
+    }
+
+    public async Task<Result<IEnumerable<RiderAccessoryUsageResponse>>> GetRiderAccessoryHistoryAsync(
+        long managerIqamaNo,
+        int riderId)
+    {
+        var housingResult = await GetManagedHousing(managerIqamaNo);
+        if (housingResult.IsFailure)
+            return Result.Failure<IEnumerable<RiderAccessoryUsageResponse>>(housingResult.Error);
+
+        var housing = housingResult.Value;
+
+        // Validate rider belongs to housing
+        if (!await IsRiderInHousing(housing, riderId))
+            return Result.Failure<IEnumerable<RiderAccessoryUsageResponse>>(
+                new Error("Unauthorized", "Rider does not belong to your housing", 403));
+
+        var usages = await context.RiderAccessoryUsages
+            .Include(u => u.RiderAccessory)
+            .Include(u => u.Rider)
+                .ThenInclude(r => r.Employee)
+            .Where(u => u.RiderId == riderId)
+            .OrderByDescending(u => u.IssuedAt)
+            .AsNoTracking()
+            .ToListAsync();
+
+        var response = usages.Select(u => new RiderAccessoryUsageResponse(
+            u.Id,
+            u.RiderAccessoryId,
+            u.RiderAccessory.Name,
+            u.RiderId,
+            u.Rider.Employee.NameEN,
+            u.Rider.Employee.NameAR,
+            u.IssuedAt,
+            u.Cost
+        ));
+
+        return Result.Success(response);
+    }
+
+    #endregion
+
+    #region Cost Tracking
+
+    public async Task<Result<MemberVehicleCostResponse>> GetVehicleCostAsync(
+        long managerIqamaNo,
+        string vehicleNumber)
+    {
+        var housingResult = await GetManagedHousing(managerIqamaNo);
+        if (housingResult.IsFailure)
+            return Result.Failure<MemberVehicleCostResponse>(housingResult.Error);
+
+        var housing = housingResult.Value;
+
+        // Validate vehicle belongs to housing
+        if (!await IsVehicleInHousing(housing, vehicleNumber))
+            return Result.Failure<MemberVehicleCostResponse>(
+                new Error("Unauthorized", "Vehicle does not belong to your housing", 403));
+
+        var vehicle = await context.Vehicles
+            .FirstOrDefaultAsync(v => v.VehicleNumber == vehicleNumber);
+
+        if (vehicle == null)
+            return Result.Failure<MemberVehicleCostResponse>(
+                new Error("NotFound", "Vehicle not found", 404));
+
+        var sparePartUsages = await context.SparePartUsages
+            .Include(u => u.SparePart)
+            .Where(u => u.VehicleNumber == vehicleNumber)
+            .OrderByDescending(u => u.UsedAt)
+            .AsNoTracking()
+            .ToListAsync();
+
+        var sparePartDetails = sparePartUsages.Select(u => new CostItemDetail(
+            u.SparePart.Name,
+            u.QuantityUsed,
+            u.SparePart.Price,
+            u.QuantityUsed * u.SparePart.Price,
+            u.UsedAt
+        )).ToList();
+
+        var totalSparePartsCost = sparePartDetails.Sum(d => d.TotalCost);
+
+        var response = new MemberVehicleCostResponse(
+            vehicleNumber,
+            vehicle.PlateNumberA,
+            totalSparePartsCost,
+            totalSparePartsCost,
+            sparePartDetails
+        );
+
+        return Result.Success(response);
+    }
+
+    public async Task<Result<MemberVehicleCostResponse>> GetVehicleCostByDateRangeAsync(
+        long managerIqamaNo,
+        string vehicleNumber,
+        DateTime fromDate,
+        DateTime toDate)
+    {
+        var housingResult = await GetManagedHousing(managerIqamaNo);
+        if (housingResult.IsFailure)
+            return Result.Failure<MemberVehicleCostResponse>(housingResult.Error);
+
+        var housing = housingResult.Value;
+
+        // Validate vehicle belongs to housing
+        if (!await IsVehicleInHousing(housing, vehicleNumber))
+            return Result.Failure<MemberVehicleCostResponse>(
+                new Error("Unauthorized", "Vehicle does not belong to your housing", 403));
+
+        var vehicle = await context.Vehicles
+            .FirstOrDefaultAsync(v => v.VehicleNumber == vehicleNumber);
+
+        if (vehicle == null)
+            return Result.Failure<MemberVehicleCostResponse>(
+                new Error("NotFound", "Vehicle not found", 404));
+
+        var sparePartUsages = await context.SparePartUsages
+            .Include(u => u.SparePart)
+            .Where(u => u.VehicleNumber == vehicleNumber
+                && u.UsedAt >= fromDate
+                && u.UsedAt <= toDate)
+            .OrderByDescending(u => u.UsedAt)
+            .AsNoTracking()
+            .ToListAsync();
+
+        var sparePartDetails = sparePartUsages.Select(u => new CostItemDetail(
+            u.SparePart.Name,
+            u.QuantityUsed,
+            u.SparePart.Price,
+            u.QuantityUsed * u.SparePart.Price,
+            u.UsedAt
+        )).ToList();
+
+        var totalSparePartsCost = sparePartDetails.Sum(d => d.TotalCost);
+
+        var response = new MemberVehicleCostResponse(
+            vehicleNumber,
+            vehicle.PlateNumberA,
+            totalSparePartsCost,
+            totalSparePartsCost,
+            sparePartDetails
+        );
+
+        return Result.Success(response);
+    }
+
+    public async Task<Result<MemberRiderCostResponse>> GetRiderCostAsync(
+        long managerIqamaNo,
+        int riderId)
+    {
+        var housingResult = await GetManagedHousing(managerIqamaNo);
+        if (housingResult.IsFailure)
+            return Result.Failure<MemberRiderCostResponse>(housingResult.Error);
+
+        var housing = housingResult.Value;
+
+        // Validate rider belongs to housing
+        if (!await IsRiderInHousing(housing, riderId))
+            return Result.Failure<MemberRiderCostResponse>(
+                new Error("Unauthorized", "Rider does not belong to your housing", 403));
+
+        var rider = await context.RiderDetails
+            .Include(r => r.Employee)
+            .FirstOrDefaultAsync(r => r.Id == riderId);
+
+        if (rider == null)
+            return Result.Failure<MemberRiderCostResponse>(
+                new Error("NotFound", "Rider not found", 404));
+
+        var accessoryUsages = await context.RiderAccessoryUsages
+            .Include(u => u.RiderAccessory)
+            .Where(u => u.RiderId == riderId)
+            .OrderByDescending(u => u.IssuedAt)
+            .AsNoTracking()
+            .ToListAsync();
+
+        var accessoryDetails = accessoryUsages.Select(u => new CostItemDetail(
+            u.RiderAccessory.Name,
+            1,
+            u.RiderAccessory.Price,
+            u.RiderAccessory.Price,
+            u.IssuedAt
+        )).ToList();
+
+        var totalAccessoriesCost = accessoryDetails.Sum(d => d.TotalCost);
+
+        var response = new MemberRiderCostResponse(
+            riderId,
+            rider.EmployeeIqamaNo,
+            rider.Employee.NameEN,
+            rider.Employee.NameAR,
+            rider.WorkingId ?? "N/A",
+            totalAccessoriesCost,
+            accessoryDetails
+        );
+
+        return Result.Success(response);
+    }
+
+    public async Task<Result<MemberRiderCostResponse>> GetRiderCostByDateRangeAsync(
+        long managerIqamaNo,
+        int riderId,
+        DateTime fromDate,
+        DateTime toDate)
+    {
+        var housingResult = await GetManagedHousing(managerIqamaNo);
+        if (housingResult.IsFailure)
+            return Result.Failure<MemberRiderCostResponse>(housingResult.Error);
+
+        var housing = housingResult.Value;
+
+        // Validate rider belongs to housing
+        if (!await IsRiderInHousing(housing, riderId))
+            return Result.Failure<MemberRiderCostResponse>(
+                new Error("Unauthorized", "Rider does not belong to your housing", 403));
+
+        var rider = await context.RiderDetails
+            .Include(r => r.Employee)
+            .FirstOrDefaultAsync(r => r.Id == riderId);
+
+        if (rider == null)
+            return Result.Failure<MemberRiderCostResponse>(
+                new Error("NotFound", "Rider not found", 404));
+
+        var accessoryUsages = await context.RiderAccessoryUsages
+            .Include(u => u.RiderAccessory)
+            .Where(u => u.RiderId == riderId
+                && u.IssuedAt >= fromDate
+                && u.IssuedAt <= toDate)
+            .OrderByDescending(u => u.IssuedAt)
+            .AsNoTracking()
+            .ToListAsync();
+
+        var accessoryDetails = accessoryUsages.Select(u => new CostItemDetail(
+            u.RiderAccessory.Name,
+            1,
+            u.RiderAccessory.Price,
+            u.RiderAccessory.Price,
+            u.IssuedAt
+        )).ToList();
+
+        var totalAccessoriesCost = accessoryDetails.Sum(d => d.TotalCost);
+
+        var response = new MemberRiderCostResponse(
+            riderId,
+            rider.EmployeeIqamaNo,
+            rider.Employee.NameEN,
+            rider.Employee.NameAR,
+            rider.WorkingId ?? "N/A",
+            totalAccessoriesCost,
+            accessoryDetails
+        );
+
+        return Result.Success(response);
+    }
+
+    public async Task<Result<MemberHousingCostSummaryResponse>> GetHousingCostSummaryAsync(
+        long managerIqamaNo,
+        DateTime fromDate,
+        DateTime toDate)
+    {
+        var housingResult = await GetManagedHousing(managerIqamaNo);
+        if (housingResult.IsFailure)
+            return Result.Failure<MemberHousingCostSummaryResponse>(housingResult.Error);
+
+        var housing = housingResult.Value;
+
+        // Get all housing vehicles
+        var employeeIqamas = housing.Employees
+            .Where(e => !e.IsDeleted)
+            .Select(e => e.IqamaNo)
+            .ToList();
+
+        var housingVehicleNumbers = await context.RiderDetails
+            .Where(r => employeeIqamas.Contains(r.EmployeeIqamaNo)
+                && !string.IsNullOrEmpty(r.VehicleNumber))
+            .Select(r => r.VehicleNumber!)
+            .Distinct()
+            .ToListAsync();
+
+        // Also include vehicles by location
+        var locationVehicles = await context.Vehicles
+            .Where(v => v.Location.Contains(housing.Name))
+            .Select(v => v.VehicleNumber)
+            .ToListAsync();
+
+        housingVehicleNumbers.AddRange(locationVehicles);
+        housingVehicleNumbers = housingVehicleNumbers.Distinct().ToList();
+
+        // Get all housing riders
+        var housingRiderIds = await context.RiderDetails
+            .Where(r => employeeIqamas.Contains(r.EmployeeIqamaNo))
+            .Select(r => r.Id)
+            .ToListAsync();
+
+        // Get spare parts usage costs
+        var sparePartUsages = await context.SparePartUsages
+            .Include(u => u.SparePart)
+            .Where(u => housingVehicleNumbers.Contains(u.VehicleNumber)
+                && u.UsedAt >= fromDate
+                && u.UsedAt <= toDate)
+            .AsNoTracking()
+            .ToListAsync();
+
+        var totalSparePartsCost = sparePartUsages.Sum(u => u.QuantityUsed * u.SparePart.Price);
+
+        // Get accessories usage costs
+        var accessoryUsages = await context.RiderAccessoryUsages
+            .Include(u => u.RiderAccessory)
+            .Where(u => housingRiderIds.Contains(u.RiderId)
+                && u.IssuedAt >= fromDate
+                && u.IssuedAt <= toDate)
+            .AsNoTracking()
+            .ToListAsync();
+
+        var totalAccessoriesCost = accessoryUsages.Sum(u => u.RiderAccessory.Price);
+
+        // Get vehicle cost summaries
+        var vehicleCosts = sparePartUsages
+            .GroupBy(u => u.VehicleNumber)
+            .Select(g => new VehicleCostSummaryItem(
+                g.Key,
+                context.Vehicles
+                    .Where(v => v.VehicleNumber == g.Key)
+                    .Select(v => v.PlateNumberA)
+                    .FirstOrDefault() ?? "N/A",
+                g.Sum(u => u.QuantityUsed * u.SparePart.Price)
+            ))
+            .OrderByDescending(v => v.TotalCost)
+            .ToList();
+
+        // Get rider cost summaries
+        var riderCosts = accessoryUsages
+            .GroupBy(u => u.RiderId)
+            .Select(g =>
+            {
+                var rider = context.RiderDetails
+                    .Include(r => r.Employee)
+                    .FirstOrDefault(r => r.Id == g.Key);
+
+                return new RiderCostSummaryItem(
+                    g.Key,
+                    rider?.Employee.NameEN ?? "Unknown",
+                    rider?.WorkingId ?? "N/A",
+                    g.Sum(u => u.RiderAccessory.Price)
+                );
+            })
+            .OrderByDescending(r => r.TotalCost)
+            .ToList();
+
+        var response = new MemberHousingCostSummaryResponse(
+            housing.Name,
+            totalSparePartsCost,
+            totalAccessoriesCost,
+            totalSparePartsCost + totalAccessoriesCost,
+            fromDate,
+            toDate,
+            housingVehicleNumbers.Count,
+            housingRiderIds.Count,
+            vehicleCosts,
+            riderCosts
+        );
+
+        return Result.Success(response);
+    }
+
+    #endregion
 }
+
+
+
 
 // Add to IMemberService.cs
 public record MemberFixVehicleRequest(

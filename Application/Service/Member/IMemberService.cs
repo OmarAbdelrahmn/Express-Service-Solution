@@ -1,4 +1,6 @@
 ﻿using Application.Abstraction;
+using Application.Contracts.RiderAccessoryCon;
+using Application.Contracts.SparePartCo;
 using Application.Service.Reports;
 using Application.Service.Riders;
 using System;
@@ -168,8 +170,132 @@ public interface IMemberService
     long riderIqamaNo,
     CancellationToken cancellationToken = default);
 
+    Task<Result<IEnumerable<SparePartResponse>>> GetHousingSparePartsAsync(long managerIqamaNo);
+    Task<Result<SparePartResponse>> GetSparePartByIdAsync(long managerIqamaNo, int id);
+    Task<Result<IEnumerable<SparePartResponse>>> SearchSparePartsAsync(long managerIqamaNo, string keyword);
+
+    // Spare Parts Usage
+    Task<Result<BatchUsageResponse>> RecordBatchSparePartUsageAsync(
+        long managerIqamaNo,
+        MemberBatchSparePartUsageRequest request);
+
+    Task<Result<IEnumerable<SparePartUsageResponse>>> GetSparePartUsageHistoryAsync(
+        long managerIqamaNo,
+        int sparePartId);
+
+    Task<Result<IEnumerable<SparePartUsageResponse>>> GetVehicleSparePartHistoryAsync(
+        long managerIqamaNo,
+        string vehicleNumber);
+
+    // Rider Accessories Management
+    Task<Result<IEnumerable<RiderAccessoryResponse>>> GetHousingAccessoriesAsync(long managerIqamaNo);
+    Task<Result<RiderAccessoryResponse>> GetAccessoryByIdAsync(long managerIqamaNo, int id);
+    Task<Result<IEnumerable<RiderAccessoryResponse>>> SearchAccessoriesAsync(long managerIqamaNo, string keyword);
+
+    // Rider Accessories Usage
+    Task<Result<BatchUsageResponse>> RecordBatchAccessoryUsageAsync(
+        long managerIqamaNo,
+        MemberBatchAccessoryUsageRequest request);
+
+    Task<Result<IEnumerable<RiderAccessoryUsageResponse>>> GetAccessoryUsageHistoryAsync(
+        long managerIqamaNo,
+        int accessoryId);
+
+    Task<Result<IEnumerable<RiderAccessoryUsageResponse>>> GetRiderAccessoryHistoryAsync(
+        long managerIqamaNo,
+        int riderId);
+
+    // Cost Tracking
+    Task<Result<MemberVehicleCostResponse>> GetVehicleCostAsync(
+        long managerIqamaNo,
+        string vehicleNumber);
+
+    Task<Result<MemberVehicleCostResponse>> GetVehicleCostByDateRangeAsync(
+        long managerIqamaNo,
+        string vehicleNumber,
+        DateTime fromDate,
+        DateTime toDate);
+
+    Task<Result<MemberRiderCostResponse>> GetRiderCostAsync(
+        long managerIqamaNo,
+        int riderId);
+
+    Task<Result<MemberRiderCostResponse>> GetRiderCostByDateRangeAsync(
+        long managerIqamaNo,
+        int riderId,
+        DateTime fromDate,
+        DateTime toDate);
+
+    Task<Result<MemberHousingCostSummaryResponse>> GetHousingCostSummaryAsync(
+        long managerIqamaNo,
+        DateTime fromDate,
+        DateTime toDate);
 }
 // Add these records at the end of the IMemberService.cs file
+
+public record MemberBatchSparePartUsageRequest(
+    List<MemberSparePartUsageItem> Usages
+);
+
+public record MemberSparePartUsageItem(
+    int SparePartId,
+    string VehicleNumber,
+    int QuantityUsed
+);
+
+public record MemberBatchAccessoryUsageRequest(
+    List<MemberAccessoryUsageItem> Usages
+);
+
+public record MemberAccessoryUsageItem(
+    int AccessoryId,
+    int RiderId
+);
+
+// Member-specific response DTOs
+public record MemberVehicleCostResponse(
+    string VehicleNumber,
+    string VehiclePlate,
+    decimal TotalSparePartsCost,
+    decimal TotalCost,
+    List<CostItemDetail> SparePartDetails
+);
+
+public record MemberRiderCostResponse(
+    int RiderId,
+    long RiderIqamaNo,
+    string RiderNameEN,
+    string RiderNameAR,
+    string WorkingId,
+    decimal TotalAccessoriesCost,
+    List<CostItemDetail> AccessoryDetails
+);
+
+public record MemberHousingCostSummaryResponse(
+    string HousingName,
+    decimal TotalSparePartsCost,
+    decimal TotalAccessoriesCost,
+    decimal GrandTotal,
+    DateTime FromDate,
+    DateTime ToDate,
+    int TotalVehicles,
+    int TotalRiders,
+    List<VehicleCostSummaryItem> VehicleCosts,
+    List<RiderCostSummaryItem> RiderCosts
+);
+
+public record VehicleCostSummaryItem(
+    string VehicleNumber,
+    string VehiclePlate,
+    decimal TotalCost
+);
+
+public record RiderCostSummaryItem(
+    int RiderId,
+    string RiderName,
+    string WorkingId,
+    decimal TotalCost
+);
 
 public record RiderMonthlyHistory(
     long IqamaNo,

@@ -15,6 +15,226 @@ public class MemberController(IMemberService housingService) : ControllerBase
 {
     private readonly IMemberService housingService = housingService;
 
+    #region Spare Parts
+    /// <summary>
+    /// Get all spare parts in housing inventory
+    /// </summary>
+    [HttpGet("spare-parts")]
+    public async Task<IActionResult> GetSpareParts()
+    {
+        var managerIqamaNo = User.GetUserIqamaNo()!;
+        var result = await housingService.GetHousingSparePartsAsync(managerIqamaNo);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    /// <summary>
+    /// Get spare part by ID
+    /// </summary>
+    [HttpGet("spare-parts/{id}")]
+    public async Task<IActionResult> GetSparePartById(int id)
+    {
+        var managerIqamaNo = User.GetUserIqamaNo()!;
+        var result = await housingService.GetSparePartByIdAsync(managerIqamaNo, id);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    /// <summary>
+    /// Search spare parts by keyword
+    /// </summary>
+    [HttpGet("spare-parts/search")]
+    public async Task<IActionResult> SearchSpareParts([FromQuery] string keyword)
+    {
+        var managerIqamaNo = User.GetUserIqamaNo()!;
+        var result = await housingService.SearchSparePartsAsync(managerIqamaNo, keyword);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    /// <summary>
+    /// Record batch spare part usage for housing vehicles
+    /// </summary>
+    [HttpPost("spare-parts/usage/batch")]
+    public async Task<IActionResult> RecordBatchSparePartUsage(
+        [FromBody] MemberBatchSparePartUsageRequest request)
+    {
+        var managerIqamaNo = User.GetUserIqamaNo()!;
+        var result = await housingService.RecordBatchSparePartUsageAsync(
+            managerIqamaNo, request);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    /// <summary>
+    /// Get spare part usage history
+    /// </summary>
+    [HttpGet("spare-parts/{sparePartId}/usage-history")]
+    public async Task<IActionResult> GetSparePartUsageHistory(int sparePartId)
+    {
+        var managerIqamaNo = User.GetUserIqamaNo()!;
+        var result = await housingService.GetSparePartUsageHistoryAsync(
+            managerIqamaNo, sparePartId);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    /// <summary>
+    /// Get spare part usage history for a vehicle
+    /// </summary>
+    [HttpGet("vehicles/{vehicleNumber}/spare-parts-history")]
+    public async Task<IActionResult> GetVehicleSparePartHistory(string vehicleNumber)
+    {
+        var managerIqamaNo = User.GetUserIqamaNo()!;
+        var result = await housingService.GetVehicleSparePartHistoryAsync(
+            managerIqamaNo, vehicleNumber);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+#endregion
+
+    #region Accessories
+
+    /// <summary>
+    /// Get all accessories in housing inventory
+    /// </summary>
+    [HttpGet("accessories")]
+    public async Task<IActionResult> GetAccessories()
+    {
+        var managerIqamaNo = User.GetUserIqamaNo()!;
+        var result = await housingService.GetHousingAccessoriesAsync(managerIqamaNo);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    /// <summary>
+    /// Get accessory by ID
+    /// </summary>
+    [HttpGet("accessories/{id}")]
+    public async Task<IActionResult> GetAccessoryById(int id)
+    {
+        var managerIqamaNo = User.GetUserIqamaNo()!;
+        var result = await housingService.GetAccessoryByIdAsync(managerIqamaNo, id);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    /// <summary>
+    /// Search accessories by keyword
+    /// </summary>
+    [HttpGet("accessories/search")]
+    public async Task<IActionResult> SearchAccessories([FromQuery] string keyword)
+    {
+        var managerIqamaNo = User.GetUserIqamaNo()!;
+        var result = await housingService.SearchAccessoriesAsync(managerIqamaNo, keyword);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    /// <summary>
+    /// Issue accessories to riders in batch
+    /// </summary>
+    [HttpPost("accessories/usage/batch")]
+    public async Task<IActionResult> RecordBatchAccessoryUsage(
+        [FromBody] MemberBatchAccessoryUsageRequest request)
+    {
+        var managerIqamaNo = User.GetUserIqamaNo()!;
+        var result = await housingService.RecordBatchAccessoryUsageAsync(
+            managerIqamaNo, request);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    /// <summary>
+    /// Get accessory usage history
+    /// </summary>
+    [HttpGet("accessories/{accessoryId}/usage-history")]
+    public async Task<IActionResult> GetAccessoryUsageHistory(int accessoryId)
+    {
+        var managerIqamaNo = User.GetUserIqamaNo()!;
+        var result = await housingService.GetAccessoryUsageHistoryAsync(
+            managerIqamaNo, accessoryId);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    /// <summary>
+    /// Get accessories issued to a specific rider
+    /// </summary>
+    [HttpGet("riders/{riderId}/accessories-history")]
+    public async Task<IActionResult> GetRiderAccessoryHistory(int riderId)
+    {
+        var managerIqamaNo = User.GetUserIqamaNo()!;
+        var result = await housingService.GetRiderAccessoryHistoryAsync(
+            managerIqamaNo, riderId);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    #endregion
+
+    #region Cost Tracking
+
+    /// <summary>
+    /// Get total cost for a vehicle (spare parts)
+    /// </summary>
+    [HttpGet("vehicles/{vehicleNumber}/cost")]
+    public async Task<IActionResult> GetVehicleCost(string vehicleNumber)
+    {
+        var managerIqamaNo = User.GetUserIqamaNo()!;
+        var result = await housingService.GetVehicleCostAsync(
+            managerIqamaNo, vehicleNumber);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    /// <summary>
+    /// Get vehicle cost for a date range
+    /// </summary>
+    [HttpGet("vehicles/{vehicleNumber}/cost/date-range")]
+    public async Task<IActionResult> GetVehicleCostByDateRange(
+        string vehicleNumber,
+        [FromQuery] DateTime fromDate,
+        [FromQuery] DateTime toDate)
+    {
+        var managerIqamaNo = User.GetUserIqamaNo()!;
+        var result = await housingService.GetVehicleCostByDateRangeAsync(
+            managerIqamaNo, vehicleNumber, fromDate, toDate);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    /// <summary>
+    /// Get total cost for a rider (accessories)
+    /// </summary>
+    [HttpGet("riders/{riderId}/cost")]
+    public async Task<IActionResult> GetRiderCost(int riderId)
+    {
+        var managerIqamaNo = User.GetUserIqamaNo()!;
+        var result = await housingService.GetRiderCostAsync(
+            managerIqamaNo, riderId);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    /// <summary>
+    /// Get rider cost for a date range
+    /// </summary>
+    [HttpGet("riders/{riderId}/cost/date-range")]
+    public async Task<IActionResult> GetRiderCostByDateRange(
+        int riderId,
+        [FromQuery] DateTime fromDate,
+        [FromQuery] DateTime toDate)
+    {
+        var managerIqamaNo = User.GetUserIqamaNo()!;
+        var result = await housingService.GetRiderCostByDateRangeAsync(
+            managerIqamaNo, riderId, fromDate, toDate);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    /// <summary>
+    /// Get cost summary for entire housing
+    /// </summary>
+    [HttpGet("cost-summary")]
+    public async Task<IActionResult> GetHousingCostSummary(
+        [FromQuery] DateTime fromDate,
+        [FromQuery] DateTime toDate)
+    {
+        var managerIqamaNo = User.GetUserIqamaNo()!;
+        var result = await housingService.GetHousingCostSummaryAsync(
+            managerIqamaNo, fromDate, toDate);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    #endregion
+
+
     [HttpGet("reports/rider-daily-detail")]
     public async Task<IActionResult> GetRiderDailyDetail(
     [FromQuery] string workingId,
