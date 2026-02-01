@@ -12,6 +12,52 @@ namespace Express_Service.Controllers;
 [Authorize(Roles = "Master,Admin,Member")]
 public class SparePartController(ISparePartService service) : ControllerBase
 {
+    [HttpGet("all-housings")]
+    [Authorize(Roles = "Master,Admin,Member")]
+    public async Task<IActionResult> GetAllHousingsCostSummary(
+        [FromQuery] DateTime fromDate,
+        [FromQuery] DateTime toDate)
+    {
+        if (fromDate > toDate)
+            return BadRequest("From date must be before or equal to to date");
+
+        var response = await service.GetAllHousingsCostSummaryAsync(fromDate, toDate);
+        return response.IsSuccess ? Ok(response.Value) : response.ToProblem();
+    }
+
+    /// <summary>
+    /// Get cost summary for company main stock "الشركة"
+    /// </summary>
+    [HttpGet("company-stock")]
+    [Authorize(Roles = "Master,Admin")]
+    public async Task<IActionResult> GetCompanyStockCost(
+        [FromQuery] DateTime fromDate,
+        [FromQuery] DateTime toDate)
+    {
+        if (fromDate > toDate)
+            return BadRequest("From date must be before or equal to to date");
+
+        var response = await service.GetCompanyStockCostAsync(fromDate, toDate);
+        return response.IsSuccess ? Ok(response.Value) : response.ToProblem();
+    }
+
+    /// <summary>
+    /// Compare costs across all housings with rankings and insights
+    /// </summary>
+    [HttpGet("comparison")]
+    [Authorize(Roles = "Master,Admin")]
+    public async Task<IActionResult> CompareHousingCosts(
+        [FromQuery] DateTime fromDate,
+        [FromQuery] DateTime toDate)
+    {
+        if (fromDate > toDate)
+            return BadRequest("From date must be before or equal to to date");
+
+        var response = await service.CompareHousingCostsAsync(fromDate, toDate);
+        return response.IsSuccess ? Ok(response.Value) : response.ToProblem();
+    }
+
+
     [HttpGet]
     public async Task<IActionResult> GetAll()
     {

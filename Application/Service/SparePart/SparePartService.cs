@@ -5,6 +5,8 @@ using Domain;
 using Domain.Entities;
 using Domain.Entities.Spare;
 using Microsoft.EntityFrameworkCore;
+using static Application.Service.Member.IMemberService;
+using static Application.Service.SparePart.ISparePartService;
 
 namespace Application.Service.SparePart;
 
@@ -12,6 +14,545 @@ public class SparePartService(ApplicationDbcontext dbcontext) : ISparePartServic
 {
     private readonly ApplicationDbcontext _dbcontext = dbcontext;
 
+    private const string COMPANY_STOCK = "الشركة";
+
+    public async Task<Result<AllHousingsCostSummaryResponse>> GetAllHousingsCostSummaryAsync(
+        DateTime fromDate,
+        DateTime toDate)
+    {
+        try
+        {
+            // Get all housings
+            var housings = await _dbcontext.Housings
+                .Include(h => h.Employees)
+                .Where(h => h.Employees.Any(e => !e.IsDeleted))
+                .ToListAsync();
+
+            var housingCosts = new List<HousingCostSummaryItem>();
+
+            // Process each housing
+            foreach (var housing in housings)
+            {
+                var housingCost = await GetHousingCostSummaryItemAsync(
+                    housing.Id,
+                    housing.Name,
+                    fromDate,
+                    toDate);
+
+                if (housingCost != null)
+                {
+                    housingCosts.Add(housingCost);
+                }
+            }
+
+            // Get company stock costs (الشركة)
+            var companyStockCost = await GetCompanyStockCostSummaryAsync(fromDate, toDate);
+
+            // Calculate totals
+            var grandTotalSparePartsCost = housingCosts.Sum(h => h.SparePartsCost) +
+                                          companyStockCost.SparePartsCost;
+            var grandTotalAccessoriesCost = housingCosts.Sum(h => h.AccessoriesCost) +
+                                           companyStockCost.AccessoriesCost;
+            var grandTotalCost = grandTotalSparePartsCost + grandTotalAccessoriesCost;
+
+            var response = new AllHousingsCostSummaryResponse(
+                fromDate,
+                toDate,
+                grandTotalSparePartsCost,
+                grandTotalAccessoriesCost,
+                grandTotalCost,
+                housingCosts.OrderByDescending(h => h.TotalCost).ToList(),
+                companyStockCost
+            );
+
+            return Result.Success(response);
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<AllHousingsCostSummaryResponse>(
+                new Error("Error", $"Failed to get housing costs summary: {ex.Message}", 500));
+        }
+    }
+
+    public async Task<Result<HousingDetailedCostResponse>> GetHousingDetailedCostAsync(
+        string housingName,
+        DateTime fromDate,
+        DateTime toDate)
+    {
+        try
+        {
+            var housing = await _dbcontext.Housings
+                .Include(h => h.Employees)
+                .FirstOrDefaultAsync(h => h.Name == housingName);
+
+            if (housing == null)
+                return Result.Failure<HousingDetailedCostResponse>(
+                    new Error("NotFound", "Housing not found", 404));
+
+            // Get rider IDs in this housing
+            var employeeIqamas = housing.Employees
+                .Where(e => !e.IsDeleted)
+                .Select(e => e.IqamaNo)
+                .ToList();
+
+            var riderIds = await _dbcontext.RiderDetails
+                .Where(r => employeeIqamas.Contains(r.EmployeeIqamaNo))
+                .Select(r => r.Id)
+                .ToListAsync();
+
+            // Get vehicle numbers - both assigned to riders and by location
+            var riderVehicleNumbers = await _dbcontext.RiderDetails
+                .Where(r => employeeIqamas.Contains(r.EmployeeIqamaNo) &&
+                           r.VehicleNumber != null)
+                .Select(r => r.VehicleNumber!)
+                .Distinct()
+                .ToListAsync();
+
+            var locationVehicleNumbers = await _dbcontext.Vehicles
+                .Where(v => v.Location == housingName)
+                .Select(v => v.VehicleNumber)
+                .ToListAsync();
+
+            var allVehicleNumbers = riderVehicleNumbers
+                .Concat(locationVehicleNumbers)
+                .Distinct()
+                .ToList();
+
+            // Get spare parts usage for these vehicles
+            var vehicleCosts = await GetVehicleCostsForHousingAsync(
+                allVehicleNumbers,
+                fromDate,
+                toDate);
+
+            // Get rider accessories usage
+            var riderCosts = await GetRiderCostsForHousingAsync(
+                riderIds,
+                housingName,
+                fromDate,
+                toDate);
+
+            var totalSparePartsCost = vehicleCosts.Sum(v => v.TotalCost);
+            var totalAccessoriesCost = riderCosts.Sum(r => r.TotalCost);
+            var grandTotal = totalSparePartsCost + totalAccessoriesCost;
+
+            // Calculate statistics
+            var statistics = CalculateStatistics(
+                vehicleCosts,
+                riderCosts,
+                totalSparePartsCost,
+                totalAccessoriesCost);
+
+            var response = new HousingDetailedCostResponse(
+                housing.Id,
+                housing.Name,
+                fromDate,
+                toDate,
+                totalSparePartsCost,
+                totalAccessoriesCost,
+                grandTotal,
+                vehicleCosts.OrderByDescending(v => v.TotalCost).ToList(),
+                riderCosts.OrderByDescending(r => r.TotalCost).ToList(),
+                statistics
+            );
+
+            return Result.Success(response);
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<HousingDetailedCostResponse>(
+                new Error("Error", $"Failed to get housing detailed cost: {ex.Message}", 500));
+        }
+    }
+
+    public async Task<Result<HousingDetailedCostResponse>> GetCompanyStockCostAsync(
+        DateTime fromDate,
+        DateTime toDate)
+    {
+        try
+        {
+            // Get vehicles with location = "الشركة"
+            var companyVehicleNumbers = await _dbcontext.Vehicles
+                .Where(v => v.Location == COMPANY_STOCK)
+                .Select(v => v.VehicleNumber)
+                .ToListAsync();
+
+            // Get spare parts usage for company stock vehicles
+            var vehicleCosts = await GetVehicleCostsForHousingAsync(
+                companyVehicleNumbers,
+                fromDate,
+                toDate);
+
+            // Get riders using accessories from company stock
+            var companyAccessoryUsages = await _dbcontext.RiderAccessoryUsages
+                .Include(u => u.RiderAccessory)
+                .Include(u => u.Rider)
+                    .ThenInclude(r => r.Employee)
+                .Where(u => u.RiderAccessory.Location == COMPANY_STOCK &&
+                           u.IssuedAt >= fromDate &&
+                           u.IssuedAt <= toDate)
+                .ToListAsync();
+
+            var riderCosts = companyAccessoryUsages
+                .GroupBy(u => u.RiderId)
+                .Select(g =>
+                {
+                    var rider = g.First().Rider;
+                    var usageDetails = g.Select(u => new AccessoryUsageDetail(
+                        u.RiderAccessory.Name,
+                        u.RiderAccessory.Price,
+                        u.IssuedAt
+                    )).ToList();
+
+                    return new RiderAccessoryCostDetail(
+                        rider.Id,
+                        rider.EmployeeIqamaNo,
+                        rider.Employee.NameEN,
+                        rider.Employee.NameAR,
+                        rider.WorkingId ?? "N/A",
+                        rider.Employee.Housing?.Name ?? "N/A",
+                        usageDetails.Sum(d => d.Price),
+                        usageDetails.Count,
+                        usageDetails
+                    );
+                })
+                .ToList();
+
+            var totalSparePartsCost = vehicleCosts.Sum(v => v.TotalCost);
+            var totalAccessoriesCost = riderCosts.Sum(r => r.TotalCost);
+            var grandTotal = totalSparePartsCost + totalAccessoriesCost;
+
+            var statistics = CalculateStatistics(
+                vehicleCosts,
+                riderCosts,
+                totalSparePartsCost,
+                totalAccessoriesCost);
+
+            var response = new HousingDetailedCostResponse(
+                null,
+                COMPANY_STOCK,
+                fromDate,
+                toDate,
+                totalSparePartsCost,
+                totalAccessoriesCost,
+                grandTotal,
+                vehicleCosts.OrderByDescending(v => v.TotalCost).ToList(),
+                riderCosts.OrderByDescending(r => r.TotalCost).ToList(),
+                statistics
+            );
+
+            return Result.Success(response);
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<HousingDetailedCostResponse>(
+                new Error("Error", $"Failed to get company stock cost: {ex.Message}", 500));
+        }
+    }
+
+    public async Task<Result<HousingCostComparisonResponse>> CompareHousingCostsAsync(
+        DateTime fromDate,
+        DateTime toDate)
+    {
+        try
+        {
+            var allCosts = await GetAllHousingsCostSummaryAsync(fromDate, toDate);
+
+            if (allCosts.IsFailure)
+                return Result.Failure<HousingCostComparisonResponse>(allCosts.Error);
+
+            var comparisons = allCosts.Value.HousingCosts
+                .Select((h, index) => new HousingComparisonItem(
+                    h.HousingName,
+                    h.SparePartsCost,
+                    h.AccessoriesCost,
+                    h.TotalCost,
+                    h.VehicleCount > 0 ? h.SparePartsCost / h.VehicleCount : 0,
+                    h.RiderCount > 0 ? h.AccessoriesCost / h.RiderCount : 0,
+                    index + 1
+                ))
+                .OrderByDescending(c => c.TotalCost)
+                .Select((c, index) => c with { Rank = index + 1 })
+                .ToList();
+
+            var insights = CalculateComparisonInsights(comparisons);
+
+            var response = new HousingCostComparisonResponse(
+                fromDate,
+                toDate,
+                comparisons,
+                insights
+            );
+
+            return Result.Success(response);
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<HousingCostComparisonResponse>(
+                new Error("Error", $"Failed to compare housing costs: {ex.Message}", 500));
+        }
+    }
+
+    // ============================================
+    // PRIVATE HELPER METHODS
+    // ============================================
+
+    private async Task<HousingCostSummaryItem?> GetHousingCostSummaryItemAsync(
+        int housingId,
+        string housingName,
+        DateTime fromDate,
+        DateTime toDate)
+    {
+        var employeeIqamas = await _dbcontext.Employees
+            .Where(e => e.HousingId == housingId && !e.IsDeleted)
+            .Select(e => e.IqamaNo)
+            .ToListAsync();
+
+        if (!employeeIqamas.Any())
+            return null;
+
+        var riderIds = await _dbcontext.RiderDetails
+            .Where(r => employeeIqamas.Contains(r.EmployeeIqamaNo))
+            .Select(r => r.Id)
+            .ToListAsync();
+
+        // Get vehicle numbers
+        var riderVehicleNumbers = await _dbcontext.RiderDetails
+            .Where(r => employeeIqamas.Contains(r.EmployeeIqamaNo) &&
+                       r.VehicleNumber != null)
+            .Select(r => r.VehicleNumber!)
+            .Distinct()
+            .ToListAsync();
+
+        var locationVehicleNumbers = await _dbcontext.Vehicles
+            .Where(v => v.Location == housingName)
+            .Select(v => v.VehicleNumber)
+            .ToListAsync();
+
+        var allVehicleNumbers = riderVehicleNumbers
+            .Concat(locationVehicleNumbers)
+            .Distinct()
+            .ToList();
+
+        // Calculate spare parts cost
+        var sparePartsCost = await _dbcontext.SparePartUsages
+            .Where(u => allVehicleNumbers.Contains(u.VehicleNumber) &&
+                       u.UsedAt >= fromDate &&
+                       u.UsedAt <= toDate)
+            .SumAsync(u => (decimal?)(u.QuantityUsed * u.SparePart.Price)) ?? 0;
+
+        // Calculate accessories cost
+        var accessoriesCost = await _dbcontext.RiderAccessoryUsages
+            .Where(u => riderIds.Contains(u.RiderId) &&
+                       u.IssuedAt >= fromDate &&
+                       u.IssuedAt <= toDate)
+            .SumAsync(u => (decimal?)u.RiderAccessory.Price) ?? 0;
+
+        return new HousingCostSummaryItem(
+            housingId,
+            housingName,
+            sparePartsCost,
+            accessoriesCost,
+            sparePartsCost + accessoriesCost,
+            allVehicleNumbers.Count,
+            riderIds.Count
+        );
+    }
+
+    private async Task<CompanyStockCostSummary> GetCompanyStockCostSummaryAsync(
+        DateTime fromDate,
+        DateTime toDate)
+    {
+        // Get vehicles with location = "الشركة"
+        var companyVehicleNumbers = await _dbcontext.Vehicles
+            .Where(v => v.Location == COMPANY_STOCK)
+            .Select(v => v.VehicleNumber)
+            .ToListAsync();
+
+        // Calculate spare parts cost
+        var sparePartsCost = await _dbcontext.SparePartUsages
+            .Where(u => companyVehicleNumbers.Contains(u.VehicleNumber) &&
+                       u.UsedAt >= fromDate &&
+                       u.UsedAt <= toDate)
+            .SumAsync(u => (decimal?)(u.QuantityUsed * u.SparePart.Price)) ?? 0;
+
+        // Get distinct vehicles serviced
+        var vehiclesServiced = await _dbcontext.SparePartUsages
+            .Where(u => companyVehicleNumbers.Contains(u.VehicleNumber) &&
+                       u.UsedAt >= fromDate &&
+                       u.UsedAt <= toDate)
+            .Select(u => u.VehicleNumber)
+            .Distinct()
+            .CountAsync();
+
+        // Calculate accessories cost from company stock
+        var accessoryUsages = await _dbcontext.RiderAccessoryUsages
+            .Include(u => u.RiderAccessory)
+            .Where(u => u.RiderAccessory.Location == COMPANY_STOCK &&
+                       u.IssuedAt >= fromDate &&
+                       u.IssuedAt <= toDate)
+            .ToListAsync();
+
+        var accessoriesCost = accessoryUsages.Sum(u => u.RiderAccessory.Price);
+        var ridersServiced = accessoryUsages.Select(u => u.RiderId).Distinct().Count();
+
+        return new CompanyStockCostSummary(
+            sparePartsCost,
+            accessoriesCost,
+            sparePartsCost + accessoriesCost,
+            vehiclesServiced,
+            ridersServiced
+        );
+    }
+
+    private async Task<List<VehicleSparePartCostDetail>> GetVehicleCostsForHousingAsync(
+        List<string> vehicleNumbers,
+        DateTime fromDate,
+        DateTime toDate)
+    {
+        if (!vehicleNumbers.Any())
+            return new List<VehicleSparePartCostDetail>();
+
+        var usages = await _dbcontext.SparePartUsages
+            .Include(u => u.SparePart)
+            .Include(u => u.Vehicle)
+            .Where(u => vehicleNumbers.Contains(u.VehicleNumber) &&
+                       u.UsedAt >= fromDate &&
+                       u.UsedAt <= toDate)
+            .OrderByDescending(u => u.UsedAt)
+            .ToListAsync();
+
+        return usages
+            .GroupBy(u => u.VehicleNumber)
+            .Select(g =>
+            {
+                var vehicle = g.First().Vehicle;
+                var usageDetails = g.Select(u => new SparePartUsageDetail(
+                    u.SparePart.Name,
+                    u.QuantityUsed,
+                    u.SparePart.Price,
+                    u.QuantityUsed * u.SparePart.Price,
+                    u.UsedAt
+                )).ToList();
+
+                return new VehicleSparePartCostDetail(
+                    vehicle.VehicleNumber,
+                    vehicle.PlateNumberA,
+                    vehicle.Location,
+                    usageDetails.Sum(d => d.TotalCost),
+                    usageDetails.Count,
+                    usageDetails
+                );
+            })
+            .ToList();
+    }
+
+    private async Task<List<RiderAccessoryCostDetail>> GetRiderCostsForHousingAsync(
+        List<int> riderIds,
+        string housingName,
+        DateTime fromDate,
+        DateTime toDate)
+    {
+        if (!riderIds.Any())
+            return new List<RiderAccessoryCostDetail>();
+
+        var usages = await _dbcontext.RiderAccessoryUsages
+            .Include(u => u.RiderAccessory)
+            .Include(u => u.Rider)
+                .ThenInclude(r => r.Employee)
+            .Where(u => riderIds.Contains(u.RiderId) &&
+                       u.IssuedAt >= fromDate &&
+                       u.IssuedAt <= toDate)
+            .OrderByDescending(u => u.IssuedAt)
+            .ToListAsync();
+
+        return usages
+            .GroupBy(u => u.RiderId)
+            .Select(g =>
+            {
+                var rider = g.First().Rider;
+                var usageDetails = g.Select(u => new AccessoryUsageDetail(
+                    u.RiderAccessory.Name,
+                    u.RiderAccessory.Price,
+                    u.IssuedAt
+                )).ToList();
+
+                return new RiderAccessoryCostDetail(
+                    rider.Id,
+                    rider.EmployeeIqamaNo,
+                    rider.Employee.NameEN,
+                    rider.Employee.NameAR,
+                    rider.WorkingId ?? "N/A",
+                    housingName,
+                    usageDetails.Sum(d => d.Price),
+                    usageDetails.Count,
+                    usageDetails
+                );
+            })
+            .ToList();
+    }
+
+    private HousingCostStatistics CalculateStatistics(
+        List<VehicleSparePartCostDetail> vehicleCosts,
+        List<RiderAccessoryCostDetail> riderCosts,
+        decimal totalSparePartsCost,
+        decimal totalAccessoriesCost)
+    {
+        var totalVehicles = vehicleCosts.Count;
+        var totalRiders = riderCosts.Count;
+        var totalSparePartUsages = vehicleCosts.Sum(v => v.UsageCount);
+        var totalAccessoryUsages = riderCosts.Sum(r => r.AccessoryCount);
+        var avgCostPerVehicle = totalVehicles > 0 ? totalSparePartsCost / totalVehicles : 0;
+        var avgCostPerRider = totalRiders > 0 ? totalAccessoriesCost / totalRiders : 0;
+        var topCostVehicle = vehicleCosts
+            .OrderByDescending(v => v.TotalCost)
+            .FirstOrDefault()?.VehicleNumber ?? "N/A";
+        var topCostRider = riderCosts
+            .OrderByDescending(r => r.TotalCost)
+            .FirstOrDefault()?.RiderNameEN ?? "N/A";
+
+        return new HousingCostStatistics(
+            totalVehicles,
+            totalRiders,
+            totalSparePartUsages,
+            totalAccessoryUsages,
+            avgCostPerVehicle,
+            avgCostPerRider,
+            topCostVehicle,
+            topCostRider
+        );
+    }
+
+    private ComparisonInsights CalculateComparisonInsights(
+        List<HousingComparisonItem> comparisons)
+    {
+        if (!comparisons.Any())
+        {
+            return new ComparisonInsights(
+                "N/A", 0, "N/A", 0, 0, 0, "N/A"
+            );
+        }
+
+        var highest = comparisons.OrderByDescending(c => c.TotalCost).First();
+        var lowest = comparisons.OrderBy(c => c.TotalCost).First();
+        var averageCost = comparisons.Average(c => c.TotalCost);
+        var totalCost = comparisons.Sum(c => c.TotalCost);
+
+        // Most efficient = lowest cost per unit (vehicle + rider)
+        var mostEfficient = comparisons
+            .OrderBy(c => c.CostPerVehicle + c.CostPerRider)
+            .First()
+            .HousingName;
+
+        return new ComparisonInsights(
+            highest.HousingName,
+            highest.TotalCost,
+            lowest.HousingName,
+            lowest.TotalCost,
+            averageCost,
+            totalCost,
+            mostEfficient
+        );
+    }
 
     public async Task<Result<BatchUsageResponse>> RecordBatchSparePartUsageAsync(
         BatchSparePartUsageRequest request)

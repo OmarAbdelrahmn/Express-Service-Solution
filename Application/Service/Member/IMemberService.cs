@@ -14,6 +14,8 @@ public interface IMemberService
 {
     // Add to IMemberService interface
 
+
+
     /// <summary>
     /// Request to switch rider's current vehicle to a new one
     /// </summary>
