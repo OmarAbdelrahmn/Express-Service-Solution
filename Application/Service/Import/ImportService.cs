@@ -347,21 +347,22 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
         return worksheet.Row(1);
     }
 
+    // ─── 1) BuildSparePartColumnMapping ────────────────────────────
     private SparePartColumnMapping BuildSparePartColumnMapping(IXLRow headerRow)
     {
         var mapping = new SparePartColumnMapping();
         var cells = headerRow.CellsUsed().ToList();
 
         mapping.NameCol = FindColumn(cells, "Name", "الاسم", "Part Name");
+        // These columns are no longer required — keep finding them so existing
+        // files with extra columns don't break, but we won't use the values.
         mapping.QuantityCol = FindColumn(cells, "Quantity", "الكمية", "Qty");
         mapping.PriceCol = FindColumn(cells, "Price", "السعر", "Cost");
         mapping.LocationCol = FindColumn(cells, "Location", "الموقع", "Storage");
 
+        // Only Name is required now
         var missing = new List<string>();
         if (mapping.NameCol == 0) missing.Add("Name");
-        if (mapping.QuantityCol == 0) missing.Add("Quantity");
-        if (mapping.PriceCol == 0) missing.Add("Price");
-        if (mapping.LocationCol == 0) missing.Add("Location");
 
         mapping.IsValid = !missing.Any();
         mapping.ErrorMessage = missing.Any() ? $"Missing: {string.Join(", ", missing)}" : null;
@@ -369,6 +370,8 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
         return mapping;
     }
 
+
+    // ─── 2) ParseSparePartRowData ──────────────────────────────────
     private SparePartRowData ParseSparePartRowData(IXLRow row, SparePartColumnMapping map, int rowNumber)
     {
         var data = new SparePartRowData { RowNumber = rowNumber };
@@ -383,31 +386,10 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
                 return data;
             }
 
-            var qtyStr = GetCellValue(row, map.QuantityCol);
-            if (!TryParseInt(qtyStr, out int qty) || qty < 0)
-            {
-                data.IsValid = false;
-                data.ErrorMessage = $"Invalid quantity: {qtyStr}";
-                return data;
-            }
-            data.Quantity = qty;
-
-            var priceStr = GetCellValue(row, map.PriceCol);
-            if (!decimal.TryParse(priceStr, out decimal price) || price < 0)
-            {
-                data.IsValid = false;
-                data.ErrorMessage = $"Invalid price: {priceStr}";
-                return data;
-            }
-            data.Price = price;
-
-            data.Location = GetCellValue(row, map.LocationCol)?.Trim();
-            if (string.IsNullOrWhiteSpace(data.Location))
-            {
-                data.IsValid = false;
-                data.ErrorMessage = "Location is required";
-                return data;
-            }
+            // Hard-coded values — ignore whatever is in the Excel columns
+            data.Quantity = 0;
+            data.Price = 0m;
+            data.Location = "الشركة";
 
             data.IsValid = true;
         }
@@ -419,6 +401,66 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
 
         return data;
     }
+
+
+    // ─── 3) BuildAccessoryColumnMapping ────────────────────────────
+    private AccessoryColumnMapping BuildAccessoryColumnMapping(IXLRow headerRow)
+    {
+        var mapping = new AccessoryColumnMapping();
+        var cells = headerRow.CellsUsed().ToList();
+
+        mapping.NameCol = FindColumn(cells, "Name", "الاسم", "Accessory Name");
+        // Keep finding these so existing files don't error on extra columns,
+        // but we won't use their values any more.
+        mapping.TypeCol = FindColumn(cells, "Type", "النوع", "Category");
+        mapping.QuantityCol = FindColumn(cells, "Quantity", "الكمية", "Qty");
+        mapping.PriceCol = FindColumn(cells, "Price", "السعر", "Cost");
+        mapping.LocationCol = FindColumn(cells, "Location", "الموقع", "Storage");
+
+        // Only Name is required now
+        var missing = new List<string>();
+        if (mapping.NameCol == 0) missing.Add("Name");
+
+        mapping.IsValid = !missing.Any();
+        mapping.ErrorMessage = missing.Any() ? $"Missing: {string.Join(", ", missing)}" : null;
+
+        return mapping;
+    }
+
+
+    // ─── 4) ParseAccessoryRowData ──────────────────────────────────
+    private AccessoryRowData ParseAccessoryRowData(IXLRow row, AccessoryColumnMapping map, int rowNumber)
+    {
+        var data = new AccessoryRowData { RowNumber = rowNumber };
+
+        try
+        {
+            data.Name = GetCellValue(row, map.NameCol)?.Trim();
+            if (string.IsNullOrWhiteSpace(data.Name))
+            {
+                data.IsValid = false;
+                data.ErrorMessage = "Name is required";
+                return data;
+            }
+
+            // Hard-coded values — ignore whatever is in the Excel columns
+            data.Quantity = 0;
+            data.Price = 0m;
+            data.Location = "الشركة";
+
+            data.IsValid = true;
+        }
+        catch (Exception ex)
+        {
+            data.IsValid = false;
+            data.ErrorMessage = $"Error parsing row: {ex.Message}";
+        }
+
+        return data;
+    }
+
+
+
 
     private IXLRow? FindAccessoryHeaderRow(IXLWorksheet worksheet)
     {
@@ -437,80 +479,7 @@ public class ImportService(ApplicationDbcontext dbcontext) : IImportService
         return worksheet.Row(1);
     }
 
-    private AccessoryColumnMapping BuildAccessoryColumnMapping(IXLRow headerRow)
-    {
-        var mapping = new AccessoryColumnMapping();
-        var cells = headerRow.CellsUsed().ToList();
 
-        mapping.NameCol = FindColumn(cells, "Name", "الاسم", "Accessory Name");
-        mapping.TypeCol = FindColumn(cells, "Type", "النوع", "Category");
-        mapping.QuantityCol = FindColumn(cells, "Quantity", "الكمية", "Qty");
-        mapping.PriceCol = FindColumn(cells, "Price", "السعر", "Cost");
-        mapping.LocationCol = FindColumn(cells, "Location", "الموقع", "Storage");
-
-        var missing = new List<string>();
-        if (mapping.NameCol == 0) missing.Add("Name");
-        if (mapping.TypeCol == 0) missing.Add("Type");
-        if (mapping.QuantityCol == 0) missing.Add("Quantity");
-        if (mapping.PriceCol == 0) missing.Add("Price");
-        if (mapping.LocationCol == 0) missing.Add("Location");
-
-        mapping.IsValid = !missing.Any();
-        mapping.ErrorMessage = missing.Any() ? $"Missing: {string.Join(", ", missing)}" : null;
-
-        return mapping;
-    }
-
-    private AccessoryRowData ParseAccessoryRowData(IXLRow row, AccessoryColumnMapping map, int rowNumber)
-    {
-        var data = new AccessoryRowData { RowNumber = rowNumber };
-
-        try
-        {
-            data.Name = GetCellValue(row, map.NameCol)?.Trim();
-            if (string.IsNullOrWhiteSpace(data.Name))
-            {
-                data.IsValid = false;
-                data.ErrorMessage = "Name is required";
-                return data;
-            }
-
-            var qtyStr = GetCellValue(row, map.QuantityCol);
-            if (!TryParseInt(qtyStr, out int qty) || qty < 0)
-            {
-                data.IsValid = false;
-                data.ErrorMessage = $"Invalid quantity: {qtyStr}";
-                return data;
-            }
-            data.Quantity = qty;
-
-            var priceStr = GetCellValue(row, map.PriceCol);
-            if (!decimal.TryParse(priceStr, out decimal price) || price < 0)
-            {
-                data.IsValid = false;
-                data.ErrorMessage = $"Invalid price: {priceStr}";
-                return data;
-            }
-            data.Price = price;
-
-            data.Location = GetCellValue(row, map.LocationCol)?.Trim();
-            if (string.IsNullOrWhiteSpace(data.Location))
-            {
-                data.IsValid = false;
-                data.ErrorMessage = "Location is required";
-                return data;
-            }
-
-            data.IsValid = true;
-        }
-        catch (Exception ex)
-        {
-            data.IsValid = false;
-            data.ErrorMessage = $"Error parsing row: {ex.Message}";
-        }
-
-        return data;
-    }
 
     // Internal classes
     internal class SparePartColumnMapping

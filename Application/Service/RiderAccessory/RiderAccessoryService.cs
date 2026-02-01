@@ -1,7 +1,6 @@
 ﻿using Application.Abstraction;
 using Application.Abstraction.Errors;
 using Application.Contracts.RiderAccessoryCon;
-using Application.Contracts.SparePartCo;
 using Domain;
 using Domain.Entities;
 using Domain.Entities.Spare;
@@ -13,10 +12,10 @@ public class RiderAccessoryService(ApplicationDbcontext dbcontext) : IRiderAcces
 {
     private readonly ApplicationDbcontext _dbcontext = dbcontext;
 
-    public async Task<Result<BatchUsageResponse>> RecordBatchRiderAccessoryUsageAsync(
-       BatchRiderAccessoryUsageRequest request)
+    public async Task<Result<Contracts.SparePartCo.BatchUsageResponse>> RecordBatchRiderAccessoryUsageAsync(
+       Contracts.SparePartCo.BatchRiderAccessoryUsageRequest request)
     {
-        var details = new List<UsageResultDetail>();
+        var details = new List<Contracts.SparePartCo.UsageResultDetail>();
         int successCount = 0;
         int failureCount = 0;
 
@@ -32,7 +31,7 @@ public class RiderAccessoryService(ApplicationDbcontext dbcontext) : IRiderAcces
 
                     if (accessory == null)
                     {
-                        details.Add(new UsageResultDetail(
+                        details.Add(new Contracts.SparePartCo.UsageResultDetail(
                             false,
                             $"ID: {usage.AccessoryId}",
                             $"Rider ID: {usage.RiderId}",
@@ -44,7 +43,7 @@ public class RiderAccessoryService(ApplicationDbcontext dbcontext) : IRiderAcces
 
                     if (accessory.Quantity <= 0)
                     {
-                        details.Add(new UsageResultDetail(
+                        details.Add(new Contracts.SparePartCo.UsageResultDetail(
                             false,
                             accessory.Name,
                             $"Rider ID: {usage.RiderId}",
@@ -60,7 +59,7 @@ public class RiderAccessoryService(ApplicationDbcontext dbcontext) : IRiderAcces
 
                     if (rider == null)
                     {
-                        details.Add(new UsageResultDetail(
+                        details.Add(new Contracts.SparePartCo.UsageResultDetail(
                             false,
                             accessory.Name,
                             $"Rider ID: {usage.RiderId}",
@@ -101,7 +100,7 @@ public class RiderAccessoryService(ApplicationDbcontext dbcontext) : IRiderAcces
                     // Update quantity
                     accessory.Quantity--;
 
-                    details.Add(new UsageResultDetail(
+                    details.Add(new Contracts.SparePartCo.UsageResultDetail(
                         true,
                         accessory.Name,
                         rider.Employee.NameEN,
@@ -111,7 +110,7 @@ public class RiderAccessoryService(ApplicationDbcontext dbcontext) : IRiderAcces
                 }
                 catch (Exception ex)
                 {
-                    details.Add(new UsageResultDetail(
+                    details.Add(new Contracts.SparePartCo.UsageResultDetail(
                         false,
                         $"ID: {usage.AccessoryId}",
                         $"Rider ID: {usage.RiderId}",
@@ -124,7 +123,7 @@ public class RiderAccessoryService(ApplicationDbcontext dbcontext) : IRiderAcces
             await _dbcontext.SaveChangesAsync();
             await transaction.CommitAsync();
 
-            var response = new BatchUsageResponse(
+            var response = new Contracts.SparePartCo.BatchUsageResponse(
                 request.Usages.Count,
                 successCount,
                 failureCount,
@@ -136,7 +135,7 @@ public class RiderAccessoryService(ApplicationDbcontext dbcontext) : IRiderAcces
         catch (Exception ex)
         {
             await transaction.RollbackAsync();
-            return Result.Failure<BatchUsageResponse>(
+            return Result.Failure<Contracts.SparePartCo.BatchUsageResponse>(
                 new Error("BatchError", $"Batch operation failed: {ex.Message}", 500));
         }
     }

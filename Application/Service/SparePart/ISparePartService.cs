@@ -8,6 +8,9 @@ namespace Application.Service.SparePart;
 
 public interface ISparePartService
 {
+    Task<Result<ComprehensiveHousingCostReport>> GetAllHousingsCostReportAsync(
+    DateTime fromDate,
+    DateTime toDate);
     Task<Result<IEnumerable<SparePartResponse>>> GetAllAsync();
     Task<Result<IEnumerable<SparePartResponse>>> GetAllAsync2();
     Task<Result<SparePartResponse>> GetByIdAsync(int id);

@@ -25,6 +25,18 @@ public class SparePartController(ISparePartService service) : ControllerBase
         return response.IsSuccess ? Ok(response.Value) : response.ToProblem();
     }
 
+
+    [HttpGet("all-housings/details")]
+    public async Task<IActionResult> GetAllHousingsCostReport(
+     [FromQuery] DateTime fromDate,
+     [FromQuery] DateTime toDate)
+    {
+        var result = await service.GetAllHousingsCostReportAsync(fromDate, toDate);
+
+        return result.IsSuccess
+            ? Ok(result.Value)
+            : result.ToProblem();
+    }
     /// <summary>
     /// Get cost summary for company main stock "الشركة"
     /// </summary>

@@ -3630,7 +3630,7 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
                         .FirstOrDefaultAsync(r => r.Id == usage.RiderId);
 
                     // Create usage record
-                    var accessoryUsage = new RiderAccessoryUsage
+                    var accessoryUsage = new Domain.Entities.Spare.RiderAccessoryUsage
                     {
                         RiderAccessoryId = usage.AccessoryId,
                         RiderId = usage.RiderId,

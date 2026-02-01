@@ -8,6 +8,75 @@ internal class SparePartsDtos
 {
 }
 
+
+// Main Response Model
+public record ComprehensiveHousingCostReport(
+    DateTime FromDate,
+    DateTime ToDate,
+    decimal TotalCompanyCost,
+    decimal TotalCompanySparePartsCost,
+    decimal TotalCompanyAccessoriesCost,
+    List<HousingCostDetail> Housings,
+    CompanyStockDetail CompanyStock
+);
+
+// Housing Detail
+public record HousingCostDetail(
+    int HousingId,
+    string HousingName,
+    decimal TotalHousingCost,
+    decimal TotalSparePartsCost,
+    decimal TotalAccessoriesCost,
+    List<VehicleSparePartUsage> VehicleUsages,
+    List<RiderAccessoryUsage> RiderUsages
+);
+
+// Vehicle Spare Part Usage
+public record VehicleSparePartUsage(
+    string VehicleNumber,
+    string VehiclePlate,
+    string VehicleLocation,
+    List<SparePartUsageItem> SparePartsUsed,
+    decimal TotalVehicleCost
+);
+
+// Spare Part Usage Item
+public record SparePartUsageItem(
+    int UsageId,
+    string SparePartName,
+    int QuantityUsed,
+    decimal UnitPrice,
+    decimal TotalCost,
+    DateTime UsedAt
+);
+
+// Rider Accessory Usage
+public record RiderAccessoryUsage(
+    int RiderId,
+    string RiderWorkingId,
+    string RiderNameEN,
+    string RiderNameAR,
+    long RiderIqamaNo,
+    List<AccessoryUsageItem> AccessoriesUsed,
+    decimal TotalRiderCost
+);
+
+// Accessory Usage Item
+public record AccessoryUsageItem(
+    int UsageId,
+    string AccessoryName,
+    decimal Price,
+    DateTime IssuedAt
+);
+
+// Company Stock Detail
+public record CompanyStockDetail(
+    decimal TotalCost,
+    decimal TotalSparePartsCost,
+    decimal TotalAccessoriesCost,
+    List<VehicleSparePartUsage> VehicleUsages,
+    List<RiderAccessoryUsage> RiderUsages
+);
 public record BatchSparePartUsageRequest(
     List<SparePartUsageItemRequest> Usages
 );
