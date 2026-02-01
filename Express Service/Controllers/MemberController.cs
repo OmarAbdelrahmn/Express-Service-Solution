@@ -15,6 +15,25 @@ public class MemberController(IMemberService housingService) : ControllerBase
 {
     private readonly IMemberService housingService = housingService;
 
+    [HttpPost("transfers")]
+    public async Task<IActionResult> TransferFromHousing([FromBody] MemberTransferRequest request)
+    {
+        var managerIqamaNo = User.GetUserIqamaNo()!;
+        var result = await housingService.TransferFromHousingAsync(managerIqamaNo, request);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    /// <summary>
+    /// Get all transfers made by this housing
+    /// </summary>
+    [HttpGet("transfers")]
+    public async Task<IActionResult> GetHousingTransfers()
+    {
+        var managerIqamaNo = User.GetUserIqamaNo()!;
+        var result = await housingService.GetHousingTransfersAsync(managerIqamaNo);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
     #region Spare Parts
     /// <summary>
     /// Get all spare parts in housing inventory

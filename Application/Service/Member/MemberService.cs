@@ -3,6 +3,7 @@ using Application.Abstraction.Errors;
 using Application.Authentication;
 using Application.Contracts.RiderAccessoryCon;
 using Application.Contracts.SparePartCo;
+using Application.Contracts.SupplierCon;
 using Application.Service.Empolyee;
 using Application.Service.Reports;
 using Domain;
@@ -4100,6 +4101,266 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
         );
 
         return Result.Success(response);
+    }
+
+    #endregion
+
+    // Add these methods to the MemberService class
+
+    #region Transfer Management
+
+    private const string MAIN_LOCATION = "الشركة";
+
+    public async Task<Result<TransferResponse>> TransferFromHousingAsync(
+        long managerIqamaNo,
+        MemberTransferRequest request)
+    {
+        var housingResult = await GetManagedHousing(managerIqamaNo);
+        if (housingResult.IsFailure)
+            return Result.Failure<TransferResponse>(housingResult.Error);
+
+        var housing = housingResult.Value;
+
+        // Validate destination
+        string toLocation;
+        int? toHousingId;
+
+        if (request.ToHousingId.HasValue)
+        {
+            var destinationHousing = await context.Housings
+                .FirstOrDefaultAsync(h => h.Id == request.ToHousingId.Value);
+
+            if (destinationHousing == null)
+                return Result.Failure<TransferResponse>(
+                    new Error("DestinationNotFound", "Destination housing not found", 404));
+
+            toLocation = destinationHousing.Name;
+            toHousingId = destinationHousing.Id;
+        }
+        else
+        {
+            // Transfer to main company
+            toLocation = MAIN_LOCATION;
+            toHousingId = null;
+        }
+
+        if (request.Items == null || !request.Items.Any())
+            return Result.Failure<TransferResponse>(
+                new Error("NoItems", "Transfer must contain at least one item", 400));
+
+        using var transaction = await context.Database.BeginTransactionAsync();
+
+        try
+        {
+            var transferItems = new List<TransferItem>();
+
+            foreach (var item in request.Items)
+            {
+                var transferItem = await ProcessMemberTransferItem(
+                    item,
+                    housing.Name,
+                    toLocation);
+
+                if (transferItem == null)
+                    return Result.Failure<TransferResponse>(
+                        new Error("ItemNotFound",
+                            $"Item with ID {item.ItemId} and type {item.ItemType} not found in your housing inventory or insufficient quantity", 404));
+
+                transferItems.Add(transferItem);
+            }
+
+            // Get manager name
+            var manager = await context.Employees
+                .FirstOrDefaultAsync(e => e.IqamaNo == managerIqamaNo);
+
+            if (manager == null)
+                return Result.Failure<TransferResponse>(UserErrors.UserNotFound);
+
+            // Create transfer record
+            var transfer = new Domain.Entities.Spare.Transfer
+            {
+                FromLocation = housing.Name,
+                ToLocation = toLocation,
+                HousingId = toHousingId ?? 0,
+                TransferredBy = manager.NameAR,
+                TransferredAt = DateTime.UtcNow.AddHours(3),
+                TransferItems = transferItems
+            };
+
+            await context.Transfers.AddAsync(transfer);
+            await context.SaveChangesAsync();
+            await transaction.CommitAsync();
+
+            // Reload for response
+            transfer = await context.Transfers
+                .Include(t => t.TransferItems)
+                .FirstAsync(t => t.Id == transfer.Id);
+
+            return Result.Success(MapTransferToResponse(transfer));
+        }
+        catch (Exception ex)
+        {
+            await transaction.RollbackAsync();
+            return Result.Failure<TransferResponse>(
+                new Error("TransferError", $"Failed to transfer items: {ex.Message}", 500));
+        }
+    }
+
+    private async Task<TransferItem?> ProcessMemberTransferItem(
+        MemberTransferItemRequest request,
+        string fromLocation,
+        string toLocation)
+    {
+        if (request.ItemType == TransferItemType.SparePart)
+        {
+            return await ProcessMemberSparePartTransfer(request, fromLocation, toLocation);
+        }
+        else if (request.ItemType == TransferItemType.Accessory)
+        {
+            return await ProcessMemberAccessoryTransfer(request, fromLocation, toLocation);
+        }
+
+        return null;
+    }
+
+    private async Task<TransferItem?> ProcessMemberSparePartTransfer(
+        MemberTransferItemRequest request,
+        string fromLocation,
+        string toLocation)
+    {
+        // Get from housing location
+        var fromSparePart = await context.SpareParts
+            .FirstOrDefaultAsync(sp => sp.Id == request.ItemId &&
+                                      sp.Location == fromLocation);
+
+        if (fromSparePart == null || fromSparePart.Quantity < request.Quantity)
+            return null;
+
+        // Check if item exists in destination location
+        var toSparePart = await context.SpareParts
+            .FirstOrDefaultAsync(sp => sp.Name == fromSparePart.Name &&
+                                      sp.Location == toLocation);
+
+        if (toSparePart != null)
+        {
+            // Add to existing
+            toSparePart.Quantity += request.Quantity;
+        }
+        else
+        {
+            // Create new in destination
+            toSparePart = new Domain.Entities.Spare.SparePart
+            {
+                Name = fromSparePart.Name,
+                Quantity = request.Quantity,
+                Price = fromSparePart.Price,
+                Location = toLocation,
+                CreatedAt = DateTime.UtcNow.AddHours(3)
+            };
+            await context.SpareParts.AddAsync(toSparePart);
+        }
+
+        // Reduce from housing location
+        fromSparePart.Quantity -= request.Quantity;
+
+        return new TransferItem
+        {
+            ItemId = fromSparePart.Id,
+            ItemName = fromSparePart.Name,
+            ItemType = TransferItemType.SparePart,
+            Quantity = request.Quantity
+        };
+    }
+
+    private async Task<TransferItem?> ProcessMemberAccessoryTransfer(
+        MemberTransferItemRequest request,
+        string fromLocation,
+        string toLocation)
+    {
+        // Get from housing location
+        var fromAccessory = await context.RiderAccessories
+            .FirstOrDefaultAsync(a => a.Id == request.ItemId &&
+                                     a.Location == fromLocation);
+
+        if (fromAccessory == null || fromAccessory.Quantity < request.Quantity)
+            return null;
+
+        // Check if item exists in destination location
+        var toAccessory = await context.RiderAccessories
+            .FirstOrDefaultAsync(a => a.Name == fromAccessory.Name &&
+                                     a.Location == toLocation);
+
+        if (toAccessory != null)
+        {
+            // Add to existing
+            toAccessory.Quantity += request.Quantity;
+        }
+        else
+        {
+            // Create new in destination
+            toAccessory = new Domain.Entities.Spare.RiderAccessory
+            {
+                Name = fromAccessory.Name,
+                Quantity = request.Quantity,
+                Price = fromAccessory.Price,
+                Location = toLocation,
+                CreatedAt = DateTime.UtcNow.AddHours(3)
+            };
+            await context.RiderAccessories.AddAsync(toAccessory);
+        }
+
+        // Reduce from housing location
+        fromAccessory.Quantity -= request.Quantity;
+
+        return new TransferItem
+        {
+            ItemId = fromAccessory.Id,
+            ItemName = fromAccessory.Name,
+            ItemType = TransferItemType.Accessory,
+            Quantity = request.Quantity
+        };
+    }
+
+    public async Task<Result<IEnumerable<TransferResponse>>> GetHousingTransfersAsync(
+        long managerIqamaNo)
+    {
+        var housingResult = await GetManagedHousing(managerIqamaNo);
+        if (housingResult.IsFailure)
+            return Result.Failure<IEnumerable<TransferResponse>>(housingResult.Error);
+
+        var housing = housingResult.Value;
+
+        // Get all transfers from this housing
+        var transfers = await context.Transfers
+            .Include(t => t.TransferItems)
+            .Where(t => t.FromLocation == housing.Name)
+            .OrderByDescending(t => t.TransferredAt)
+            .AsNoTracking()
+            .ToListAsync();
+
+        var response = transfers.Select(MapTransferToResponse);
+        return Result.Success<IEnumerable<TransferResponse>>(response);
+    }
+
+    private static TransferResponse MapTransferToResponse(Domain.Entities.Spare.Transfer transfer)
+    {
+        var items = transfer.TransferItems.Select(ti => new TransferItemResponse(
+            ti.ItemId,
+            ti.ItemName,
+            ti.ItemType,
+            ti.Quantity
+        )).ToList();
+
+        return new TransferResponse(
+            transfer.Id,
+            transfer.FromLocation,
+            transfer.ToLocation,
+            transfer.HousingId,
+            transfer.TransferItems.Sum(ti => ti.Quantity),
+            transfer.TransferredBy,
+            transfer.TransferredAt,
+            items
+        );
     }
 
     #endregion

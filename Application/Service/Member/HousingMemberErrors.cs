@@ -96,4 +96,30 @@ public static class HousingMemberErrors
         "There is already a pending switch request for this rider",
         StatusCodes.Status400BadRequest
     );
+
+    // Add these error definitions to the HousingMemberErrors class
+
+    public static readonly Error InsufficientInventory = new(
+        "HousingMember.InsufficientInventory",
+        "Insufficient quantity in housing inventory",
+        StatusCodes.Status400BadRequest
+    );
+
+    public static readonly Error DestinationHousingNotFound = new(
+        "HousingMember.DestinationHousingNotFound",
+        "Destination housing not found",
+        StatusCodes.Status404NotFound
+    );
+
+    public static readonly Error ItemNotFoundInInventory = new(
+        "HousingMember.ItemNotFoundInInventory",
+        "Item not found in your housing inventory",
+        StatusCodes.Status404NotFound
+    );
+
+    public static readonly Error EmptyTransfer = new(
+        "HousingMember.EmptyTransfer",
+        "Transfer must contain at least one item",
+        StatusCodes.Status400BadRequest
+    );
 }

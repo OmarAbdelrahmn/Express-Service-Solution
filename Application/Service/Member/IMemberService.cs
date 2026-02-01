@@ -1,8 +1,10 @@
 ﻿using Application.Abstraction;
 using Application.Contracts.RiderAccessoryCon;
 using Application.Contracts.SparePartCo;
+using Application.Contracts.SupplierCon;
 using Application.Service.Reports;
 using Application.Service.Riders;
+using Domain.Entities.Spare;
 using System;
 using System.Collections.Generic;
 using System.Text;
@@ -14,7 +16,31 @@ public interface IMemberService
 {
     // Add to IMemberService interface
 
+    /// <summary>
+    /// Transfer spare parts and accessories from housing to another housing or back to main company
+    /// </summary>
+    Task<Result<TransferResponse>> TransferFromHousingAsync(
+        long managerIqamaNo,
+        MemberTransferRequest request);
 
+    /// <summary>
+    /// Get all transfers made by this housing
+    /// </summary>
+    Task<Result<IEnumerable<TransferResponse>>> GetHousingTransfersAsync(
+        long managerIqamaNo);
+
+    // Add these records at the end of IMemberService.cs
+
+    public record MemberTransferRequest(
+        int? ToHousingId,  // null means transfer to main company "الشركة"
+        List<MemberTransferItemRequest> Items
+    );
+
+    public record MemberTransferItemRequest(
+        int ItemId,
+        TransferItemType ItemType,
+        int Quantity
+    );
 
     /// <summary>
     /// Request to switch rider's current vehicle to a new one
