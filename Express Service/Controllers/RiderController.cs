@@ -24,6 +24,16 @@ public class RiderController(IRiderService service) : ControllerBase
         return result.IsSuccess
             ? Ok(result.Value) : result.ToProblem();
     }
+    [HttpGet("vehicle")]
+    [Authorize(Roles = "Master,Admin,Member")]
+ 
+    public async Task<IActionResult> getridervehicel(long iqamaNo)
+    {
+        var result = await service.GetRiderVehicle(iqamaNo);
+        
+        return result.IsSuccess
+            ? Ok(result.Value) : result.ToProblem();
+    }
     [HttpGet("2")]
     [Authorize(Roles = "Master,Admin,Member")]
  

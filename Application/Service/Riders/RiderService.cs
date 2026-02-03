@@ -20,6 +20,58 @@ public class RiderService(ApplicationDbcontext dbcontext,IRiderWorkingIdHistoryS
     private readonly ApplicationDbcontext dbcontext = dbcontext;
     private readonly IRiderWorkingIdHistoryService _workingIdHistoryService = workingIdHistoryService;
 
+    public async Task<Result<VehicleResponse>> GetRiderVehicle(long IqamaNo)
+    {
+        try
+        {
+            var employee = await dbcontext.Employees
+                .Where(e => !e.IsDeleted && e.IqamaNo == IqamaNo)
+                .Include(e => e.RiderDetails)
+                    .ThenInclude(rd => rd.Vehicle)
+                .AsNoTracking()
+                .FirstOrDefaultAsync();
+
+            if (employee is null)
+                return Result.Failure<VehicleResponse>(
+                    new Error("NotFound", "Employee/Rider not found with this Iqama", 404));
+
+            if (employee.RiderDetails is null)
+                return Result.Failure<VehicleResponse>(
+                    new Error("NotFound", "This employee is not a rider", 404));
+
+            if (employee.RiderDetails.Vehicle is null)
+                return Result.Failure<VehicleResponse>(
+                    new Error("NotFound", "No vehicle assigned to this rider", 404));
+
+            var vehicle = employee.RiderDetails.Vehicle;
+
+            var response = new VehicleResponse(
+                VehicleType: vehicle.VehicleType,
+                VehicleNumber: vehicle.VehicleNumber,
+                SerialNumber: vehicle.SerialNumber,
+                PlateNumberA: vehicle.PlateNumberA,
+                OwnerId: vehicle.OwnerId,
+                OwnerName: vehicle.OwnerName,
+                PlateNumberE: vehicle.PlateNumberE,
+                ManufactureYear: vehicle.ManufactureYear,
+                Manufacturer: vehicle.Manufacturer,
+                LicenseExpiryDate: vehicle.LicenseExpiryDate,
+                VehicleImagePath: vehicle.VehicleImagePath,
+                LicenseImagePath: vehicle.LicenseImagePath,
+                ExstraImage: vehicle.ExstraImage,
+                ExstraImage1: vehicle.ExstraImage1,
+                CreatedAt: vehicle.CreatedAt,
+                Location: vehicle.Location
+            );
+
+            return Result.Success(response);
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<VehicleResponse>(
+                new Error("ServerError", $"Error retrieving rider vehicle: {ex.Message}", 500));
+        }
+    }
     public async Task<Result<EmployeeStatisticsResponse>> GetEmployeeStatistics()
     {
         try

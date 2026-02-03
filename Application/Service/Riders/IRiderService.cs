@@ -23,7 +23,7 @@ public interface IRiderService
     Task<Result> AddETOR(long IqamaNo, EMTOR request );
     Task<Result<EmployeeStatisticsResponse>> GetEmployeeStatistics();
     Task<Result<IEnumerable<RiderResponse>>> Filter(EmployeeFilterr filter);
-
+    Task<Result<VehicleResponse>> GetRiderVehicle(long IqamaNo);
 }
 public record EmployeeStatisticsResponse(
     int Total,
