@@ -19,6 +19,8 @@ public interface IFreelancerService
 }
 
 // Response DTOs
+
+// Response DTOs
 public record KetaFreelancerImportResponse(
     int TotalRecords,
     int SuccessfulImports,
@@ -32,6 +34,10 @@ public record KetaFreelancerImportRowResult(
     int RowNumber,
     bool Success,
     string WorkingId,
+    string RiderNameEN,
+    string RiderNameAR,
+    long? IqamaNo,
+    string? HousingName,
     string Month,
     int TotalOrders,
     bool Created,
@@ -40,10 +46,18 @@ public record KetaFreelancerImportRowResult(
     string? ErrorMessage
 );
 
+
 public record KetaFreelancerResponse(
     int Id,
+    int RiderId,
     string WorkingId,
+    string RiderNameEN,
+    string RiderNameAR,
+    long IqamaNo,
+    string? HousingName,
     string Month,
     int TotalOrders,
     DateTime CreatedAt
 );
+
+

@@ -2,6 +2,7 @@
 using ClosedXML.Excel;
 using Domain;
 using Domain.Entities;
+using Domain.Migrations;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using System;
@@ -13,6 +14,7 @@ namespace Application.Service.Freelancer;
 
 public class FreelancerService(ApplicationDbcontext dbcontext) : IFreelancerService
 {
+
 
     public async Task<Result<KetaFreelancerImportResponse>> ImportKetaFreelancersFromExcelAsync(
         IFormFile file,
@@ -99,16 +101,20 @@ public class FreelancerService(ApplicationDbcontext dbcontext) : IFreelancerServ
                     {
                         failedRecords++;
                         results.Add(new KetaFreelancerImportRowResult(
-                            rowNumber,
-                            false,
-                            rowData.WorkingId ?? "N/A",
-                            rowData.Month ?? "N/A",
-                            0,
-                            false,
-                            false,
-                            new List<string>(),
-                            rowData.ErrorMessage
-                        ));
+                        rowNumber,
+                        false,
+                        "N/A",
+                        "N/A",
+                        "N/A",
+                        0,
+                        "N/A",
+                        "N/A",
+                        0,
+                        false,
+                        false,
+                        new List<string>(),
+                        $"Exception: {rowData.ErrorMessage}"
+                    ));
                         continue;
                     }
 
@@ -140,6 +146,10 @@ public class FreelancerService(ApplicationDbcontext dbcontext) : IFreelancerServ
                         false,
                         "N/A",
                         "N/A",
+                        "N/A",
+                        0,
+                        "N/A",
+                        "N/A",
                         0,
                         false,
                         false,
@@ -163,10 +173,42 @@ public class FreelancerService(ApplicationDbcontext dbcontext) : IFreelancerServ
                     var data = kvp.Value;
                     var warnings = new List<string>();
 
+                    // Find the rider by WorkingId
+                    var rider = await dbcontext.RiderDetails
+                        .Include(r => r.Employee)
+                            .ThenInclude(e => e.Housing)
+                        .FirstOrDefaultAsync(r => r.WorkingId == data.WorkingId, cancellationToken);
+
+                    if (rider == null)
+                    {
+                        failedRecords++;
+                        errors.Add($"WorkingId {data.WorkingId} not found in RiderDetails");
+
+                        results.Add(new KetaFreelancerImportRowResult(
+                            processedRow,
+                            false,
+                            data.WorkingId!,
+                            "N/A",
+                            "N/A",
+                            null,
+                            null,
+                            data.Month!,
+                            data.TotalOrders,
+                            false,
+                            false,
+                            new List<string>(),
+                            $"Rider with WorkingId '{data.WorkingId}' not found"
+                        ));
+
+                        await transaction.RollbackAsync(cancellationToken);
+                        processedRow++;
+                        continue;
+                    }
+
                     // Check if record already exists
                     var existing = await dbcontext.KetaFreeLancers
                         .FirstOrDefaultAsync(k =>
-                            k.WorkingId == data.WorkingId &&
+                            k.RiderId == rider.Id &&
                             k.Month == data.Month,
                             cancellationToken);
 
@@ -178,6 +220,7 @@ public class FreelancerService(ApplicationDbcontext dbcontext) : IFreelancerServ
                         // Create new record
                         var ketaFreelancer = new KetaFreeLancer
                         {
+                            RiderId = rider.Id,
                             WorkingId = data.WorkingId!,
                             Month = data.Month!,
                             TotalOrders = data.TotalOrders,
@@ -206,6 +249,10 @@ public class FreelancerService(ApplicationDbcontext dbcontext) : IFreelancerServ
                         processedRow,
                         true,
                         data.WorkingId!,
+                        rider.Employee.NameEN,
+                        rider.Employee.NameAR,
+                        rider.Employee.IqamaNo,
+                        rider.Employee.Housing?.Name,
                         data.Month!,
                         data.TotalOrders,
                         created,
@@ -214,7 +261,7 @@ public class FreelancerService(ApplicationDbcontext dbcontext) : IFreelancerServ
                         null
                     ));
 
-                    Console.WriteLine($"[KetaFreelancer] ✓ Processed {data.WorkingId} for {data.Month} - Total Orders: {data.TotalOrders}");
+                    Console.WriteLine($"[KetaFreelancer] ✓ Processed {data.WorkingId} ({rider.Employee.NameEN}) for {data.Month} - Total Orders: {data.TotalOrders}");
                 }
                 catch (Exception ex)
                 {
@@ -226,6 +273,10 @@ public class FreelancerService(ApplicationDbcontext dbcontext) : IFreelancerServ
                         processedRow,
                         false,
                         kvp.Value.WorkingId ?? "N/A",
+                        "N/A",
+                        "N/A",
+                        null,
+                        null,
                         kvp.Value.Month ?? "N/A",
                         kvp.Value.TotalOrders,
                         false,
@@ -279,6 +330,9 @@ public class FreelancerService(ApplicationDbcontext dbcontext) : IFreelancerServ
             Console.WriteLine($"[KetaFreelancer] Retrieving records for month: {month}");
 
             var freelancers = await dbcontext.KetaFreeLancers
+                .Include(k => k.Rider)
+                    .ThenInclude(r => r.Employee)
+                        .ThenInclude(e => e.Housing)
                 .Where(k => k.Month == month)
                 .OrderBy(k => k.WorkingId)
                 .AsNoTracking()
@@ -292,7 +346,12 @@ public class FreelancerService(ApplicationDbcontext dbcontext) : IFreelancerServ
 
             var responses = freelancers.Select(k => new KetaFreelancerResponse(
                 k.Id,
+                k.RiderId,
                 k.WorkingId,
+                k.Rider.Employee.NameEN,
+                k.Rider.Employee.NameAR,
+                k.Rider.Employee.IqamaNo,
+                k.Rider.Employee.Housing?.Name,
                 k.Month,
                 k.TotalOrders,
                 k.CreatedAt
@@ -584,3 +643,4 @@ public class FreelancerService(ApplicationDbcontext dbcontext) : IFreelancerServ
         public int TotalOrders { get; set; }
     }
 }
+
