@@ -1,10 +1,12 @@
-﻿using Application.Service.Backgroundimports;
+﻿using Application.Extensions;
+using Application.Service.Backgroundimports;
 using Application.Service.Import;
 using k8s.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Timeouts;
 using Microsoft.AspNetCore.Mvc;
+using static Application.Service.Import.IImportService;
 using static Application.Service.Import.ImportService;
 
 namespace Express_Service.Controllers;
@@ -15,6 +17,33 @@ public class ImportController(IImportService service , IBackgroundImportService 
 {
     private readonly IImportService service = service;
     private readonly IBackgroundImportService service1 = service1;
+
+
+
+    [HttpPost("sub")]
+    [Authorize]
+    public async Task<IActionResult> SyncSubstitutionsFromExcel(
+        IFormFile file,
+        CancellationToken cancellationToken = default)
+    {
+        if (file == null || file.Length == 0)
+            return BadRequest(new { Error = "File is required" });
+
+        if (!file.FileName.EndsWith(".xlsx") && !file.FileName.EndsWith(".xls"))
+            return BadRequest(new { Error = "File must be Excel format (.xlsx or .xls)" });
+
+        var uploadedBy = User.GetUserId();
+
+        var result = await service.SyncSubstitutionsFromExcelAsync(
+            file,
+            uploadedBy!,
+            cancellationToken);
+
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+
+
 
     [HttpPost("rider-shifts/start")]
     [DisableRequestSizeLimit]

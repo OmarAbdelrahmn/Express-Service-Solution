@@ -13,7 +13,44 @@ public interface IImportService
     Task<Result<SparePartImportResponse>> ImportSparePartsAsync(IFormFile file, string uploadedBy);
     Task<Result<RiderAccessoryImportResponse>> ImportRiderAccessoriesAsync(IFormFile file, string uploadedBy);
 
+    Task<Result<SubstitutionImportResponse>> SyncSubstitutionsFromExcelAsync(
+     IFormFile file,
+     string uploadedBy,
+     CancellationToken cancellationToken = default);
 
+    public record SubstitutionImportResponse(
+    int TotalRecordsInExcel,
+    int ActiveSubstitutionsCreated,
+    int ActiveSubstitutionsRetained,
+    int ActiveSubstitutionsStopped,
+    int ValidationErrors,
+    int ActualRiderNotFound,
+    int SubstituteRiderNotFound,
+    List<SubstitutionImportDetail> Details,
+    List<string> ProcessingErrors,
+    DateTime ProcessedAt
+);
+
+    public record SubstitutionImportDetail(
+        int RowNumber,
+        string ActualRiderWorkingId,
+        string SubstituteWorkingId,
+        SubstitutionImportStatus Status,
+        string? Action,
+        string? ActualRiderName,
+        string? SubstituteRiderName,
+        string? ErrorMessage
+    );
+
+    public enum SubstitutionImportStatus
+    {
+        Created = 1,           // New substitution created
+        Retained = 2,          // Already exists, kept active
+        Stopped = 3,           // Was active but not in Excel, stopped
+        ActualRiderNotFound = 4,
+        SubstituteRiderNotFound = 5,
+        ValidationError = 6
+    }
     Task<Result<VehicleRelocationImportResponse>> ImportVehicleRelocationsAsync(
     IFormFile file,
     string uploadedBy);

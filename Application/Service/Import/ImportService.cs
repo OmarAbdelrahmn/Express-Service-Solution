@@ -1,6 +1,7 @@
 ﻿using Application.Abstraction;
 using Application.Service.Backgroundimports;
 using Application.Service.Empolyee;
+using Application.Service.Riders;
 using ClosedXML.Excel;
 using Domain;
 using Domain.Entities;
@@ -12,13 +13,473 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
+using static Application.Service.Import.IImportService;
 using static Application.Service.Import.ImportService;
 
 namespace Application.Service.Import;
 
-public class ImportService(ApplicationDbcontext dbcontext) : IImportService
+public class ImportService(ApplicationDbcontext dbcontext , IRiderSub riderSub) : IImportService
 {
     private readonly ApplicationDbcontext _dbcontext = dbcontext;
+    private readonly IRiderSub riderSub = riderSub;
+
+    public async Task<Result<SubstitutionImportResponse>> SyncSubstitutionsFromExcelAsync(
+    IFormFile file,
+    string uploadedBy,
+    CancellationToken cancellationToken = default)
+    {
+        if (file == null || file.Length == 0)
+            return Result.Failure<SubstitutionImportResponse>(
+                new Error("InvalidFile", "File is empty or null", 400));
+
+        if (!file.FileName.EndsWith(".xlsx") && !file.FileName.EndsWith(".xls"))
+            return Result.Failure<SubstitutionImportResponse>(
+                new Error("InvalidFormat", "File must be Excel format (.xlsx or .xls)", 400));
+
+        var details = new List<SubstitutionImportDetail>();
+        var errors = new List<string>();
+
+        int activeSubstitutionsCreated = 0;
+        int activeSubstitutionsRetained = 0;
+        int activeSubstitutionsStopped = 0;
+        int validationErrors = 0;
+        int actualRiderNotFound = 0;
+        int substituteRiderNotFound = 0;
+
+        try
+        {
+            Console.WriteLine($"[SubstitutionImport] Starting sync for file: {file.FileName}");
+
+            using var stream = file.OpenReadStream();
+            using var workbook = new XLWorkbook(stream);
+            var worksheet = workbook.Worksheet(1);
+
+            if (worksheet == null)
+            {
+                Console.WriteLine("[SubstitutionImport] ERROR: Could not read worksheet");
+                return Result.Failure<SubstitutionImportResponse>(
+                    new Error("InvalidWorksheet", "Could not read worksheet", 400));
+            }
+
+            Console.WriteLine($"[SubstitutionImport] Worksheet loaded: {worksheet.Name}");
+
+            var headerRow = FindSubstitutionHeaderRow(worksheet);
+            if (headerRow == null)
+            {
+                Console.WriteLine("[SubstitutionImport] ERROR: No header row found");
+                return Result.Failure<SubstitutionImportResponse>(
+                    new Error("EmptyFile", "Excel file has no header row", 400));
+            }
+
+            Console.WriteLine($"[SubstitutionImport] Header row found at row {headerRow.RowNumber()}");
+
+            var columnMap = BuildSubstitutionColumnMapping(headerRow);
+            if (!columnMap.IsValid)
+            {
+                Console.WriteLine($"[SubstitutionImport] ERROR: Invalid columns - {columnMap.ErrorMessage}");
+                return Result.Failure<SubstitutionImportResponse>(
+                    new Error("InvalidColumns", columnMap.ErrorMessage!, 400));
+            }
+
+            Console.WriteLine($"[SubstitutionImport] Column mapping successful");
+
+            var dataRows = worksheet.RowsUsed()
+                .Where(r => r.RowNumber() > headerRow.RowNumber())
+                .ToList();
+
+            var totalRows = dataRows.Count;
+            Console.WriteLine($"[SubstitutionImport] Total data rows to process: {totalRows}");
+
+            if (totalRows == 0)
+            {
+                Console.WriteLine("[SubstitutionImport] WARNING: No data rows found");
+                return Result.Failure<SubstitutionImportResponse>(
+                    new Error("EmptyFile", "No data rows found in Excel file", 400));
+            }
+
+            // STEP 1: Parse all valid rows from Excel
+            var excelSubstitutions = new HashSet<(string ActualWorkingId, string SubstituteWorkingId)>(
+                EqualityComparer<(string ActualWorkingId, string SubstituteWorkingId)>.Create(
+                    (x, y) =>
+                        string.Equals(x.ActualWorkingId, y.ActualWorkingId, StringComparison.OrdinalIgnoreCase) &&
+                        string.Equals(x.SubstituteWorkingId, y.SubstituteWorkingId, StringComparison.OrdinalIgnoreCase),
+                    obj =>
+                        (obj.ActualWorkingId?.ToLowerInvariant().GetHashCode() ?? 0) ^
+                        (obj.SubstituteWorkingId?.ToLowerInvariant().GetHashCode() ?? 0)
+                )
+            );
+            var rowNumber = headerRow.RowNumber();
+
+            foreach (var row in dataRows)
+            {
+                rowNumber++;
+
+                try
+                {
+                    var rowData = ParseSubstitutionRowData(row, columnMap, rowNumber);
+
+                    if (!rowData.IsValid)
+                    {
+                        validationErrors++;
+                        details.Add(new SubstitutionImportDetail(
+                            rowNumber,
+                            rowData.ActualRiderWorkingId ?? "N/A",
+                            rowData.SubstituteWorkingId ?? "N/A",
+                            SubstitutionImportStatus.ValidationError,
+                            null,
+                            null,
+                            null,
+                            rowData.ErrorMessage
+                        ));
+                        continue;
+                    }
+
+                    // Add to Excel substitutions set (case-insensitive)
+                    var key = (rowData.ActualRiderWorkingId!.Trim(), rowData.SubstituteWorkingId!.Trim());
+                    excelSubstitutions.Add(key);
+                }
+                catch (Exception ex)
+                {
+                    validationErrors++;
+                    errors.Add($"Row {rowNumber}: {ex.Message}");
+
+                    details.Add(new SubstitutionImportDetail(
+                        rowNumber,
+                        "N/A",
+                        "N/A",
+                        SubstitutionImportStatus.ValidationError,
+                        null,
+                        null,
+                        null,
+                        $"Processing error: {ex.Message}"
+                    ));
+                }
+            }
+
+            Console.WriteLine($"[SubstitutionImport] Valid substitutions in Excel: {excelSubstitutions.Count}");
+
+            // STEP 2: Get all currently active substitutions from database
+            var currentActiveSubstitutions = await _dbcontext.RiderShiftSubstitutions
+                .Where(s => s.IsActive)
+                .ToListAsync(cancellationToken);
+
+            Console.WriteLine($"[SubstitutionImport] Current active substitutions in DB: {currentActiveSubstitutions.Count}");
+
+            // STEP 3: Stop substitutions that are NOT in Excel
+            foreach (var current in currentActiveSubstitutions)
+            {
+                var key = (current.ActualRiderWorkingId.Trim(), current.SubstituteWorkingId.Trim());
+
+                // If this substitution is NOT in Excel, stop it
+                if (!excelSubstitutions.Contains(key))
+                {
+                    Console.WriteLine($"[SubstitutionImport] Stopping substitution: {current.ActualRiderWorkingId} -> {current.SubstituteWorkingId} (not in Excel)");
+
+                    var stopResult = await riderSub.StopSubstitutionByWorkingId(
+                        current.ActualRiderWorkingId,
+                        cancellationToken);
+
+                    if (stopResult.IsSuccess)
+                    {
+                        activeSubstitutionsStopped++;
+                        Console.WriteLine($"[SubstitutionImport] ✓ Stopped substitution for {current.ActualRiderWorkingId}");
+                    }
+                    else
+                    {
+                        errors.Add($"Failed to stop substitution {current.ActualRiderWorkingId} -> {current.SubstituteWorkingId}: {stopResult.Error.Description}");
+                    }
+                }
+            }
+
+            // STEP 4: Process each substitution from Excel
+            rowNumber = headerRow.RowNumber();
+
+            foreach (var row in dataRows)
+            {
+                rowNumber++;
+
+                var rowData = ParseSubstitutionRowData(row, columnMap, rowNumber);
+
+                if (!rowData.IsValid)
+                    continue; // Already handled in STEP 1
+
+                try
+                {
+                    var actualWorkingId = rowData.ActualRiderWorkingId!.Trim();
+                    var substituteWorkingId = rowData.SubstituteWorkingId!.Trim();
+
+                    // Check if this substitution already exists and is active
+                    var existingSubstitution = await _dbcontext.RiderShiftSubstitutions
+                        .Include(s => s.ActualRider)
+                            .ThenInclude(r => r.Employee)
+                        .Include(s => s.SubstituteRider)
+                            .ThenInclude(r => r.Employee)
+                        .FirstOrDefaultAsync(s =>
+                            s.ActualRiderWorkingId == actualWorkingId &&
+                            s.SubstituteWorkingId == substituteWorkingId &&
+                            s.IsActive,
+                            cancellationToken);
+
+                    if (existingSubstitution != null)
+                    {
+                        // Already exists - retain it
+                        activeSubstitutionsRetained++;
+
+                        var actualRiderName = existingSubstitution.ActualRider?.Employee?.NameEN
+                            ?? $"Unassigned WorkingId [{actualWorkingId}]";
+                        var substituteRiderName = existingSubstitution.SubstituteRider.Employee.NameEN;
+
+                        details.Add(new SubstitutionImportDetail(
+                            rowNumber,
+                            actualWorkingId,
+                            substituteWorkingId,
+                            SubstitutionImportStatus.Retained,
+                            "Already active - retained",
+                            actualRiderName,
+                            substituteRiderName,
+                            null
+                        ));
+
+                        Console.WriteLine($"[SubstitutionImport] ✓ Retained existing: {actualWorkingId} -> {substituteWorkingId}");
+                        continue;
+                    }
+
+                    // Create new substitution using the existing service
+                    var request = new StartSubstitutionRequest(
+                        ActualRiderWorkingId: actualWorkingId,
+                        SubstituteWorkingId: substituteWorkingId,
+                        Reason: uploadedBy,
+                        CreatedBy: uploadedBy
+                    );
+
+                    var createResult = await riderSub.StartSubstitution(request, cancellationToken);
+
+                    if (createResult.IsSuccess)
+                    {
+                        activeSubstitutionsCreated++;
+
+                        details.Add(new SubstitutionImportDetail(
+                            rowNumber,
+                            actualWorkingId,
+                            substituteWorkingId,
+                            SubstitutionImportStatus.Created,
+                            "New substitution created",
+                            createResult.Value.ActualRiderName,
+                            createResult.Value.SubstituteRiderName,
+                            null
+                        ));
+
+                        Console.WriteLine($"[SubstitutionImport] ✓ Created: {actualWorkingId} -> {substituteWorkingId}");
+                    }
+                    else
+                    {
+                        // Determine error type
+                        var errorMessage = createResult.Error.Description;
+                        SubstitutionImportStatus status;
+
+                        if (errorMessage.Contains("Substitute rider not found"))
+                        {
+                            status = SubstitutionImportStatus.SubstituteRiderNotFound;
+                            substituteRiderNotFound++;
+                        }
+                        else if (errorMessage.Contains("not found") || errorMessage.Contains("NotFound"))
+                        {
+                            status = SubstitutionImportStatus.ActualRiderNotFound;
+                            actualRiderNotFound++;
+                        }
+                        else
+                        {
+                            status = SubstitutionImportStatus.ValidationError;
+                            validationErrors++;
+                        }
+
+                        details.Add(new SubstitutionImportDetail(
+                            rowNumber,
+                            actualWorkingId,
+                            substituteWorkingId,
+                            status,
+                            null,
+                            null,
+                            null,
+                            errorMessage
+                        ));
+
+                        errors.Add($"Row {rowNumber}: {errorMessage}");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    validationErrors++;
+                    errors.Add($"Row {rowNumber}: {ex.Message}");
+
+                    details.Add(new SubstitutionImportDetail(
+                        rowNumber,
+                        rowData.ActualRiderWorkingId ?? "N/A",
+                        rowData.SubstituteWorkingId ?? "N/A",
+                        SubstitutionImportStatus.ValidationError,
+                        null,
+                        null,
+                        null,
+                        $"Exception: {ex.InnerException.Message}"
+                    ));
+                }
+            }
+
+            Console.WriteLine($"[SubstitutionImport] Sync complete:");
+            Console.WriteLine($"  - Total in Excel: {totalRows}");
+            Console.WriteLine($"  - Created: {activeSubstitutionsCreated}");
+            Console.WriteLine($"  - Retained: {activeSubstitutionsRetained}");
+            Console.WriteLine($"  - Stopped (not in Excel): {activeSubstitutionsStopped}");
+            Console.WriteLine($"  - Validation Errors: {validationErrors}");
+
+            var response = new SubstitutionImportResponse(
+                TotalRecordsInExcel: totalRows,
+                ActiveSubstitutionsCreated: activeSubstitutionsCreated,
+                ActiveSubstitutionsRetained: activeSubstitutionsRetained,
+                ActiveSubstitutionsStopped: activeSubstitutionsStopped,
+                ValidationErrors: validationErrors,
+                ActualRiderNotFound: actualRiderNotFound,
+                SubstituteRiderNotFound: substituteRiderNotFound,
+                Details: details,
+                ProcessingErrors: errors,
+                ProcessedAt: DateTime.UtcNow.AddHours(3)
+            );
+
+            return Result.Success(response);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[SubstitutionImport] FATAL ERROR: {ex}");
+            return Result.Failure<SubstitutionImportResponse>(
+                new Error("ProcessingError", $"Failed to process Excel file: {ex.Message}", 500));
+        }
+    }
+
+    // ============================================
+    // HELPER METHODS
+    // ============================================
+
+    private IXLRow? FindSubstitutionHeaderRow(IXLWorksheet worksheet)
+    {
+        var knownColumns = new[]
+        {
+            "ActualRiderWorkingId", "Actual Rider", "Main Working ID", "معرف الأساسي",
+            "SubstituteWorkingId", "Substitute Rider", "Sub Working ID", "معرف البديل",
+            "MainWorkingId", "SubWorkingId", "Original", "Replacement"
+        };
+
+        for (int i = 1; i <= Math.Min(10, worksheet.RowsUsed().Count()); i++)
+        {
+            var row = worksheet.Row(i);
+            var cellValues = row.CellsUsed()
+                .Select(c => c.IsMerged()
+                    ? c.MergedRange().FirstCell().GetString().Trim()
+                    : c.GetString().Trim())
+                .Where(v => !string.IsNullOrWhiteSpace(v))
+                .ToList();
+
+            int matchCount = cellValues.Count(cv =>
+                knownColumns.Any(kc =>
+                    cv.Equals(kc, StringComparison.OrdinalIgnoreCase) ||
+                    cv.Replace(" ", "").Equals(kc.Replace(" ", ""), StringComparison.OrdinalIgnoreCase)));
+
+            if (matchCount >= 2)
+                return row;
+        }
+
+        return worksheet.Row(1);
+    }
+
+    private SubstitutionColumnMapping BuildSubstitutionColumnMapping(IXLRow headerRow)
+    {
+        var mapping = new SubstitutionColumnMapping();
+        var cells = headerRow.CellsUsed().ToList();
+
+        mapping.ActualRiderWorkingIdCol = FindColumn(cells,
+            "ActualRiderWorkingId", "Actual Rider", "Main Working ID", "MainWorkingId",
+            "معرف الأساسي", "الأساسي", "Original", "ActualWorkingId");
+
+        mapping.SubstituteWorkingIdCol = FindColumn(cells,
+            "SubstituteWorkingId", "Substitute Rider", "Sub Working ID", "SubWorkingId",
+            "معرف البديل", "البديل", "Replacement", "SubstituteWorkingId");
+
+        var missing = new List<string>();
+        if (mapping.ActualRiderWorkingIdCol == 0) missing.Add("ActualRiderWorkingId / Main Working ID");
+        if (mapping.SubstituteWorkingIdCol == 0) missing.Add("SubstituteWorkingId / Sub Working ID");
+
+        if (missing.Any())
+        {
+            mapping.IsValid = false;
+            mapping.ErrorMessage = $"Required columns missing: {string.Join(", ", missing)}";
+        }
+        else
+        {
+            mapping.IsValid = true;
+        }
+
+        return mapping;
+
+    }
+    private SubstitutionRowData ParseSubstitutionRowData(
+        IXLRow row,
+        SubstitutionColumnMapping map,
+        int rowNumber)
+    {
+        var data = new SubstitutionRowData { RowNumber = rowNumber };
+
+        try
+        {
+            data.ActualRiderWorkingId = GetCellValue(row, map.ActualRiderWorkingIdCol)?.Trim();
+            if (string.IsNullOrWhiteSpace(data.ActualRiderWorkingId))
+            {
+                data.IsValid = false;
+                data.ErrorMessage = "Actual Rider Working ID is required";
+                return data;
+            }
+
+            data.SubstituteWorkingId = GetCellValue(row, map.SubstituteWorkingIdCol)?.Trim();
+            if (string.IsNullOrWhiteSpace(data.SubstituteWorkingId))
+            {
+                data.IsValid = false;
+                data.ErrorMessage = "Substitute Working ID is required";
+                return data;
+            }
+
+            // Check if they're the same
+            if (data.ActualRiderWorkingId.Equals(data.SubstituteWorkingId, StringComparison.OrdinalIgnoreCase))
+            {
+                data.IsValid = false;
+                data.ErrorMessage = "Actual and Substitute Working IDs cannot be the same";
+                return data;
+            }
+
+            data.IsValid = true;
+        }
+        catch (Exception ex)
+        {
+            data.IsValid = false;
+            data.ErrorMessage = $"Error parsing row: {ex.Message}";
+        }
+
+        return data;
+    }
+
+    internal class SubstitutionColumnMapping
+    {
+        public bool IsValid { get; set; }
+        public string? ErrorMessage { get; set; }
+        public int ActualRiderWorkingIdCol { get; set; }
+        public int SubstituteWorkingIdCol { get; set; }
+    }
+
+    internal class SubstitutionRowData
+    {
+        public int RowNumber { get; set; }
+        public bool IsValid { get; set; }
+        public string? ErrorMessage { get; set; }
+        public string? ActualRiderWorkingId { get; set; }
+        public string? SubstituteWorkingId { get; set; }
+    }
 
 
     // Add this method to ImportService.cs class

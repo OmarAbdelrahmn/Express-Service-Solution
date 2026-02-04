@@ -193,7 +193,7 @@ public class RiderSub(
         {
             await transaction.RollbackAsync(cancellationToken);
             return Result.Failure<RiderSubstitutionResponse>(
-                new Error("ServerError", ex.Message, 500));
+                new Error("ServerError", ex.InnerException.Message, 500));
         }
     }
 
