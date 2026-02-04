@@ -5,6 +5,7 @@ using Application.Service.Auth;
 using Application.Service.Backgroundimports;
 using Application.Service.DE;
 using Application.Service.Empolyee;
+using Application.Service.Freelancer;
 using Application.Service.Hungerdisa;
 using Application.Service.Import;
 using Application.Service.Member;
@@ -68,6 +69,7 @@ public static class ApplicationDependencies
         Services.AddScoped<IBillService, BillService>();
         Services.AddScoped<ISupplierService,SupplierService>();
         Services.AddScoped<IReturnService,ReturnService>();
+        Services.AddScoped<IFreelancerService,FreelancerService>();
  
 
 

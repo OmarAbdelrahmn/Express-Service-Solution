@@ -42,6 +42,7 @@ public class ApplicationDbcontext(DbContextOptions<ApplicationDbcontext> options
     public required DbSet<TransferItem> TransferItems { get; set; }
     public required DbSet<Return> Returns { get; set; }
     public required DbSet<ReturnItem> ReturnItems { get; set; }
+    public required DbSet<KetaFreeLancer> KetaFreeLancers { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

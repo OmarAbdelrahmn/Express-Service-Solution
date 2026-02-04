@@ -1,0 +1,14 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Text;
+
+namespace Domain.Entities;
+
+public class KetaFreeLancer
+{
+    public int Id { get; set; }
+    public string WorkingId { get; set; } = string.Empty;
+    public string Month { get; set; } = string.Empty; 
+    public int TotalOrders { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow.AddHours(3);
+}
