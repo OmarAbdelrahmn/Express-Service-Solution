@@ -19,6 +19,86 @@ public class ImportController(IImportService service , IBackgroundImportService 
     private readonly IBackgroundImportService service1 = service1;
 
 
+    [HttpPost("transfer-to-company")]
+    public async Task<IActionResult> TransferRidersToCompany(
+    IFormFile file,
+    [FromQuery] int companyId)
+    {
+        if (file == null || file.Length == 0)
+            return BadRequest(new { error = "No file uploaded or file is empty" });
+
+        if (!file.FileName.EndsWith(".xlsx") && !file.FileName.EndsWith(".xls"))
+            return BadRequest(new { error = "File must be Excel format (.xlsx or .xls)" });
+
+        var uploadedBy = "Omar";
+
+        var result = await service.TransferRidersToCompanyAsync(file, companyId, uploadedBy);
+
+        if (result.IsSuccess)
+        {
+            return Ok(new
+            {
+                success = true,
+                data = result.Value,
+                summary = new
+                {
+                    totalRecords = result.Value.TotalRecords,
+                    successfulTransfers = result.Value.SuccessfulTransfers,
+                    failedRecords = result.Value.FailedRecords,
+                    employeeNotFound = result.Value.EmployeeNotFound,
+                    riderDetailsNotFound = result.Value.RiderDetailsNotFound,
+                    successRate = result.Value.TotalRecords > 0
+                        ? $"{(result.Value.SuccessfulTransfers * 100.0 / result.Value.TotalRecords):F1}%"
+                        : "0%"
+                }
+            });
+        }
+
+        return result.ToProblem();
+    }
+
+    [HttpGet("transfer-to-company-template-info")]
+    public IActionResult GetTransferToCompanyTemplateInfo()
+    {
+        return Ok(new
+        {
+            requiredColumns = new[]
+            {
+            "IqamaNumber / رقم الإقامة (Employee to transfer)",
+            "WorkingId / معرف العمل (New Working ID for target company)"
+        },
+            requiredQueryParameter = new
+            {
+                companyId = "Target company ID (in query string)"
+            },
+            importBehavior = new
+            {
+                companyVerification = "Company ID verified before processing",
+                workingIdUpdate = "Updates rider's Working ID",
+                companyTransfer = "Changes rider's company",
+                historyTracking = "Deactivates old WorkingId histories, creates new active history",
+                employeeNotFound = "Skipped if Iqama not found",
+                riderDetailsNotFound = "Skipped if employee has no RiderDetails"
+            },
+            exampleUsage = new
+            {
+                endpoint = "POST /api/import/transfer-to-company?companyId=5",
+                description = "Transfer riders from any company to company with ID 5"
+            },
+            notes = new[]
+            {
+            "Company ID must be passed as query parameter (?companyId=X)",
+            "Company must exist in database",
+            "All riders transferred to same company",
+            "Each rider gets new WorkingId from Excel",
+            "Old WorkingId histories automatically deactivated",
+            "New history record created with transfer notes",
+            "Transaction safety - each row independent",
+            "Maximum file size: 10MB"
+        }
+        });
+    }
+
 
     [HttpPost("sub")]
     [Authorize]

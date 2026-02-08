@@ -10,6 +10,12 @@ namespace Application.Service.Import;
 
 public interface IImportService
 {
+
+    Task<Result<CompanyTransferImportResponse>> TransferRidersToCompanyAsync(
+    IFormFile file,
+    int newCompanyId,
+    string uploadedBy);
+
     Task<Result<SparePartImportResponse>> ImportSparePartsAsync(IFormFile file, string uploadedBy);
     Task<Result<RiderAccessoryImportResponse>> ImportRiderAccessoriesAsync(IFormFile file, string uploadedBy);
 
@@ -418,3 +424,31 @@ public enum SyncStatus
     ValidationError = 5,          // Invalid data
     DuplicateSkipped = 6          // Duplicate WorkingId in Excel - skipped
 }
+
+public record CompanyTransferImportResponse(
+    int TotalRecords,
+    int SuccessfulTransfers,
+    int FailedRecords,
+    int EmployeeNotFound,
+    int RiderDetailsNotFound,
+    int CompanyNotFound,
+    List<CompanyTransferRowResult> Results,
+    List<string> Errors,
+    DateTime ProcessedAt
+);
+
+public record CompanyTransferRowResult(
+    int RowNumber,
+    bool Success,
+    string IqamaNo,
+    string? NewWorkingId,
+    string? OldWorkingId,
+    int NewCompanyId,
+    int? OldCompanyId,
+    string? OldCompanyName,
+    string? NewCompanyName,
+    string? EmployeeNameEN,
+    string? EmployeeNameAR,
+    List<string> Warnings,
+    string? ErrorMessage
+);
