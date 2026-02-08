@@ -20,7 +20,10 @@ public interface IRiderShiftService
     Task<Result<RiderShiftResponse>> UpdateShiftAsync(UpdateRiderShiftRequest request, CancellationToken cancellationToken = default);
     Task<Result> DeleteShiftAsync(string WorkingId, DateOnly shiftDate, CancellationToken cancellationToken = default);
     Task<Result<IEnumerable<RiderShiftResponse>>> GetShiftsByDateRangeAsync(DateOnly startDate, DateOnly endDate, CancellationToken cancellationToken = default);
-    Task<Result<BulkDeleteResult>> DeleteShiftsByDateAsync(DateOnly shiftDate, CancellationToken cancellationToken = default);
+    Task<Result<BulkDeleteResult>> DeleteShiftsByDateAsync(
+        DateOnly shiftDate,
+        int? companyId = null,
+        CancellationToken cancellationToken = default);
     Task<Result<BulkDeleteResult>> DeleteShiftsByDateRangeAsync(DateOnly startDate, DateOnly endDate, CancellationToken cancellationToken = default);
     Task<Result<BulkDeleteResult>> DeleteShiftsByRiderAndDateRangeAsync(string WorkingId, DateOnly startDate, DateOnly endDate, CancellationToken cancellationToken = default);
     Task<Result<BulkComparisonResult>> CreateShiftComparisonsAsync(Stream excelStream,DateOnly shiftDate,int rejectionThreshold = 2, CancellationToken cancellationToken = default);

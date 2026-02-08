@@ -1164,8 +1164,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext , IRiderWorkingIdH
                 .Include(c=>c.Housing)
                 .Include(s => s.Rider)
                     .ThenInclude(r => r.Employee)
-                .Include(s => s.Rider)
-                    .ThenInclude(r => r.Company)
+                    .Include(r => r.Company)
                 .FirstOrDefaultAsync(s =>
                                          s.WorkingId.Trim() == WorkingId.Trim() &&
                                          s.ShiftDate == shiftDate,
@@ -1194,8 +1193,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext , IRiderWorkingIdH
             var shifts = await dbcontext.RiderShifts
                 .Include(s => s.Rider)
                     .ThenInclude(r => r.Employee)
-                .Include(s => s.Rider)
-                    .ThenInclude(r => r.Company)
+                    .Include(r => r.Company)
                 .Where(s => s.WorkingId == WorkingId)
                 .OrderByDescending(s => s.ShiftDate)
                 .ToListAsync(cancellationToken);
@@ -1219,8 +1217,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext , IRiderWorkingIdH
             var shifts = await dbcontext.RiderShifts
                 .Include(s => s.Rider)
                     .ThenInclude(r => r.Employee)
-                .Include(s => s.Rider)
-                    .ThenInclude(r => r.Company)
+                    .Include(r => r.Company)
                 .Where(s => s.ShiftDate == shiftDate)
                 .OrderBy(s => s.WorkingId)
                 .ToListAsync(cancellationToken);
@@ -1245,8 +1242,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext , IRiderWorkingIdH
             var shifts = await dbcontext.RiderShifts
                 .Include(s => s.Rider)
                     .ThenInclude(r => r.Employee)
-                .Include(s => s.Rider)
-                    .ThenInclude(r => r.Company)
+                    .Include(r => r.Company)
                 .Where(s => s.ShiftDate >= startDate && s.ShiftDate <= endDate)
                 .OrderBy(s => s.ShiftDate)
                 .ThenBy(s => s.WorkingId)
@@ -1438,8 +1434,8 @@ public class RiderShiftService(ApplicationDbcontext dbcontext , IRiderWorkingIdH
             shift.StackedDeliveries,  // ADD THIS in appropriate position
             shift.WorkingHours,
             shift.CompanyId,
-            shift.Rider?.Company?.Name ?? "Unknown", // Null-safe access
-            shift.Rider?.Employee?.NameEN ?? "Unknown", // Null-safe access
+            shift.Company?.Name ?? "Unknown", // Null-safe access
+            shift.Rider?.Employee?.NameAR ?? "Unknown", // Null-safe access
             shiftStatus.ToString(),
             hasRejectionProblem,
             penaltyAmount,
@@ -1477,15 +1473,23 @@ public class RiderShiftService(ApplicationDbcontext dbcontext , IRiderWorkingIdH
         }
     }
 
-
     public async Task<Result<BulkDeleteResult>> DeleteShiftsByDateAsync(
-       DateOnly shiftDate,
-       CancellationToken cancellationToken = default)
+    DateOnly shiftDate,
+    int? companyId = null,
+    CancellationToken cancellationToken = default)
     {
         try
         {
-            var shiftsToDelete = await dbcontext.RiderShifts
-                .Where(s => s.ShiftDate == shiftDate)
+            var query = dbcontext.RiderShifts
+                .Where(s => s.ShiftDate == shiftDate);
+
+            // Apply company filter if provided
+            if (companyId.HasValue)
+            {
+                query = query.Where(s => s.CompanyId == companyId.Value);
+            }
+
+            var shiftsToDelete = await query
                 .Include(s => s.Rider)
                     .ThenInclude(r => r.Employee)
                 .Include(s => s.Company)
@@ -1493,13 +1497,17 @@ public class RiderShiftService(ApplicationDbcontext dbcontext , IRiderWorkingIdH
 
             if (!shiftsToDelete.Any())
             {
-                return Result.Success(new BulkDeleteResult(0, new List<string>()));
+                var message = companyId.HasValue
+                    ? $"No shifts found for date {shiftDate} and company ID {companyId.Value}"
+                    : $"No shifts found for date {shiftDate}";
+
+                return Result.Success(new BulkDeleteResult(0, new List<string> { message }));
             }
 
             var deletedDetails = shiftsToDelete
                 .Select(s => $"Rider: {s.Rider.Employee.NameEN} (ID: {s.WorkingId}), Date: {s.ShiftDate}, Company: {s.Company.Name}")
                 .ToList();
-
+            
             dbcontext.RiderShifts.RemoveRange(shiftsToDelete);
             await dbcontext.SaveChangesAsync(cancellationToken);
 

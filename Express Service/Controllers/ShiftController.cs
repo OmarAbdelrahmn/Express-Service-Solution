@@ -106,12 +106,15 @@ public class ShiftController(IRiderShiftService service) : ControllerBase
     }
 
     [HttpDelete("date")]
- 
-    public async Task<IActionResult> DeleteShiftsByDateAsync([FromQuery] DateOnly shiftDate, CancellationToken cancellationToken)
+    public async Task<IActionResult> DeleteShiftsByDateAsync(
+        [FromQuery] DateOnly shiftDate,
+        [FromQuery] int? companyId = null,
+        CancellationToken cancellationToken = default)
     {
-        var result = await service.DeleteShiftsByDateAsync(shiftDate, cancellationToken);
+        var result = await service.DeleteShiftsByDateAsync(shiftDate, companyId, cancellationToken);
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
+
 
     [HttpDelete("range")]
  
