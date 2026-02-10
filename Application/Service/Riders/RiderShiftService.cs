@@ -1682,19 +1682,26 @@ public class RiderShiftService(ApplicationDbcontext dbcontext , IRiderWorkingIdH
 
                     if (shift != null)
                     {
-                        // Direct match found - update it
+                        // Direct match found - update only provided fields
                         var oldAcceptedOrders = shift.AcceptedDailyOrders;
-                        var oldWorkingHours = shift.WorkingHours;  // ADD THIS
+                        var oldWorkingHours = shift.WorkingHours;
 
-                        shift.AcceptedDailyOrders = updateData.AcceptedOrders!.Value;
-                        shift.WorkingHours = updateData.WorkingHours!.Value;  // ADD THIS
+                        // Only update if value is provided
+                        if (updateData.AcceptedOrders.HasValue)
+                        {
+                            shift.AcceptedDailyOrders = updateData.AcceptedOrders.Value;
 
+                            // Recalculate shift status based on new accepted orders
+                            var newStatus = CalculateShiftStatus(
+                                shift.AcceptedDailyOrders,
+                                shift.Rider.Company.Name);
+                            shift.ShiftStatus = newStatus;
+                        }
 
-                        // Recalculate shift status based on new accepted orders
-                        var newStatus = CalculateShiftStatus(
-                            shift.AcceptedDailyOrders,
-                            shift.Rider.Company.Name);
-                        shift.ShiftStatus = newStatus;
+                        if (updateData.WorkingHours.HasValue)
+                        {
+                            shift.WorkingHours = updateData.WorkingHours.Value;
+                        }
 
                         await dbcontext.SaveChangesAsync(cancellationToken);
 
@@ -1705,7 +1712,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext , IRiderWorkingIdH
                             shift.Rider.Employee.NameEN,
                             updateData.ShiftDate!.Value,
                             oldAcceptedOrders,
-                            updateData.AcceptedOrders.Value,
+                            updateData.AcceptedOrders ?? oldAcceptedOrders,  // Show old value if not updated
                             shift.Rider.Company.Name,
                             false));
                     }
@@ -1760,18 +1767,26 @@ public class RiderShiftService(ApplicationDbcontext dbcontext , IRiderWorkingIdH
 
                         if (shiftWithCurrentId != null)
                         {
-                            // Found shift with new WorkingId - update it
+                            // Found shift with new WorkingId - update only provided fields
                             var oldAcceptedOrders = shiftWithCurrentId.AcceptedDailyOrders;
-                            var oldWorkingHours = shiftWithCurrentId.WorkingHours;  // ADD THIS
+                            var oldWorkingHours = shiftWithCurrentId.WorkingHours;
 
-                            shiftWithCurrentId.WorkingHours = updateData.WorkingHours!.Value;  // ADD THIS
-                            shiftWithCurrentId.AcceptedDailyOrders = updateData.AcceptedOrders!.Value;
+                            // Only update if value is provided
+                            if (updateData.AcceptedOrders.HasValue)
+                            {
+                                shiftWithCurrentId.AcceptedDailyOrders = updateData.AcceptedOrders.Value;
 
-                            // Recalculate shift status
-                            var newStatus = CalculateShiftStatus(
-                                shiftWithCurrentId.AcceptedDailyOrders,
-                                shiftWithCurrentId.Rider.Company.Name);
-                            shiftWithCurrentId.ShiftStatus = newStatus;
+                                // Recalculate shift status
+                                var newStatus = CalculateShiftStatus(
+                                    shiftWithCurrentId.AcceptedDailyOrders,
+                                    shiftWithCurrentId.Rider.Company.Name);
+                                shiftWithCurrentId.ShiftStatus = newStatus;
+                            }
+
+                            if (updateData.WorkingHours.HasValue)
+                            {
+                                shiftWithCurrentId.WorkingHours = updateData.WorkingHours.Value;
+                            }
 
                             await dbcontext.SaveChangesAsync(cancellationToken);
 
@@ -1782,7 +1797,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext , IRiderWorkingIdH
                                 currentRider.Employee.NameEN,
                                 updateData.ShiftDate!.Value,
                                 oldAcceptedOrders,
-                                updateData.AcceptedOrders.Value,
+                                updateData.AcceptedOrders ?? oldAcceptedOrders,  // Show old value if not updated
                                 currentRider.Company.Name,
                                 true));
                         }
@@ -1869,42 +1884,41 @@ public class RiderShiftService(ApplicationDbcontext dbcontext , IRiderWorkingIdH
     }
 
     private static (
-        bool IsValid,
-        string? WorkingId,
-        DateOnly? ShiftDate,
-        int? AcceptedOrders,
-        float? WorkingHours,  // ADD THIS
-        string? ErrorMessage) ParseUpdateExcelRow(
-        IXLRow row,
-        UpdateColumnMapping mapping,
-        int rowNumber)
+      bool IsValid,
+      string? WorkingId,
+      DateOnly? ShiftDate,
+      int? AcceptedOrders,
+      float? WorkingHours,
+      string? ErrorMessage) ParseUpdateExcelRow(
+      IXLRow row,
+      UpdateColumnMapping mapping,
+      int rowNumber)
     {
         try
         {
             var workingIdCell = row.Cell(mapping.WorkingIdColumn).Value;
             var workingId = workingIdCell.ToString()?.Trim();
             if (string.IsNullOrWhiteSpace(workingId))
-                return (false, null, null, null,null, "Invalid Working ID");
+                return (false, null, null, null, null, "Invalid Working ID");
 
             // Parse shift date
             var dateCell = row.Cell(mapping.ShiftDateColumn);
             DateOnly? shiftDate;
             try
             {
-                // Excel stores dates as DateTime, so get it as DateTime first
                 if (dateCell.Value.IsDateTime)
                 {
                     shiftDate = DateOnly.FromDateTime(dateCell.GetDateTime());
                 }
                 else
                 {
-                    // If not a DateTime cell, use the custom date parser
                     var dateString = dateCell.Value.ToString()?.Trim();
                     shiftDate = ParseDate(dateString);
 
                     if (!shiftDate.HasValue)
                     {
-                        return (false, workingId, null, null,null, $"Invalid Shift Date format: '{dateString}'. Expected date format like: 1/4/2026, 01-04-2026, or 2026-01-04");
+                        return (false, workingId, null, null, null,
+                            $"Invalid Shift Date format: '{dateString}'. Expected date format like: 1/4/2026, 01-04-2026, or 2026-01-04");
                     }
                 }
             }
@@ -1913,28 +1927,40 @@ public class RiderShiftService(ApplicationDbcontext dbcontext , IRiderWorkingIdH
                 return (false, workingId, null, null, null, $"Error parsing Shift Date: {ex.Message}");
             }
 
-            //string[] formats = { "yyyy-MM-dd", "MM/dd/yyyy", "M/d/yyyy" , "M/dd/yyyy" , "MM/d/yyyy" };
-
-            //if (!DateOnly.TryParseExact(dateString, formats, CultureInfo.InvariantCulture, DateTimeStyles.None, out var shiftDate))
-            //{
-            //    return (false, workingId, null, null, $"Invalid Shift Date format. Expected formats: {string.Join(", ", formats)}");
-            //}
-
+            // Parse AcceptedOrders (OPTIONAL)
+            int? acceptedOrders = null;
             var acceptedCell = row.Cell(mapping.AcceptedOrdersColumn).Value;
-            if (!int.TryParse(acceptedCell.ToString(), out var acceptedOrders) || acceptedOrders < 0)
-                return (false, workingId, shiftDate, null,null, "Invalid Accepted Orders (must be >= 0)");
+            var acceptedStr = acceptedCell.ToString()?.Trim();
+            if (!string.IsNullOrWhiteSpace(acceptedStr))
+            {
+                if (!int.TryParse(acceptedStr, out var parsedOrders) || parsedOrders < 0)
+                    return (false, workingId, shiftDate, null, null, "Invalid Accepted Orders (must be >= 0)");
+                acceptedOrders = parsedOrders;
+            }
 
+            // Parse WorkingHours (OPTIONAL)
+            float? workingHours = null;
             var hoursCell = row.Cell(mapping.WorkingHoursColumn).Value;
-            if (!float.TryParse(hoursCell.ToString(), out var workingHours) || workingHours < 0 || workingHours > 24)
-                return (false, workingId, shiftDate, acceptedOrders, null, "Invalid Working Hours (must be 0-24)");
+            var hoursStr = hoursCell.ToString()?.Trim();
+            if (!string.IsNullOrWhiteSpace(hoursStr))
+            {
+                if (!float.TryParse(hoursStr, out var parsedHours) || parsedHours < 0 || parsedHours > 24)
+                    return (false, workingId, shiftDate, acceptedOrders, null, "Invalid Working Hours (must be 0-24)");
+                workingHours = parsedHours;
+            }
 
+            // VALIDATE: At least one field must be provided
+            if (!acceptedOrders.HasValue && !workingHours.HasValue)
+            {
+                return (false, workingId, shiftDate, null, null,
+                    "At least one field (Accepted Orders or Working Hours) must be provided");
+            }
 
-
-            return (true, workingId, shiftDate, acceptedOrders, workingHours, null);  // UPDATE THIS
+            return (true, workingId, shiftDate, acceptedOrders, workingHours, null);
         }
         catch (Exception ex)
         {
-            return (false, null, null, null, null, $"Error: {ex.Message}");  // UPDATE THIS
+            return (false, null, null, null, null, $"Error: {ex.Message}");
         }
     }
     private static DateOnly? ParseDate(string? dateStr)
