@@ -23,7 +23,344 @@ public class ImportService(ApplicationDbcontext dbcontext , IRiderSub riderSub) 
     private readonly ApplicationDbcontext _dbcontext = dbcontext;
     private readonly IRiderSub riderSub = riderSub;
 
+    public async Task<Result<SparePartQuantityUpdateResponse>> UpdateSparePartQuantitiesAsync(
+    IFormFile file,
+    string uploadedBy)
+    {
+        if (file == null || file.Length == 0)
+            return Result.Failure<SparePartQuantityUpdateResponse>(
+                new Error("InvalidFile", "File is empty or null", 400));
 
+        if (!file.FileName.EndsWith(".xlsx") && !file.FileName.EndsWith(".xls"))
+            return Result.Failure<SparePartQuantityUpdateResponse>(
+                new Error("InvalidFormat", "File must be Excel format (.xlsx or .xls)", 400));
+
+        var results = new List<SparePartQuantityUpdateRowResult>();
+        var errors = new List<string>();
+        int successfulUpdates = 0;
+        int noChangeNeeded = 0;
+        int sparePartNotFound = 0;
+        int failedRecords = 0;
+
+        try
+        {
+            Console.WriteLine($"[UpdateSparePartQuantities] Starting update for file: {file.FileName}");
+
+            using var stream = file.OpenReadStream();
+            using var workbook = new XLWorkbook(stream);
+            var worksheet = workbook.Worksheet(1);
+
+            if (worksheet == null)
+            {
+                Console.WriteLine("[UpdateSparePartQuantities] ERROR: Could not read worksheet");
+                return Result.Failure<SparePartQuantityUpdateResponse>(
+                    new Error("InvalidWorksheet", "Could not read worksheet", 400));
+            }
+
+            Console.WriteLine($"[UpdateSparePartQuantities] Worksheet loaded: {worksheet.Name}");
+
+            var headerRow = FindSparePartQuantityUpdateHeaderRow(worksheet);
+            if (headerRow == null)
+            {
+                Console.WriteLine("[UpdateSparePartQuantities] ERROR: No header row found");
+                return Result.Failure<SparePartQuantityUpdateResponse>(
+                    new Error("EmptyFile", "Excel file has no header row", 400));
+            }
+
+            Console.WriteLine($"[UpdateSparePartQuantities] Header row found at row {headerRow.RowNumber()}");
+
+            var columnMap = BuildSparePartQuantityUpdateColumnMapping(headerRow);
+            if (!columnMap.IsValid)
+            {
+                Console.WriteLine($"[UpdateSparePartQuantities] ERROR: Invalid columns - {columnMap.ErrorMessage}");
+                return Result.Failure<SparePartQuantityUpdateResponse>(
+                    new Error("InvalidColumns", columnMap.ErrorMessage!, 400));
+            }
+
+            Console.WriteLine($"[UpdateSparePartQuantities] Column mapping successful");
+
+            var dataRows = worksheet.RowsUsed()
+                .Where(r => r.RowNumber() > headerRow.RowNumber())
+                .ToList();
+
+            var totalRows = dataRows.Count;
+            Console.WriteLine($"[UpdateSparePartQuantities] Total data rows to process: {totalRows}");
+
+            if (totalRows == 0)
+            {
+                Console.WriteLine("[UpdateSparePartQuantities] WARNING: No data rows found");
+                return Result.Failure<SparePartQuantityUpdateResponse>(
+                    new Error("EmptyFile", "No data rows found in Excel file", 400));
+            }
+
+            var rowNumber = headerRow.RowNumber();
+
+            foreach (var row in dataRows)
+            {
+                rowNumber++;
+
+                using var transaction = await _dbcontext.Database.BeginTransactionAsync();
+                try
+                {
+                    var rowData = ParseSparePartQuantityUpdateRowData(row, columnMap, rowNumber);
+
+                    if (!rowData.IsValid)
+                    {
+                        failedRecords++;
+                        results.Add(new SparePartQuantityUpdateRowResult(
+                            rowNumber,
+                            false,
+                            rowData.Name ?? "N/A",
+                            null,
+                            rowData.Quantity,
+                            false,
+                            rowData.ErrorMessage
+                        ));
+                        await transaction.RollbackAsync();
+                        continue;
+                    }
+
+                    // Find spare part by name (case-insensitive)
+                    var sparePart = await _dbcontext.SpareParts
+                        .FirstOrDefaultAsync(sp => sp.Name.ToLower() == rowData.Name!.ToLower());
+
+                    if (sparePart == null)
+                    {
+                        sparePartNotFound++;
+                        failedRecords++;
+                        results.Add(new SparePartQuantityUpdateRowResult(
+                            rowNumber,
+                            false,
+                            rowData.Name!,
+                            null,
+                            rowData.Quantity,
+                            false,
+                            $"Spare part '{rowData.Name}' not found in database"
+                        ));
+                        await transaction.RollbackAsync();
+                        continue;
+                    }
+
+                    int oldQuantity = sparePart.Quantity;
+
+                    // Check if update is needed
+                    if (oldQuantity == rowData.Quantity)
+                    {
+                        noChangeNeeded++;
+                        results.Add(new SparePartQuantityUpdateRowResult(
+                            rowNumber,
+                            true,
+                            sparePart.Name,
+                            oldQuantity,
+                            rowData.Quantity,
+                            false,
+                            null
+                        ));
+                        await transaction.CommitAsync();
+                        Console.WriteLine($"[UpdateSparePartQuantities] No change needed for '{sparePart.Name}' - Quantity already {oldQuantity}");
+                        continue;
+                    }
+
+                    // Update quantity
+                    sparePart.Quantity = rowData.Quantity;
+
+                    await _dbcontext.SaveChangesAsync();
+                    await transaction.CommitAsync();
+
+                    successfulUpdates++;
+                    results.Add(new SparePartQuantityUpdateRowResult(
+                        rowNumber,
+                        true,
+                        sparePart.Name,
+                        oldQuantity,
+                        rowData.Quantity,
+                        true,
+                        null
+                    ));
+
+                    Console.WriteLine($"[UpdateSparePartQuantities] ✓ Updated '{sparePart.Name}': {oldQuantity} → {rowData.Quantity}");
+                }
+                catch (Exception ex)
+                {
+                    await transaction.RollbackAsync();
+                    failedRecords++;
+                    errors.Add($"Row {rowNumber}: {ex.Message}");
+
+                    results.Add(new SparePartQuantityUpdateRowResult(
+                        rowNumber,
+                        false,
+                        "N/A",
+                        null,
+                        0,
+                        false,
+                        $"Exception: {ex.Message}"
+                    ));
+
+                    Console.WriteLine($"[UpdateSparePartQuantities] ERROR at row {rowNumber}: {ex.Message}");
+                }
+            }
+
+            Console.WriteLine($"[UpdateSparePartQuantities] Update complete:");
+            Console.WriteLine($"  - Total: {totalRows}");
+            Console.WriteLine($"  - Successful Updates: {successfulUpdates}");
+            Console.WriteLine($"  - No Change Needed: {noChangeNeeded}");
+            Console.WriteLine($"  - Not Found: {sparePartNotFound}");
+            Console.WriteLine($"  - Failed: {failedRecords}");
+
+            var response = new SparePartQuantityUpdateResponse(
+                TotalRecords: totalRows,
+                SuccessfulUpdates: successfulUpdates,
+                NoChangeNeeded: noChangeNeeded,
+                SparePartNotFound: sparePartNotFound,
+                FailedRecords: failedRecords,
+                Results: results,
+                Errors: errors,
+                ProcessedAt: DateTime.UtcNow.AddHours(3)
+            );
+
+            return Result.Success(response);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[UpdateSparePartQuantities] FATAL ERROR: {ex}");
+            return Result.Failure<SparePartQuantityUpdateResponse>(
+                new Error("ProcessingError", $"Failed to process Excel file: {ex.Message}", 500));
+        }
+    }
+
+    // ============================================
+    // HELPER METHODS
+    // ============================================
+
+    private IXLRow? FindSparePartQuantityUpdateHeaderRow(IXLWorksheet worksheet)
+    {
+        var knownColumns = new[]
+        {
+        "Name", "الاسم", "Part Name", "Spare Part Name", "اسم القطعة",
+        "Quantity", "الكمية", "Qty", "Stock", "المخزون"
+    };
+
+        for (int i = 1; i <= Math.Min(10, worksheet.RowsUsed().Count()); i++)
+        {
+            var row = worksheet.Row(i);
+            var cellValues = row.CellsUsed()
+                .Select(c => c.IsMerged()
+                    ? c.MergedRange().FirstCell().GetString().Trim()
+                    : c.GetString().Trim())
+                .Where(v => !string.IsNullOrWhiteSpace(v))
+                .ToList();
+
+            int matchCount = cellValues.Count(cv =>
+                knownColumns.Any(kc =>
+                    cv.Equals(kc, StringComparison.OrdinalIgnoreCase) ||
+                    cv.Replace(" ", "").Equals(kc.Replace(" ", ""), StringComparison.OrdinalIgnoreCase)));
+
+            if (matchCount >= 2)
+                return row;
+        }
+
+        return worksheet.Row(1);
+    }
+
+    private SparePartQuantityUpdateColumnMapping BuildSparePartQuantityUpdateColumnMapping(IXLRow headerRow)
+    {
+        var mapping = new SparePartQuantityUpdateColumnMapping();
+        var cells = headerRow.CellsUsed().ToList();
+
+        mapping.NameCol = FindColumn(cells,
+            "Name", "الاسم", "Part Name", "Spare Part Name", "اسم القطعة");
+
+        mapping.QuantityCol = FindColumn(cells,
+            "Quantity", "الكمية", "Qty", "Stock", "المخزون");
+
+        var missing = new List<string>();
+        if (mapping.NameCol == 0) missing.Add("Name");
+        if (mapping.QuantityCol == 0) missing.Add("Quantity");
+
+        if (missing.Any())
+        {
+            mapping.IsValid = false;
+            mapping.ErrorMessage = $"Required columns missing: {string.Join(", ", missing)}";
+        }
+        else
+        {
+            mapping.IsValid = true;
+        }
+
+        return mapping;
+    }
+
+    private SparePartQuantityUpdateRowData ParseSparePartQuantityUpdateRowData(
+        IXLRow row,
+        SparePartQuantityUpdateColumnMapping map,
+        int rowNumber)
+    {
+        var data = new SparePartQuantityUpdateRowData { RowNumber = rowNumber };
+
+        try
+        {
+            data.Name = GetCellValue(row, map.NameCol)?.Trim();
+            if (string.IsNullOrWhiteSpace(data.Name))
+            {
+                data.IsValid = false;
+                data.ErrorMessage = "Spare part name is required";
+                return data;
+            }
+
+            var quantityStr = GetCellValue(row, map.QuantityCol);
+            if (string.IsNullOrWhiteSpace(quantityStr))
+            {
+                data.IsValid = false;
+                data.ErrorMessage = "Quantity is required";
+                return data;
+            }
+
+            if (!TryParseInt(quantityStr, out int quantity))
+            {
+                data.IsValid = false;
+                data.ErrorMessage = $"Invalid quantity: '{quantityStr}'";
+                return data;
+            }
+
+            if (quantity < 0)
+            {
+                data.IsValid = false;
+                data.ErrorMessage = "Quantity cannot be negative";
+                return data;
+            }
+
+            data.Quantity = quantity;
+            data.IsValid = true;
+        }
+        catch (Exception ex)
+        {
+            data.IsValid = false;
+            data.ErrorMessage = $"Error parsing row: {ex.Message}";
+        }
+
+        return data;
+    }
+
+    // ============================================
+    // INTERNAL CLASSES
+    // ============================================
+
+    internal class SparePartQuantityUpdateColumnMapping
+    {
+        public bool IsValid { get; set; }
+        public string? ErrorMessage { get; set; }
+        public int NameCol { get; set; }
+        public int QuantityCol { get; set; }
+    }
+
+    internal class SparePartQuantityUpdateRowData
+    {
+        public int RowNumber { get; set; }
+        public bool IsValid { get; set; }
+        public string? ErrorMessage { get; set; }
+        public string? Name { get; set; }
+        public int Quantity { get; set; }
+    }
     public async Task<Result<CompanyTransferImportResponse>> TransferRidersToCompanyAsync(
     IFormFile file,
     int newCompanyId,

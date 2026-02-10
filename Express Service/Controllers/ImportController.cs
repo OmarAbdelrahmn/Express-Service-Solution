@@ -19,6 +19,90 @@ public class ImportController(IImportService service , IBackgroundImportService 
     private readonly IBackgroundImportService service1 = service1;
 
 
+    [HttpPost("spare-parts/update-quantities")]
+    public async Task<IActionResult> UpdateSparePartQuantities(IFormFile file)
+    {
+        if (file == null || file.Length == 0)
+            return BadRequest(new { error = "No file uploaded or file is empty" });
+
+        if (!file.FileName.EndsWith(".xlsx") && !file.FileName.EndsWith(".xls"))
+            return BadRequest(new { error = "File must be Excel format (.xlsx or .xls)" });
+
+        var uploadedBy =  "System";
+
+        var result = await service.UpdateSparePartQuantitiesAsync(file, uploadedBy);
+
+        if (result.IsSuccess)
+        {
+            return Ok(new
+            {
+                success = true,
+                data = result.Value,
+                summary = new
+                {
+                    totalRecords = result.Value.TotalRecords,
+                    successfulUpdates = result.Value.SuccessfulUpdates,
+                    noChangeNeeded = result.Value.NoChangeNeeded,
+                    sparePartNotFound = result.Value.SparePartNotFound,
+                    failedRecords = result.Value.FailedRecords,
+                    successRate = result.Value.TotalRecords > 0
+                        ? $"{(result.Value.SuccessfulUpdates * 100.0 / result.Value.TotalRecords):F1}%"
+                        : "0%"
+                }
+            });
+        }
+
+        return result.ToProblem();
+    }
+
+    [HttpGet("spare-parts/update-quantities-template-info")]
+    public IActionResult GetUpdateQuantitiesTemplateInfo()
+    {
+        return Ok(new
+        {
+            requiredColumns = new[]
+            {
+            "Name / الاسم (Spare part name - must match exactly, case-insensitive)",
+            "Quantity / الكمية (New quantity value)"
+        },
+            importBehavior = new
+            {
+                updateCondition = "Updates ONLY if current quantity ≠ Excel quantity",
+                noChange = "Skips update if quantities are already equal",
+                notFound = "Fails if spare part name not found in database",
+                negativeQuantity = "Rejects negative quantities",
+                transactionSafety = "Each row processed in its own transaction"
+            },
+            response = new
+            {
+                totalRecords = "Total rows in Excel",
+                successfulUpdates = "Number of spare parts actually updated",
+                noChangeNeeded = "Number where quantity was already correct",
+                sparePartNotFound = "Number where name was not found",
+                results = "Detailed results showing old → new quantity for each part"
+            },
+            notes = new[]
+            {
+            "Spare part name must match exactly (case-insensitive)",
+            "Only updates if new quantity differs from current quantity",
+            "Negative quantities are rejected",
+            "Each update is transactional - failures don't affect other rows",
+            "Shows both old and new quantities in results",
+            "Maximum file size: 10MB"
+        },
+            exampleExcel = new
+            {
+                headers = new[] { "Name", "Quantity" },
+                sampleData = new[]
+                {
+                new { Name = "Brake Pad", Quantity = 50 },
+                new { Name = "Oil Filter", Quantity = 100 },
+                new { Name = "Spark Plug", Quantity = 75 }
+            }
+            }
+        });
+    }
+
     [HttpPost("transfer-to-company")]
     public async Task<IActionResult> TransferRidersToCompany(
     IFormFile file,

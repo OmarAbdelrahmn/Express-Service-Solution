@@ -1684,7 +1684,11 @@ public class RiderShiftService(ApplicationDbcontext dbcontext , IRiderWorkingIdH
                     {
                         // Direct match found - update it
                         var oldAcceptedOrders = shift.AcceptedDailyOrders;
+                        var oldWorkingHours = shift.WorkingHours;  // ADD THIS
+
                         shift.AcceptedDailyOrders = updateData.AcceptedOrders!.Value;
+                        shift.WorkingHours = updateData.WorkingHours!.Value;  // ADD THIS
+
 
                         // Recalculate shift status based on new accepted orders
                         var newStatus = CalculateShiftStatus(
@@ -1758,6 +1762,9 @@ public class RiderShiftService(ApplicationDbcontext dbcontext , IRiderWorkingIdH
                         {
                             // Found shift with new WorkingId - update it
                             var oldAcceptedOrders = shiftWithCurrentId.AcceptedDailyOrders;
+                            var oldWorkingHours = shiftWithCurrentId.WorkingHours;  // ADD THIS
+
+                            shiftWithCurrentId.WorkingHours = updateData.WorkingHours!.Value;  // ADD THIS
                             shiftWithCurrentId.AcceptedDailyOrders = updateData.AcceptedOrders!.Value;
 
                             // Recalculate shift status
@@ -1836,6 +1843,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext , IRiderWorkingIdH
         mapping.WorkingIdColumn = FindColumn(headerCells, ExcelColumnConfig.WorkingIdColumns);
         mapping.AcceptedOrdersColumn = FindColumn(headerCells, ExcelColumnConfig.AcceptedOrdersColumns);
         mapping.ShiftDateColumn = FindColumn(headerCells, ExcelColumnConfig.ShiftDateColumns);
+        mapping.WorkingHoursColumn = FindColumn(headerCells, ExcelColumnConfig.WorkingHoursColumns);  // ADD THIS
 
         var missingColumns = new List<string>();
 
@@ -1845,6 +1853,9 @@ public class RiderShiftService(ApplicationDbcontext dbcontext , IRiderWorkingIdH
             missingColumns.Add($"AcceptedOrders (tried: {string.Join(", ", ExcelColumnConfig.AcceptedOrdersColumns)})");
         if (mapping.ShiftDateColumn == 0)
             missingColumns.Add($"ShiftDate (tried: {string.Join(", ", ExcelColumnConfig.ShiftDateColumns)})");
+        if (mapping.WorkingHoursColumn == 0)  // ADD THIS
+            missingColumns.Add($"WorkingHours (tried: {string.Join(", ", ExcelColumnConfig.WorkingHoursColumns)})");  // ADD THIS
+
 
         if (missingColumns.Any())
         {
@@ -1862,6 +1873,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext , IRiderWorkingIdH
         string? WorkingId,
         DateOnly? ShiftDate,
         int? AcceptedOrders,
+        float? WorkingHours,  // ADD THIS
         string? ErrorMessage) ParseUpdateExcelRow(
         IXLRow row,
         UpdateColumnMapping mapping,
@@ -1872,7 +1884,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext , IRiderWorkingIdH
             var workingIdCell = row.Cell(mapping.WorkingIdColumn).Value;
             var workingId = workingIdCell.ToString()?.Trim();
             if (string.IsNullOrWhiteSpace(workingId))
-                return (false, null, null, null, "Invalid Working ID");
+                return (false, null, null, null,null, "Invalid Working ID");
 
             // Parse shift date
             var dateCell = row.Cell(mapping.ShiftDateColumn);
@@ -1892,13 +1904,13 @@ public class RiderShiftService(ApplicationDbcontext dbcontext , IRiderWorkingIdH
 
                     if (!shiftDate.HasValue)
                     {
-                        return (false, workingId, null, null, $"Invalid Shift Date format: '{dateString}'. Expected date format like: 1/4/2026, 01-04-2026, or 2026-01-04");
+                        return (false, workingId, null, null,null, $"Invalid Shift Date format: '{dateString}'. Expected date format like: 1/4/2026, 01-04-2026, or 2026-01-04");
                     }
                 }
             }
             catch (Exception ex)
             {
-                return (false, workingId, null, null, $"Error parsing Shift Date: {ex.Message}");
+                return (false, workingId, null, null, null, $"Error parsing Shift Date: {ex.Message}");
             }
 
             //string[] formats = { "yyyy-MM-dd", "MM/dd/yyyy", "M/d/yyyy" , "M/dd/yyyy" , "MM/d/yyyy" };
@@ -1910,13 +1922,19 @@ public class RiderShiftService(ApplicationDbcontext dbcontext , IRiderWorkingIdH
 
             var acceptedCell = row.Cell(mapping.AcceptedOrdersColumn).Value;
             if (!int.TryParse(acceptedCell.ToString(), out var acceptedOrders) || acceptedOrders < 0)
-                return (false, workingId, shiftDate, null, "Invalid Accepted Orders (must be >= 0)");
+                return (false, workingId, shiftDate, null,null, "Invalid Accepted Orders (must be >= 0)");
 
-            return (true, workingId, shiftDate, acceptedOrders, null);
+            var hoursCell = row.Cell(mapping.WorkingHoursColumn).Value;
+            if (!float.TryParse(hoursCell.ToString(), out var workingHours) || workingHours < 0 || workingHours > 24)
+                return (false, workingId, shiftDate, acceptedOrders, null, "Invalid Working Hours (must be 0-24)");
+
+
+
+            return (true, workingId, shiftDate, acceptedOrders, workingHours, null);  // UPDATE THIS
         }
         catch (Exception ex)
         {
-            return (false, null, null, null, $"Error: {ex.Message}");
+            return (false, null, null, null, null, $"Error: {ex.Message}");  // UPDATE THIS
         }
     }
     private static DateOnly? ParseDate(string? dateStr)
@@ -1955,6 +1973,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext , IRiderWorkingIdH
         public int WorkingIdColumn { get; set; }
         public int ShiftDateColumn { get; set; }
         public int AcceptedOrdersColumn { get; set; }
+        public int WorkingHoursColumn { get; set; }  // ADD THIS
     }
 
     public record BulkUpdateResult(

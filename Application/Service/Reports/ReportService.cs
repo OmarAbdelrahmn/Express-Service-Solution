@@ -1426,10 +1426,9 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                 new Error($"Error generating Company 2 daily summary: {ex.Message}", "server_error", 500));
         }
     }
+    // Updated method for GetCompany2CumulativeRiderStatsAsync
+    // Replace the existing method in ReportService.cs with this implementation
 
-    /// <summary>
-    /// Get cumulative rider statistics for Company 2 - Report 2: اجمالي الطلبات الى 13-01-2026
-    /// </summary>
     public async Task<Result<Company2CumulativeRiderReport>> GetCompany2CumulativeRiderStatsAsync(
         DateOnly endDate,
         CancellationToken cancellationToken = default)
@@ -1466,12 +1465,42 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                 if (rider?.Employee == null) continue;
 
                 var riderShifts = group.OrderBy(s => s.ShiftDate).ToList();
+
+                // Check if rider worked in previous month with this company
+                var workedPreviousMonth = await DidRiderWorkInPreviousMonthAsync(
+                    rider.Id,
+                    2, // Company 2 (Keta)
+                    monthStart,
+                    cancellationToken);
+
+                // Get rider's actual start date in this month
+                var riderStartDate = riderShifts.First().ShiftDate;
+
+                // Determine if this is a new rider (didn't work previous month and started after day 1)
+                var isNewRider = !workedPreviousMonth && riderStartDate > monthStart;
+
+                // Calculate expected days based on when they started
+                int riderExpectedDays;
+                int targetOrders;
+
+                if (isNewRider)
+                {
+                    // For new riders, calculate from their start date to end date
+                    riderExpectedDays = endDate.DayNumber - riderStartDate.DayNumber + 1;
+                    targetOrders = riderExpectedDays * TARGET_ORDERS_PER_DAY2;
+                }
+                else
+                {
+                    // For existing riders (worked previous month), use full month expectation
+                    riderExpectedDays = totalExpectedDays;
+                    targetOrders = totalExpectedDays * TARGET_ORDERS_PER_DAY2;
+                }
+
                 var totalOrders = riderShifts.Sum(s => s.AcceptedDailyOrders);
                 var workingDays = riderShifts.Count;
                 var avgOrdersPerDay = workingDays > 0 ? (float)totalOrders / workingDays : 0;
 
-                // Calculate deficit/surplus (العجز)
-                var targetOrders = totalExpectedDays * TARGET_ORDERS_PER_DAY2;
+                // Calculate deficit/surplus (العجز) based on adjusted target
                 var deficitOrSurplus = totalOrders - targetOrders;
 
                 var housingName = riderShifts.FirstOrDefault()?.Housing?.Name ?? "غير محدد";
@@ -1484,7 +1513,11 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                     TotalOrders: totalOrders,
                     AverageOrdersPerDay: avgOrdersPerDay,
                     DeficitOrSurplus: deficitOrSurplus,
-                    HousingGroup: housingName
+                    HousingGroup: housingName,
+                    ExpectedDays: riderExpectedDays,
+                    TargetOrders: targetOrders,
+                    IsNewRider: isNewRider,
+                    StartDate: riderStartDate
                 ));
             }
 
@@ -1513,6 +1546,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                 new Error($"Error generating Company 2 cumulative stats: {ex.Message}", "server_error", 500));
         }
     }
+
 
     /// <summary>
     /// Get daily rider details for Company 2 - Report 3: طلبات 13-01-2026
@@ -1597,6 +1631,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
         int TotalOrdersAllRiders
     );
 
+
     public record Company2RiderCumulativeStats(
         int RiderId,
         long IqamaNo,
@@ -1606,8 +1641,13 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
         float AverageOrdersPerDay,
         int DeficitOrSurplus,
         string HousingGroup,
+        int ExpectedDays,         // NEW: Actual expected days for this rider
+        int TargetOrders,         // NEW: Adjusted target based on expected days
+        bool IsNewRider,          // NEW: Flag indicating if rider is new this month
+        DateOnly StartDate,       // NEW: Date when rider started in this month
         int Rank = 0
     );
+
 
     public record Company2DailyRiderDetailsReport(
         DateOnly ReportDate,

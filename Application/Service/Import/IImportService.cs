@@ -10,6 +10,32 @@ namespace Application.Service.Import;
 
 public interface IImportService
 {
+    Task<Result<SparePartQuantityUpdateResponse>> UpdateSparePartQuantitiesAsync(
+    IFormFile file,
+    string uploadedBy);
+
+
+    // Add these records at the end of the file with other response records
+    public record SparePartQuantityUpdateResponse(
+        int TotalRecords,
+        int SuccessfulUpdates,
+        int NoChangeNeeded,
+        int SparePartNotFound,
+        int FailedRecords,
+        List<SparePartQuantityUpdateRowResult> Results,
+        List<string> Errors,
+        DateTime ProcessedAt
+    );
+
+    public record SparePartQuantityUpdateRowResult(
+        int RowNumber,
+        bool Success,
+        string Name,
+        int? OldQuantity,
+        int NewQuantity,
+        bool WasUpdated,
+        string? ErrorMessage
+    );
 
     Task<Result<CompanyTransferImportResponse>> TransferRidersToCompanyAsync(
     IFormFile file,
