@@ -1109,9 +1109,10 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
         var first3Days = Enumerable.Range(Math.Max(1, actualStartDay), Math.Min(FIRST_CRITICAL_DAYS, currentDayOfMonth - actualStartDay + 1)).ToList();
         var missingInFirst3 = first3Days.Intersect(missingDays).ToList();
 
-        // Rule 3: Check last 4 days
-        var last4DaysStart = Math.Max(actualStartDay, lastDayOfMonth - LAST_CRITICAL_DAYS + 1);
-        var last4Days = Enumerable.Range(last4DaysStart, Math.Min(LAST_CRITICAL_DAYS, lastDayOfMonth - last4DaysStart + 1))
+        // Rule 3: Check last 4 days (5 days for 31-day months to include day 31)
+        var lastCriticalDaysCount = lastDayOfMonth == 31 ? 5 : LAST_CRITICAL_DAYS;
+        var last4DaysStart = Math.Max(actualStartDay, lastDayOfMonth - lastCriticalDaysCount + 1);
+        var last4Days = Enumerable.Range(last4DaysStart, Math.Min(lastCriticalDaysCount, lastDayOfMonth - last4DaysStart + 1))
             .Where(d => d <= currentDayOfMonth && d >= actualStartDay)
             .ToList();
         var missingInLast4 = last4Days.Intersect(missingDays).ToList();
@@ -1136,7 +1137,12 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
             criticalDaysViolation = true;
             errors.Add($"❌ أيام مفقودة في أول {FIRST_CRITICAL_DAYS} أيام: {missingInFirst3.Count} أيام ({string.Join(", ", missingInFirst3)}) - المسموح فقط يوم واحد");
         }
-
+        if (missingInFirst3.Any() && missingInLast4.Any())
+        {
+            isValid = false;
+            criticalDaysViolation = true;
+            errors.Add($"❌ غياب في كل من أول الشهر ({string.Join(", ", missingInFirst3)}) وآخر الشهر ({string.Join(", ", missingInLast4)}) - غير مسموح");
+        }
         // Check last 4 days - max 1 missing allowed  
         if (missingInLast4.Count > 1)
         {
@@ -1239,27 +1245,41 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
             adjustedTargetOrders = (int)Math.Ceiling((decimal)expectedWorkingDays / lastDayOfMonth * FULL_MONTH_TARGET_ORDERS);
         }
 
-        // Determine allowed missing days based on start date and history
+        // Determine allowed missing days based on month length and rider start date
+        int baseAllowedMissingDays;
+
+        // Calculate base allowed missing days based on total days in the month
+        if (lastDayOfMonth == 31)
+        {
+            baseAllowedMissingDays = 5;
+        }
+        else if (lastDayOfMonth == 30)
+        {
+            baseAllowedMissingDays = 4;
+        }
+        else // 28 or 29 days (February)
+        {
+            baseAllowedMissingDays = 3;
+        }
+
         int allowedMissingDays;
+
         if (workedPreviousMonth || !isNewRider)
         {
-            // Existing rider - use standard rules (4 days max)
-            allowedMissingDays = MAX_ALLOWED_MISSING_DAYS;
-        }
-        else if (actualStartDay >= 11)
-        {
-            // New rider started from day 11 or later: only 1 day miss allowed
-            allowedMissingDays = 1;
-        }
-        else if (actualStartDay >= 2)
-        {
-            // New rider started before day 10: 2 days miss allowed
-            allowedMissingDays = 2;
+            // Existing rider - use full month base allowed days
+            allowedMissingDays = baseAllowedMissingDays;
         }
         else
         {
-            // Started from day 1: use the original MAX_ALLOWED_MISSING_DAYS (4)
-            allowedMissingDays = MAX_ALLOWED_MISSING_DAYS;
+            // New rider - calculate proportionally based on their working period
+            // Formula: (days they work / total days in month) * base allowed days
+            allowedMissingDays = (int)Math.Floor((decimal)expectedWorkingDays / lastDayOfMonth * baseAllowedMissingDays);
+
+            // Ensure at least 1 day is allowed even for very short periods
+            if (allowedMissingDays < 1)
+            {
+                allowedMissingDays = 1;
+            }
         }
 
         // Create a dictionary of shifts by date for easy lookup
@@ -1401,12 +1421,12 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
             }
 
             var totalOrders = shifts.Sum(s => s.AcceptedDailyOrders);
-            var totalShifts = shifts.Sum(s=>s.RejectedDailyOrders);
+            var totalShifts = shifts.Sum(s => s.RejectedDailyOrders);
             var totalWorkingHours = shifts.Sum(s => s.WorkingHours);
             var avgWorkingHours = totalShifts > 0 ? totalWorkingHours / totalShifts : 0;
 
             // Calculate on-time delivery rate
-            var totalOnTimeDeliveries =  0;
+            var totalOnTimeDeliveries = 0;
 
             var report = new Company2DailySummaryReport(
                 ReportDate: reportDate,

@@ -49,7 +49,8 @@ public record URiderRequest
     long? EmployeeIqamaNo,
     string? TshirtSize,
     string? LicenseNumber,
-    string? CompanyName
+    string? CompanyName,
+    int? HousingId
     );
 
 public record EMTOR

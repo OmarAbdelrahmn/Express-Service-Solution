@@ -533,6 +533,9 @@ public class RiderService(ApplicationDbcontext dbcontext,IRiderWorkingIdHistoryS
 
         if (request.INKSA.HasValue)
             employee.INKSA = request.INKSA.Value;
+
+        if(request.HousingId.HasValue)
+            employee.HousingId = request.HousingId.Value;
     }
 
     public async Task<List<RiderResponse>> SmartSearch(string keyword)
