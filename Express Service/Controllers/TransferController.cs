@@ -37,6 +37,14 @@ public class TransferController(ITransferService service) : ControllerBase
         return response.IsSuccess ? Ok(response.Value) : response.ToProblem();
     }
 
+    [HttpDelete("{id}")]
+    [Authorize(Roles = "Master,Admin,Member")]
+    public async Task<IActionResult> GetdById(int id)
+    {
+        var response = await service.DeleteTransferAsync(id);
+        return response.IsSuccess ? Ok(response.Value) : response.ToProblem();
+    }
+
     [HttpGet("housing/{housingId}")]
     [Authorize(Roles = "Master,Admin,Member")]
     public async Task<IActionResult> GetByHousing(int housingId)

@@ -12,6 +12,159 @@ public class TransferService(ApplicationDbcontext dbcontext) : ITransferService
     private readonly ApplicationDbcontext _dbcontext = dbcontext;
     private const string MAIN_LOCATION = "الشركة";
 
+
+
+    public async Task<Result<bool>> DeleteTransferAsync(int transferId)
+    {
+        using var transaction = await _dbcontext.Database.BeginTransactionAsync();
+
+        try
+        {
+            // Get transfer with items
+            var transfer = await _dbcontext.Transfers
+                .Include(t => t.TransferItems)
+                .FirstOrDefaultAsync(t => t.Id == transferId);
+
+            if (transfer == null)
+                return Result.Failure<bool>(
+                    new Error("TransferNotFound", "Transfer not found", 404));
+
+            // Reverse the transfer for each item
+            foreach (var item in transfer.TransferItems)
+            {
+                var reverseResult = await ReverseTransferItem(item, transfer.ToLocation);
+
+                if (!reverseResult)
+                    return Result.Failure<bool>(
+                        new Error("ReverseTransferFailed",
+                            $"Failed to reverse transfer for item {item.ItemName}. " +
+                            $"The item may not exist in housing location or has insufficient quantity.", 400));
+            }
+
+            // Delete transfer items first (due to foreign key)
+            _dbcontext.Set<TransferItem>().RemoveRange(transfer.TransferItems);
+
+            // Delete the transfer record
+            _dbcontext.Transfers.Remove(transfer);
+
+            await _dbcontext.SaveChangesAsync();
+            await transaction.CommitAsync();
+
+            return Result.Success(true);
+        }
+        catch (Exception ex)
+        {
+            await transaction.RollbackAsync();
+            return Result.Failure<bool>(
+                new Error("DeleteTransferError", $"Failed to delete transfer: {ex.Message}", 500));
+        }
+    }
+
+    private async Task<bool> ReverseTransferItem(TransferItem item, string housingLocation)
+    {
+        if (item.ItemType == TransferItemType.SparePart)
+        {
+            return await ReverseSparePartTransfer(item, housingLocation);
+        }
+        else if (item.ItemType == TransferItemType.Accessory)
+        {
+            return await ReverseAccessoryTransfer(item, housingLocation);
+        }
+
+        return false;
+    }
+
+    private async Task<bool> ReverseSparePartTransfer(TransferItem item, string housingLocation)
+    {
+        // Find item in housing location
+        var housingSparePart = await _dbcontext.SpareParts
+            .FirstOrDefaultAsync(sp => sp.Name == item.ItemName &&
+                                      sp.Location == housingLocation);
+
+        if (housingSparePart == null || housingSparePart.Quantity < item.Quantity)
+            return false;
+
+        // Find or create item in main location
+        var mainSparePart = await _dbcontext.SpareParts
+            .FirstOrDefaultAsync(sp => sp.Name == item.ItemName &&
+                                      sp.Location == MAIN_LOCATION);
+
+        if (mainSparePart != null)
+        {
+            // Add back to main location
+            mainSparePart.Quantity += item.Quantity;
+        }
+        else
+        {
+            // Create new in main location (shouldn't normally happen, but handle it)
+            mainSparePart = new Domain.Entities.Spare.SparePart
+            {
+                Name = item.ItemName,
+                Quantity = item.Quantity,
+                Price = housingSparePart.Price,
+                Location = MAIN_LOCATION,
+                CreatedAt = DateTime.UtcNow.AddHours(3)
+            };
+            await _dbcontext.SpareParts.AddAsync(mainSparePart);
+        }
+
+        // Reduce from housing location
+        housingSparePart.Quantity -= item.Quantity;
+
+        // Remove housing item if quantity becomes zero
+        if (housingSparePart.Quantity == 0)
+        {
+            _dbcontext.SpareParts.Remove(housingSparePart);
+        }
+
+        return true;
+    }
+    private async Task<bool> ReverseAccessoryTransfer(TransferItem item, string housingLocation)
+    {
+        // Find item in housing location
+        var housingAccessory = await _dbcontext.RiderAccessories
+            .FirstOrDefaultAsync(a => a.Name == item.ItemName &&
+                                     a.Location == housingLocation);
+
+        if (housingAccessory == null || housingAccessory.Quantity < item.Quantity)
+            return false;
+
+        // Find or create item in main location
+        var mainAccessory = await _dbcontext.RiderAccessories
+            .FirstOrDefaultAsync(a => a.Name == item.ItemName &&
+                                     a.Location == MAIN_LOCATION);
+
+        if (mainAccessory != null)
+        {
+            // Add back to main location
+            mainAccessory.Quantity += item.Quantity;
+        }
+        else
+        {
+            // Create new in main location (shouldn't normally happen, but handle it)
+            mainAccessory = new Domain.Entities.Spare.RiderAccessory
+            {
+                Name = item.ItemName,
+                Quantity = item.Quantity,
+                Price = housingAccessory.Price,
+                Location = MAIN_LOCATION,
+                CreatedAt = DateTime.UtcNow.AddHours(3)
+            };
+            await _dbcontext.RiderAccessories.AddAsync(mainAccessory);
+        }
+
+        // Reduce from housing location
+        housingAccessory.Quantity -= item.Quantity;
+
+        // Remove housing item if quantity becomes zero
+        if (housingAccessory.Quantity == 0)
+        {
+            _dbcontext.RiderAccessories.Remove(housingAccessory);
+        }
+
+        return true;
+    }
+
     public async Task<Result<TransferResponse>> TransferToHousingAsync(
         TransferRequest request,
         string transferredBy)

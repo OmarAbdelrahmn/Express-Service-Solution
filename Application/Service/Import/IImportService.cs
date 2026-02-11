@@ -41,7 +41,9 @@ public interface IImportService
     IFormFile file,
     int newCompanyId,
     string uploadedBy);
-
+    Task<Result<CompanyTransferImportResponse>> TransferRidersByIqamaAsync(
+    IFormFile file,
+    int newCompanyId);
     Task<Result<SparePartImportResponse>> ImportSparePartsAsync(IFormFile file, string uploadedBy);
     Task<Result<RiderAccessoryImportResponse>> ImportRiderAccessoriesAsync(IFormFile file, string uploadedBy);
 

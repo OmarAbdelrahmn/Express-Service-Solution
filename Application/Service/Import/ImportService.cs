@@ -23,6 +23,367 @@ public class ImportService(ApplicationDbcontext dbcontext , IRiderSub riderSub) 
     private readonly ApplicationDbcontext _dbcontext = dbcontext;
     private readonly IRiderSub riderSub = riderSub;
 
+
+    // Add this method to ImportService.cs
+
+    public async Task<Result<CompanyTransferImportResponse>> TransferRidersByIqamaAsync(
+        IFormFile file,
+        int newCompanyId
+        )
+    {
+        if (file == null || file.Length == 0)
+            return Result.Failure<CompanyTransferImportResponse>(
+                new Error("InvalidFile", "File is empty or null", 400));
+
+        if (!file.FileName.EndsWith(".xlsx") && !file.FileName.EndsWith(".xls"))
+            return Result.Failure<CompanyTransferImportResponse>(
+                new Error("InvalidFormat", "File must be Excel format (.xlsx or .xls)", 400));
+
+        var results = new List<CompanyTransferRowResult>();
+        var errors = new List<string>();
+        int successfulTransfers = 0;
+        int failedRecords = 0;
+        int employeeNotFound = 0;
+        int riderDetailsNotFound = 0;
+        int companyNotFound = 0;
+
+        try
+        {
+            // Verify company exists
+            var newCompany = await _dbcontext.Companies
+                .FirstOrDefaultAsync(c => c.Id == newCompanyId);
+
+            if (newCompany == null)
+            {
+                return Result.Failure<CompanyTransferImportResponse>(
+                    new Error("CompanyNotFound", $"Company with ID {newCompanyId} not found", 404));
+            }
+
+            using var stream = file.OpenReadStream();
+            using var workbook = new XLWorkbook(stream);
+            var worksheet = workbook.Worksheet(1);
+
+            if (worksheet == null)
+            {
+                return Result.Failure<CompanyTransferImportResponse>(
+                    new Error("InvalidWorksheet", "Could not read worksheet", 400));
+            }
+
+            var headerRow = FindIqamaOnlyHeaderRow(worksheet);
+            if (headerRow == null)
+            {
+                return Result.Failure<CompanyTransferImportResponse>(
+                    new Error("EmptyFile", "Excel file has no header row", 400));
+            }
+
+            var columnMap = BuildIqamaOnlyColumnMapping(headerRow);
+            if (!columnMap.IsValid)
+            {
+                return Result.Failure<CompanyTransferImportResponse>(
+                    new Error("InvalidColumns", columnMap.ErrorMessage!, 400));
+            }
+
+            var dataRows = worksheet.RowsUsed()
+                .Where(r => r.RowNumber() > headerRow.RowNumber())
+                .ToList();
+
+            var rowNumber = headerRow.RowNumber();
+
+            foreach (var row in dataRows)
+            {
+                rowNumber++;
+
+                using var transaction = await _dbcontext.Database.BeginTransactionAsync();
+                try
+                {
+                    var rowData = ParseIqamaOnlyRowData(row, columnMap, rowNumber);
+
+                    if (!rowData.IsValid)
+                    {
+                        failedRecords++;
+                        results.Add(new CompanyTransferRowResult(
+                            rowNumber,
+                            false,
+                            rowData.IqamaNo?.ToString() ?? "N/A",
+                            null,
+                            null,
+                            newCompanyId,
+                            null,
+                            null,
+                            newCompany.Name,
+                            null,
+                            null,
+                            new List<string>(),
+                            rowData.ErrorMessage
+                        ));
+                        continue;
+                    }
+
+                    var warnings = new List<string>();
+
+                    // Find employee with rider details
+                    var employee = await _dbcontext.Employees
+                        .Include(e => e.RiderDetails)
+                            .ThenInclude(rd => rd!.Company)
+                        .FirstOrDefaultAsync(e => e.IqamaNo == rowData.IqamaNo!.Value);
+
+                    if (employee == null)
+                    {
+                        employeeNotFound++;
+                        failedRecords++;
+                        results.Add(new CompanyTransferRowResult(
+                            rowNumber,
+                            false,
+                            rowData.IqamaNo!.Value.ToString(),
+                            null,
+                            null,
+                            newCompanyId,
+                            null,
+                            null,
+                            newCompany.Name,
+                            null,
+                            null,
+                            warnings,
+                            "Employee with this Iqama number not found"
+                        ));
+                        await transaction.RollbackAsync();
+                        continue;
+                    }
+
+                    if (employee.RiderDetails == null)
+                    {
+                        riderDetailsNotFound++;
+                        failedRecords++;
+                        results.Add(new CompanyTransferRowResult(
+                            rowNumber,
+                            false,
+                            rowData.IqamaNo!.Value.ToString(),
+                            null,
+                            null,
+                            newCompanyId,
+                            null,
+                            null,
+                            newCompany.Name,
+                            employee.NameEN,
+                            employee.NameAR,
+                            warnings,
+                            "Employee exists but has no RiderDetails record"
+                        ));
+                        await transaction.RollbackAsync();
+                        continue;
+                    }
+
+                    // Store old values
+                    string? currentWorkingId = employee.RiderDetails.WorkingId;
+                    int oldCompanyId = employee.RiderDetails.CompanyId;
+                    string? oldCompanyName = employee.RiderDetails.Company?.Name;
+
+                    // Check if already in target company
+                    if (oldCompanyId == newCompanyId)
+                    {
+                        warnings.Add($"Already in company '{newCompany.Name}'");
+                    }
+
+                    // Deactivate old WorkingId histories
+                    var oldHistories = await _dbcontext.RiderWorkingIdHistories
+                        .Where(h => h.RiderIqamaNo == employee.IqamaNo && h.IsActive)
+                        .ToListAsync();
+
+                    var now = DateTime.UtcNow.AddHours(3);
+
+                    foreach (var oldHistory in oldHistories)
+                    {
+                        oldHistory.IsActive = false;
+                        oldHistory.EndDate = now;
+                    }
+
+                    // Update CompanyId ONLY (keep WorkingId the same)
+                    employee.RiderDetails.CompanyId = newCompanyId;
+
+                    // Add new WorkingId history with EXISTING WorkingId
+                    var newHistory = new RiderWorkingIdHistory
+                    {
+                        RiderIqamaNo = employee.IqamaNo,
+                        WorkingId = currentWorkingId ?? $"AUTO_{employee.IqamaNo}",
+                        CompanyId = newCompanyId,
+                        StartDate = now,
+                        IsActive = true,
+                        Notes = $"Transferred to {newCompany.Name} by omar via bulk import (WorkingId unchanged)"
+                    };
+
+                    await _dbcontext.RiderWorkingIdHistories.AddAsync(newHistory);
+
+                    await _dbcontext.SaveChangesAsync();
+                    await transaction.CommitAsync();
+
+                    successfulTransfers++;
+                    results.Add(new CompanyTransferRowResult(
+                        rowNumber,
+                        true,
+                        rowData.IqamaNo!.Value.ToString(),
+                        currentWorkingId, // Same as old WorkingId
+                        currentWorkingId, // Old WorkingId (unchanged)
+                        newCompanyId,
+                        oldCompanyId,
+                        oldCompanyName,
+                        newCompany.Name,
+                        employee.NameEN,
+                        employee.NameAR,
+                        warnings,
+                        null
+                    ));
+                }
+                catch (Exception ex)
+                {
+                    await transaction.RollbackAsync();
+                    failedRecords++;
+                    errors.Add($"Row {rowNumber}: {ex.Message}");
+
+                    results.Add(new CompanyTransferRowResult(
+                        rowNumber,
+                        false,
+                        "N/A",
+                        null,
+                        null,
+                        newCompanyId,
+                        null,
+                        null,
+                        newCompany.Name,
+                        null,
+                        null,
+                        new List<string>(),
+                        $"Exception: {ex.Message}"
+                    ));
+                }
+            }
+
+            var response = new CompanyTransferImportResponse(
+                TotalRecords: dataRows.Count,
+                SuccessfulTransfers: successfulTransfers,
+                FailedRecords: failedRecords,
+                EmployeeNotFound: employeeNotFound,
+                RiderDetailsNotFound: riderDetailsNotFound,
+                CompanyNotFound: companyNotFound,
+                Results: results,
+                Errors: errors,
+                ProcessedAt: DateTime.UtcNow.AddHours(3)
+            );
+
+            return Result.Success(response);
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<CompanyTransferImportResponse>(
+                new Error("ProcessingError", $"Failed to process Excel file: {ex.Message}", 500));
+        }
+    }
+
+    // Helper methods
+    private IXLRow? FindIqamaOnlyHeaderRow(IXLWorksheet worksheet)
+    {
+        var knownColumns = new[]
+        {
+        "IqamaNumber", "Iqama Number", "رقم الاقامة", "رقم الإقامة",
+        "IqamaNo", "Iqama No", "Iqama", "الاقامة"
+    };
+
+        for (int i = 1; i <= Math.Min(10, worksheet.RowsUsed().Count()); i++)
+        {
+            var row = worksheet.Row(i);
+            var cellValues = row.CellsUsed()
+                .Select(c => c.IsMerged()
+                    ? c.MergedRange().FirstCell().GetString().Trim()
+                    : c.GetString().Trim())
+                .Where(v => !string.IsNullOrWhiteSpace(v))
+                .ToList();
+
+            int matchCount = cellValues.Count(cv =>
+                knownColumns.Any(kc =>
+                    cv.Equals(kc, StringComparison.OrdinalIgnoreCase) ||
+                    cv.Replace(" ", "").Equals(kc.Replace(" ", ""), StringComparison.OrdinalIgnoreCase)));
+
+            if (matchCount >= 1)
+                return row;
+        }
+
+        return worksheet.Row(1);
+    }
+
+    private IqamaOnlyColumnMapping BuildIqamaOnlyColumnMapping(IXLRow headerRow)
+    {
+        var mapping = new IqamaOnlyColumnMapping();
+        var cells = headerRow.CellsUsed().ToList();
+
+        mapping.IqamaNoCol = FindColumn(cells,
+            "IqamaNumber", "Iqama Number", "IqamaNo", "رقم الاقامة", "رقم الإقامة", "Iqama", "الاقامة");
+
+        var missing = new List<string>();
+        if (mapping.IqamaNoCol == 0) missing.Add("Iqama Number");
+
+        if (missing.Any())
+        {
+            mapping.IsValid = false;
+            mapping.ErrorMessage = $"Required column missing: {string.Join(", ", missing)}";
+        }
+        else
+        {
+            mapping.IsValid = true;
+        }
+
+        return mapping;
+    }
+
+    private IqamaOnlyRowData ParseIqamaOnlyRowData(
+        IXLRow row,
+        IqamaOnlyColumnMapping map,
+        int rowNumber)
+    {
+        var data = new IqamaOnlyRowData { RowNumber = rowNumber };
+
+        try
+        {
+            var iqamaStr = GetCellValue(row, map.IqamaNoCol);
+            if (string.IsNullOrWhiteSpace(iqamaStr))
+            {
+                data.IsValid = false;
+                data.ErrorMessage = "Iqama Number is required";
+                return data;
+            }
+
+            if (!long.TryParse(iqamaStr.Replace(" ", ""), out long iqamaNo) || iqamaNo <= 0)
+            {
+                data.IsValid = false;
+                data.ErrorMessage = $"Invalid Iqama Number: {iqamaStr}";
+                return data;
+            }
+            data.IqamaNo = iqamaNo;
+
+            data.IsValid = true;
+        }
+        catch (Exception ex)
+        {
+            data.IsValid = false;
+            data.ErrorMessage = $"Error parsing row: {ex.Message}";
+        }
+
+        return data;
+    }
+
+    // Internal classes
+    internal class IqamaOnlyColumnMapping
+    {
+        public bool IsValid { get; set; }
+        public string? ErrorMessage { get; set; }
+        public int IqamaNoCol { get; set; }
+    }
+
+    internal class IqamaOnlyRowData
+    {
+        public int RowNumber { get; set; }
+        public bool IsValid { get; set; }
+        public string? ErrorMessage { get; set; }
+        public long? IqamaNo { get; set; }
+    }
     public async Task<Result<SparePartQuantityUpdateResponse>> UpdateSparePartQuantitiesAsync(
     IFormFile file,
     string uploadedBy)

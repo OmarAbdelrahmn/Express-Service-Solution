@@ -12,4 +12,6 @@ public interface ITransferService
     Task<Result<IEnumerable<TransferResponse>>> GetAllTransfersAsync();
     Task<Result<TransferResponse>> GetTransferByIdAsync(int id);
     Task<Result<IEnumerable<TransferResponse>>> GetTransfersByHousingAsync(int housingId);
+    Task<Result<bool>> DeleteTransferAsync(int transferId);
+
 }

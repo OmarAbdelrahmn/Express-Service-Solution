@@ -140,6 +140,42 @@ public class ImportController(IImportService service , IBackgroundImportService 
 
         return result.ToProblem();
     }
+    [HttpPost("transfer-to-company2")]
+    public async Task<IActionResult> TransferRidersToCompany2(
+    IFormFile file,
+    [FromQuery] int companyId)
+    {
+        if (file == null || file.Length == 0)
+            return BadRequest(new { error = "No file uploaded or file is empty" });
+
+        if (!file.FileName.EndsWith(".xlsx") && !file.FileName.EndsWith(".xls"))
+            return BadRequest(new { error = "File must be Excel format (.xlsx or .xls)" });
+
+
+        var result = await service.TransferRidersByIqamaAsync(file, companyId);
+
+        if (result.IsSuccess)
+        {
+            return Ok(new
+            {
+                success = true,
+                data = result.Value,
+                summary = new
+                {
+                    totalRecords = result.Value.TotalRecords,
+                    successfulTransfers = result.Value.SuccessfulTransfers,
+                    failedRecords = result.Value.FailedRecords,
+                    employeeNotFound = result.Value.EmployeeNotFound,
+                    riderDetailsNotFound = result.Value.RiderDetailsNotFound,
+                    successRate = result.Value.TotalRecords > 0
+                        ? $"{(result.Value.SuccessfulTransfers * 100.0 / result.Value.TotalRecords):F1}%"
+                        : "0%"
+                }
+            });
+        }
+
+        return result.ToProblem();
+    }
 
     [HttpGet("transfer-to-company-template-info")]
     public IActionResult GetTransferToCompanyTemplateInfo()
