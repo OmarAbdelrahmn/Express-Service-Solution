@@ -2019,6 +2019,17 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
                 .OrderByDescending(rvs => rvs.Timestamp)
                 .ToListAsync();
 
+            var statusIqamas = allStatuses
+            .Where(s => s.EmployeeIqamaNo.HasValue)
+            .Select(s => s.EmployeeIqamaNo!.Value)
+            .Distinct()
+            .ToList();
+
+            var statusEmployees = await context.Employees
+                .Where(e => statusIqamas.Contains(e.IqamaNo))
+                .ToDictionaryAsync(e => e.IqamaNo);
+
+
             // Step 7: Get the latest status for each vehicle (in memory)
             var statusDict = allStatuses
                 .GroupBy(s => s.VehicleNumber)
@@ -2039,8 +2050,31 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
                 statusDict.TryGetValue(v.VehicleNumber, out var status);
                 riderDict.TryGetValue(v.VehicleNumber, out var rider);
 
-                var statusType = status?.StatusType.ToString() ?? "Returned"; // or "Available", "Unassigned", etc.
+                var statusType = status?.StatusType.ToString() ?? "Returned";
                 var statusTimestamp = status?.Timestamp;
+
+                // Get rider info: prioritize status record for "Taken" vehicles
+                long? assignedIqama = null;
+                string? assignedNameAR = null;
+                string? assignedNameEN = null;
+
+                if (status?.StatusType == VehicleStatusType.Taken && status.EmployeeIqamaNo.HasValue)
+                {
+                    // Get employee from status record
+                    assignedIqama = status.EmployeeIqamaNo;
+                    if (statusEmployees.TryGetValue(status.EmployeeIqamaNo.Value, out var statusEmployee))
+                    {
+                        assignedNameAR = statusEmployee.NameAR;
+                        assignedNameEN = statusEmployee.NameEN;
+                    }
+                }
+                else if (rider != null)
+                {
+                    // Use rider from RiderDetails
+                    assignedIqama = rider.EmployeeIqamaNo;
+                    assignedNameAR = rider.Employee?.NameAR;
+                    assignedNameEN = rider.Employee?.NameEN;
+                }
 
                 return new HousingVehicleResponse(
                     v.VehicleNumber,
@@ -2052,9 +2086,9 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
                     v.LicenseExpiryDate,
                     v.Location,
                     statusType,
-                    rider?.EmployeeIqamaNo,
-                    rider?.Employee?.NameAR,
-                    rider?.Employee?.NameEN,
+                    assignedIqama,
+                    assignedNameAR,
+                    assignedNameEN,
                     statusTimestamp
                 );
             }).ToList();
@@ -2068,6 +2102,7 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
             );
         }
     }
+
     public async Task<Result<List<VehicleStatusHistoryResponse>>> GetVehicleStatusHistory(
         long managerIqamaNo,
         string vehicleNumber)
