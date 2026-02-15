@@ -45,7 +45,7 @@ public class CompanyController(ICompanyService service) : ControllerBase
     }
 
     [HttpGet("")]
-    [Authorize(Roles = "Master,Admin")]
+    [Authorize(Roles = "Master,Admin,Member")]
  
     public async Task<IActionResult> GetAllEmployee()
     {

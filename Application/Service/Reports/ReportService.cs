@@ -3769,6 +3769,7 @@ public async Task<Result<HousingDetailedDailyPerformanceReport>> GetHousingDetai
 
             var allRiders = await _dbcontext.RiderDetails
                 .Include(r => r.Employee)
+                .Where(d=>!d.Employee.IsDeleted)
                 .AsNoTracking()
                 .ToListAsync(cancellationToken);
 

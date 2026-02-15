@@ -31,6 +31,95 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
     private const float TARGET_HOURS_PER_DAY = 9f;
     private const int TARGET_ORDERS_PER_DAY = 14;
 
+    public async Task<Result<UpdateRiderCompanyResponse>> UpdateRiderCompanyAsync(
+    long managerIqamaNo,
+    MemberUpdateRiderCompanyRequest request)
+    {
+        var housingResult = await GetManagedHousing(managerIqamaNo);
+        if (housingResult.IsFailure)
+            return Result.Failure<UpdateRiderCompanyResponse>(housingResult.Error);
+
+        var housing = housingResult.Value;
+        var employeeIqamas = housing.Employees.Where(e => !e.IsDeleted).Select(e => e.IqamaNo).ToList();
+
+        // Verify rider belongs to this housing
+        var rider = await context.RiderDetails
+            .Include(r => r.Employee)
+            .Include(r => r.Company)
+            .FirstOrDefaultAsync(r => r.Id == request.RiderId
+                && employeeIqamas.Contains(r.EmployeeIqamaNo));
+
+        if (rider == null)
+            return Result.Failure<UpdateRiderCompanyResponse>(
+                HousingMemberErrors.RiderNotFound);
+
+        // Check if already assigned to this company
+        if (rider.CompanyId == request.NewCompanyId)
+            return Result.Failure<UpdateRiderCompanyResponse>(
+                HousingMemberErrors.SameCompanyAssignment);
+
+        // Verify new company exists
+        var newCompany = await context.Companies
+            .FirstOrDefaultAsync(c => c.Id == request.NewCompanyId);
+
+        if (newCompany == null)
+            return Result.Failure<UpdateRiderCompanyResponse>(
+                HousingMemberErrors.CompanyNotFound);
+
+        // Get manager name
+        var manager = await context.Employees
+            .FirstOrDefaultAsync(e => e.IqamaNo == managerIqamaNo);
+
+        if (manager == null)
+            return Result.Failure<UpdateRiderCompanyResponse>(UserErrors.UserNotFound);
+
+        var oldCompanyId = rider.CompanyId;
+        var oldCompanyName = rider.Company.Name;
+
+        using var transaction = await context.Database.BeginTransactionAsync();
+
+        try
+        {
+            // Create history record
+            var history = new RiderCompanyHistory
+            {
+                RiderId = rider.Id,
+                CompanyId = oldCompanyId,
+                StartDate = rider.CreatedAt,
+                EndDate = DateTime.UtcNow.AddHours(3),
+                Reason = request.Reason ?? $"Company changed by housing manager: {manager.NameAR}"
+            };
+            await context.RiderCompanyHistory.AddAsync(history);
+
+            // Update rider's company
+            rider.CompanyId = request.NewCompanyId;
+
+            await context.SaveChangesAsync();
+            await transaction.CommitAsync();
+
+            var response = new UpdateRiderCompanyResponse(
+                RiderId: rider.Id,
+                RiderIqamaNo: rider.EmployeeIqamaNo,
+                RiderName: rider.Employee.NameAR,
+                WorkingId: rider.WorkingId ?? "N/A",
+                OldCompanyId: oldCompanyId,
+                OldCompanyName: oldCompanyName,
+                NewCompanyId: request.NewCompanyId,
+                NewCompanyName: newCompany.Name,
+                ChangedAt: DateTime.UtcNow.AddHours(3),
+                ChangedBy: manager.NameAR,
+                Reason: request.Reason
+            );
+
+            return Result.Success(response);
+        }
+        catch (Exception ex)
+        {
+            await transaction.RollbackAsync();
+            return Result.Failure<UpdateRiderCompanyResponse>(
+                new Error("UpdateError", $"Failed to update rider company: {ex.Message}", 500));
+        }
+    }
 
     // Add this method to the MemberService class
     public async Task<Result> CancelVehicleOperationRequestAsync(

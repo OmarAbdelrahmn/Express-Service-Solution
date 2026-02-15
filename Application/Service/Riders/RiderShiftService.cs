@@ -987,6 +987,11 @@ public class RiderShiftService(ApplicationDbcontext dbcontext , IRiderWorkingIdH
             {
                 return (false, workingId, acceptedOrders, rejectedOrders, stackedDeliveries, workingHours, "Accepted Orders, Rejected Orders, and Stacked Deliveries cannot all be zero");
             }
+        
+            if(acceptedOrders == 0 && rejectedOrders == 0 && stackedDeliveries == 0 && workingHours <= 1)
+            {
+                return (false, workingId, acceptedOrders, rejectedOrders, stackedDeliveries, workingHours, "Accepted Orders, Rejected Orders, and Stacked Deliveries cannot all be zero");
+            }
 
  
             return (true, workingId, acceptedOrders, rejectedOrders, stackedDeliveries, workingHours, null);

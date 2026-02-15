@@ -122,4 +122,21 @@ public static class HousingMemberErrors
         "Transfer must contain at least one item",
         StatusCodes.Status400BadRequest
     );
+    public static readonly Error RiderNotFound = new(
+    "HousingMember.RiderNotFound",
+    "Rider not found in your housing",
+    StatusCodes.Status404NotFound
+);
+
+    public static readonly Error CompanyNotFound = new(
+        "HousingMember.CompanyNotFound",
+        "Company not found",
+        StatusCodes.Status404NotFound
+    );
+
+    public static readonly Error SameCompanyAssignment = new(
+        "HousingMember.SameCompanyAssignment",
+        "Rider is already assigned to this company",
+        StatusCodes.Status400BadRequest
+    );
 }

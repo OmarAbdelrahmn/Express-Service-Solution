@@ -258,6 +258,13 @@ public interface IMemberService
         long managerIqamaNo,
         DateTime fromDate,
         DateTime toDate);
+
+    /// <summary>
+    /// Update rider's company assignment
+    /// </summary>
+    Task<Result<UpdateRiderCompanyResponse>> UpdateRiderCompanyAsync(
+        long managerIqamaNo,
+        MemberUpdateRiderCompanyRequest request);
 }
 // Add these records at the end of the IMemberService.cs file
 
@@ -879,4 +886,23 @@ public record VehicleUtilization(
     int DaysInUse,
     int TotalOrders,
     string? PrimaryRiderName
+);
+public record MemberUpdateRiderCompanyRequest(
+    int RiderId,
+    int NewCompanyId,
+    string? Reason = null
+);
+
+public record UpdateRiderCompanyResponse(
+    int RiderId,
+    long RiderIqamaNo,
+    string RiderName,
+    string WorkingId,
+    int OldCompanyId,
+    string OldCompanyName,
+    int NewCompanyId,
+    string NewCompanyName,
+    DateTime ChangedAt,
+    string ChangedBy,
+    string? Reason
 );

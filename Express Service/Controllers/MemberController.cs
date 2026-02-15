@@ -23,6 +23,14 @@ public class MemberController(IMemberService housingService) : ControllerBase
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
 
+    [HttpPost("edit-rider-company")]
+    public async Task<IActionResult> editridercompany([FromBody] MemberUpdateRiderCompanyRequest request)
+    {
+        var managerIqamaNo = User.GetUserIqamaNo()!;
+        var result = await housingService.UpdateRiderCompanyAsync(managerIqamaNo, request);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
     /// <summary>
     /// Get all transfers made by this housing
     /// </summary>
