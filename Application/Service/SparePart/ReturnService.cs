@@ -1,5 +1,4 @@
 ﻿using Application.Abstraction;
-using Application.Abstraction.Errors;
 using Application.Contracts.SparePartCo;
 using Application.Service.SparePart;
 using Domain;

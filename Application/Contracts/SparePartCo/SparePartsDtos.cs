@@ -1,8 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
-
-namespace Application.Contracts.SparePartCo;
+﻿namespace Application.Contracts.SparePartCo;
 
 internal class SparePartsDtos
 {

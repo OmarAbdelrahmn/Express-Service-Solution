@@ -3,7 +3,6 @@ using Application.Abstraction.Errors;
 using Application.Contracts.Users;
 using Domain;
 using Domain.Entities;
-using Mapster;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -13,7 +12,7 @@ namespace Application.Service.Admin;
 
 public class AdminService(
      UserManager<ApplicationUser> manager
-    , ApplicationDbcontext dbcontext ) : IAdminService
+    , ApplicationDbcontext dbcontext) : IAdminService
 {
     private readonly UserManager<ApplicationUser> manager = manager;
     private readonly ApplicationDbcontext dbcontext = dbcontext;
@@ -21,7 +20,7 @@ public class AdminService(
 
     public async Task<Result> ResetPasswordAsync(string userName)
     {
-        string tempPassword = "P@ssword1234"; 
+        string tempPassword = "P@ssword1234";
 
         var user = await manager.FindByNameAsync(userName);
 
@@ -94,7 +93,7 @@ public class AdminService(
                    roles = roles.Select(r => r.Name!).ToList(),
                    u.LastLogin
                })
-                  .GroupBy(x => new { x.Id, x.UserName, x.Address, x.FullName, x.IsDisable , x.LastLogin })
+                  .GroupBy(x => new { x.Id, x.UserName, x.Address, x.FullName, x.IsDisable, x.LastLogin })
                   .Select(c => new UserResponses(
                       c.Key.Id,
                       c.Key.FullName,

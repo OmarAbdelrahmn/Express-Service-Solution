@@ -1,17 +1,13 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
-
-namespace Domain.Entities;
+﻿namespace Domain.Entities;
 
 public class RiderShift
-{ 
+{
     public int RiderId { get; set; }
-    public string WorkingId { get; set; } 
+    public string WorkingId { get; set; }
     public DateOnly ShiftDate { get; set; }
     public int AcceptedDailyOrders { get; set; }
     public int RejectedDailyOrders { get; set; }
-    public int StackedDeliveries{ get; set; }
+    public int StackedDeliveries { get; set; }
     public int RealRejectedDailyOrders { get; set; }
     public int? HousingId { get; set; }
     public float WorkingHours { get; set; }

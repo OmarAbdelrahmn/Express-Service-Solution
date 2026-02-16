@@ -4,9 +4,6 @@ using Domain;
 using Domain.Entities;
 using Mapster;
 using Microsoft.EntityFrameworkCore;
-using System;
-using System.Collections.Generic;
-using System.Text;
 
 namespace Application.Service.Empolyee;
 
@@ -66,14 +63,14 @@ public class HousingService(ApplicationDbcontext dbcontext) : IHousingService
 
     public async Task<Result<IEnumerable<HousingResponse>>> Get(string Name)
     {
-        var companies = await dbcontext.Housings.Where(c => c.Name.StartsWith(Name)).Include(c=>c.Employees).AsNoTracking().ToListAsync();
+        var companies = await dbcontext.Housings.Where(c => c.Name.StartsWith(Name)).Include(c => c.Employees).AsNoTracking().ToListAsync();
 
         if (companies == null)
             return Result.Failure<IEnumerable<HousingResponse>>(new Error("Housing.NotFound", $"Housing starts with name {Name} was not found.", 404));
 
         var companyResponses = companies.Adapt<IEnumerable<HousingResponse>>();
 
-        return Result.Success(companyResponses); 
+        return Result.Success(companyResponses);
     }
 
     public async Task<Result<IEnumerable<HousingResponse>>> GetAllEmployee()
@@ -100,14 +97,14 @@ public class HousingService(ApplicationDbcontext dbcontext) : IHousingService
         return Result.Success(companyResponses);
     }
 
-    public async Task<Result<UHousingResponse>> UpdateAsync(string editHousingName ,HousingRequest Request)
+    public async Task<Result<UHousingResponse>> UpdateAsync(string editHousingName, HousingRequest Request)
     {
         var companies = await dbcontext.Housings.Where(c => c.Name == editHousingName).FirstOrDefaultAsync();
 
         if (companies == null)
             return Result.Failure<UHousingResponse>(new Error("house.NotFound", $"Housing with name {Request.Name} was not found.", 404));
 
-       
+
         companies.Name = Request.Name;
         companies.Address = Request.Address;
         companies.Capacity = Request.Capacity;

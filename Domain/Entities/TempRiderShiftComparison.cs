@@ -1,19 +1,17 @@
-﻿using System;
-
-namespace Domain.Entities;
+﻿namespace Domain.Entities;
 
 public class TempRiderShiftComparison
 {
     public int Id { get; set; }
 
-    public int RiderId { get; set; }  
-    public string WorkingId { get; set; } 
+    public int RiderId { get; set; }
+    public string WorkingId { get; set; }
     public DateOnly ShiftDate { get; set; }
     public int CompanyId { get; set; }
     public int? HousingId { get; set; }
 
-    public bool IsSubstitution { get; set; }  
-    public string? OriginalRiderWorkingId { get; set; }  
+    public bool IsSubstitution { get; set; }
+    public string? OriginalRiderWorkingId { get; set; }
 
     public int? OldAcceptedDailyOrders { get; set; }
     public int? OldRejectedDailyOrders { get; set; }
@@ -50,8 +48,8 @@ public record ShiftComparisonResponse(
     int HousingId,
     int DailyOrderTarget,
     bool IsSubstitution,
-    string? OriginalRiderWorkingId,  
-    string SubstitutionNote, 
+    string? OriginalRiderWorkingId,
+    string SubstitutionNote,
     ShiftComparisonData OldData,
     ShiftComparisonData NewData,
     ComparisonAnalysis Analysis

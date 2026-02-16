@@ -18,7 +18,6 @@ using Application.Service.SupplierSer;
 using Application.Service.temp;
 using Application.Service.Transfer;
 using Application.Service.User;
-using DocumentFormat.OpenXml.Office2016.Drawing.ChartDrawing;
 using Domain;
 using Domain.Entities;
 using FluentValidation;
@@ -27,11 +26,7 @@ using MapsterMapper;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Tokens;
-using System;
-using System.Collections.Generic;
 using System.Reflection;
 using System.Text;
 
@@ -67,10 +62,10 @@ public static class ApplicationDependencies
         Services.AddScoped<IRiderAccessoryService, RiderAccessoryService>();
         Services.AddScoped<ITransferService, TransferService>();
         Services.AddScoped<IBillService, BillService>();
-        Services.AddScoped<ISupplierService,SupplierService>();
-        Services.AddScoped<IReturnService,ReturnService>();
-        Services.AddScoped<IFreelancerService,FreelancerService>();
- 
+        Services.AddScoped<ISupplierService, SupplierService>();
+        Services.AddScoped<IReturnService, ReturnService>();
+        Services.AddScoped<IFreelancerService, FreelancerService>();
+
 
 
         Services.AddAuth(configuration)

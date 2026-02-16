@@ -1,5 +1,4 @@
 using Express_Service;
-using Microsoft.Build.Tasks;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -33,11 +32,11 @@ var app = builder.Build();
 // Configure the HTTP request pipeline.
 //if (app.Environment.IsDevelopment())
 //{
-    app.UseSwagger();
-    app.UseSwaggerUI(c =>
-    {
-        c.DocExpansion(Swashbuckle.AspNetCore.SwaggerUI.DocExpansion.None);
-    });
+app.UseSwagger();
+app.UseSwaggerUI(c =>
+{
+    c.DocExpansion(Swashbuckle.AspNetCore.SwaggerUI.DocExpansion.None);
+});
 //}
 
 app.UseResponseCaching();

@@ -1,8 +1,5 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
+﻿namespace Domain.Entities.Spare;
 
-namespace Domain.Entities.Spare;
 public class BillItem
 {
     public int Id { get; set; }

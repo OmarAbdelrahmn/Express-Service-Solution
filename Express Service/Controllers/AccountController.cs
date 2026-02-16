@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Mvc;
 
 
 namespace Express_Service.Controllers;
+
 [Route("api/me")]
 [ApiController]
 [Authorize]
@@ -18,17 +19,17 @@ public class AccountController(IUserService service) : ControllerBase
     }
 
     [HttpGet("")]
- 
+
     public async Task<IActionResult> ShowUserProfile()
     {
         var result = await service.GetUserProfile(User.GetUserId()!);
 
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
-    
+
 
     [HttpPut("info")]
- 
+
 
     public async Task<IActionResult> UpdateUserProfile([FromBody] UpdateUserProfileRequest request)
     {
@@ -38,7 +39,7 @@ public class AccountController(IUserService service) : ControllerBase
     }
 
     [HttpPut("change-password")]
- 
+
 
     public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordRequest request)
     {

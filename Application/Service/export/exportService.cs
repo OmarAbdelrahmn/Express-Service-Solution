@@ -1,10 +1,4 @@
 ﻿using Application.Service.Reports;
-using ClosedXML.Excel;
-using DocumentFormat.OpenXml.Spreadsheet;
-using QuestPDF.Infrastructure;
-using System.ComponentModel;
-using System.Drawing;
-using System.Reflection.Metadata;
 
 namespace Application.Service.export;
 

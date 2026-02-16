@@ -3,12 +3,7 @@ using Application.Contracts.Employees;
 using Domain;
 using Domain.Entities;
 using Mapster;
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
 using static Application.Service.Empolyee.IVehicleService;
 using static Application.Service.Member.IMemberService;
 
@@ -341,7 +336,7 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
                     $"Failed to get pending switch operations: {ex.Message}", 500));
         }
     }
-  
+
     private async Task<VehicleSwitchValidation> ValidateSwitchOperation(
        long riderIqamaNo,
        string currentVehicleNumber,
@@ -410,21 +405,21 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
         );
     }
 
-     public record PendingSwitchVehicleAdminResponse(
-        int Id,
-        long RiderIqamaNo,
-        string RiderNameAR,
-        string RiderNameEN,
-        string HousingName,
-        string CurrentVehicleNumber,
-        string CurrentVehiclePlate,
-        string NewVehicleNumber,
-        string NewVehiclePlate,
-        string Reason,
-        DateTime RequestedAt,
-        string RequestedBy,
-        VehicleSwitchValidation Validation
-    );
+    public record PendingSwitchVehicleAdminResponse(
+       int Id,
+       long RiderIqamaNo,
+       string RiderNameAR,
+       string RiderNameEN,
+       string HousingName,
+       string CurrentVehicleNumber,
+       string CurrentVehiclePlate,
+       string NewVehicleNumber,
+       string NewVehiclePlate,
+       string Reason,
+       DateTime RequestedAt,
+       string RequestedBy,
+       VehicleSwitchValidation Validation
+   );
 
     public async Task<Result<VehicleLocationSyncResponse>> SyncAllVehicleLocationsAsync()
     {
@@ -771,7 +766,7 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
                 StatusType = VehicleStatusType.Stolen,
                 Reason = reason ?? "justStolen",
                 IsActive = true,
-                PermissionEndDate = DateTime.UtcNow.AddHours(3) 
+                PermissionEndDate = DateTime.UtcNow.AddHours(3)
             });
 
             await dbcontext.SaveChangesAsync();
@@ -926,7 +921,7 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
 
     #region Request-Based Operations (Member Requests)
 
-    public async Task<Result> RequestTakeVehicleAsync(SVehicleResolutionRequest request,string UserId, string reason = "work")
+    public async Task<Result> RequestTakeVehicleAsync(SVehicleResolutionRequest request, string UserId, string reason = "work")
     {
         try
         {
@@ -991,7 +986,7 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
         }
     }
 
-    public async Task<Result> RequestReturnVehicleAsync(SVehicleResolutionRequest request,string UserId, string reason = "leave the work")
+    public async Task<Result> RequestReturnVehicleAsync(SVehicleResolutionRequest request, string UserId, string reason = "leave the work")
     {
         try
         {
@@ -1051,7 +1046,7 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
         }
     }
 
-    public async Task<Result> RequestReportProblemAsync(SVehicleResolutionRequest request,string UserId, string reason = "problem at vehicle")
+    public async Task<Result> RequestReportProblemAsync(SVehicleResolutionRequest request, string UserId, string reason = "problem at vehicle")
     {
         try
         {
@@ -1142,7 +1137,7 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
 
 
             var vehicle = await dbcontext.Vehicles
-                
+
                 .FirstOrDefaultAsync(v => v.PlateNumberA == request.Plate)
                 ;
             if (vehicle == null)
@@ -1472,7 +1467,7 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
         status.PermissionEndDate = DateTime.UtcNow.AddHours(3);
     }
 
- 
+
     private async Task EndAllActivePermissionsForVehicle(string vehicleNumber)
     {
         var activeStatuses = await dbcontext.RiderVehicleStatus
@@ -1498,7 +1493,7 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
         }
     }
 
-   
+
     private async Task<Result> ValidateVehicleAvailability(string vehicleNumber, string plateNumber)
     {
         bool unavailable = await dbcontext.RiderVehicleStatus

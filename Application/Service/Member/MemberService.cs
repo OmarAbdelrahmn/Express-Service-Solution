@@ -11,14 +11,11 @@ using Domain.Entities;
 using Domain.Entities.Spare;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
-using System;
-using System.Collections.Generic;
-using System.Text;
 using static Application.Service.Member.IMemberService;
 
 namespace Application.Service.Member;
 
-public class MemberService(UserManager<ApplicationUser> userManager, SignInManager<ApplicationUser> signInManager, IJwtProvider jwtProvider, ApplicationDbcontext context , IReportService reportService) : IMemberService
+public class MemberService(UserManager<ApplicationUser> userManager, SignInManager<ApplicationUser> signInManager, IJwtProvider jwtProvider, ApplicationDbcontext context, IReportService reportService) : IMemberService
 {
     private readonly UserManager<ApplicationUser> userManager = userManager;
     private readonly SignInManager<ApplicationUser> signInManager = signInManager;
@@ -459,7 +456,7 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
             VehiclePlateNumber = request.VehiclePlate,
             VehicleNumber = vehicle.VehicleNumber,
             VehicleStatusType = VehicleStatusType.Returned, // Request to mark as available (fixed)
-            Reason =  $"Problem fixed - Original issue: {activeProblem.Reason}",
+            Reason = $"Problem fixed - Original issue: {activeProblem.Reason}",
             RequestedAt = DateTime.UtcNow.AddHours(3),
             RequestedBy = name!,
             IsResolved = false
@@ -1820,7 +1817,7 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
         }
 
         var employee = await context.Employees
-            .Where(e=>!e.IsDeleted)
+            .Where(e => !e.IsDeleted)
             .Include(e => e.Housing)
             .Include(e => e.RiderDetails!)
                 .ThenInclude(r => r.Company)
@@ -1894,7 +1891,7 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
             return Result.Failure<List<RiderShiftResponse>>(housingResult.Error);
 
         var housing = housingResult.Value;
-        var employeeIqamas = housing.Employees.Where(e=>!e.IsDeleted).Select(e => e.IqamaNo).ToList();
+        var employeeIqamas = housing.Employees.Where(e => !e.IsDeleted).Select(e => e.IqamaNo).ToList();
 
         var riderIds = await context.RiderDetails
             .Where(r => employeeIqamas.Contains(r.EmployeeIqamaNo))
@@ -2800,7 +2797,7 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
             .AnyAsync(s => s.VehicleNumber == vehicle.VehicleNumber
                 && s.IsActive
                 && s.StatusType == VehicleStatusType.Problem);
-  
+
         var existingreport = await context.TempVehicleOperations
             .AnyAsync(s => s.VehicleNumber == vehicle.VehicleNumber
                 && !s.IsResolved);
@@ -3002,7 +2999,7 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
 
         // Verify new vehicle exists
         var newVehicle = await context.Vehicles
-            .Include(c=>c.RiderDetails)
+            .Include(c => c.RiderDetails)
             .FirstOrDefaultAsync(v => v.PlateNumberA == request.NewVehiclePlate);
 
         if (newVehicle is null)
@@ -3016,8 +3013,8 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
         if (currentVehicleNumber == newVehicle.VehicleNumber)
             return Result.Failure(HousingMemberErrors.SameVehicleSwitch);
 
-        if(newVehicle.RiderDetails is not null)
-            return Result.Failure(new Error("vehicle has rider","vehicle has a rider already",400));
+        if (newVehicle.RiderDetails is not null)
+            return Result.Failure(new Error("vehicle has rider", "vehicle has a rider already", 400));
 
 
         // Verify new vehicle belongs to housing or is available

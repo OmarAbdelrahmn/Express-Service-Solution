@@ -1,5 +1,4 @@
 ﻿using Application.Abstraction;
-using Application.Service.Backgroundimports;
 using Application.Service.Empolyee;
 using Application.Service.Riders;
 using ClosedXML.Excel;
@@ -7,18 +6,12 @@ using Domain;
 using Domain.Entities;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
-using System;
-using System.Collections.Concurrent;
-using System.Collections.Generic;
 using System.Globalization;
-using System.Linq;
-using System.Threading.Tasks;
 using static Application.Service.Import.IImportService;
-using static Application.Service.Import.ImportService;
 
 namespace Application.Service.Import;
 
-public class ImportService(ApplicationDbcontext dbcontext , IRiderSub riderSub) : IImportService
+public class ImportService(ApplicationDbcontext dbcontext, IRiderSub riderSub) : IImportService
 {
     private readonly ApplicationDbcontext _dbcontext = dbcontext;
     private readonly IRiderSub riderSub = riderSub;

@@ -1,8 +1,6 @@
 ﻿using Application.Abstraction;
-using Application.Abstraction.Errors;
 using Application.Contracts.RiderAccessoryCon;
 using Domain;
-using Domain.Entities;
 using Domain.Entities.Spare;
 using Microsoft.EntityFrameworkCore;
 
@@ -92,7 +90,7 @@ public class RiderAccessoryService(ApplicationDbcontext dbcontext) : IRiderAcces
                         RiderAccessoryId = usage.AccessoryId,
                         RiderId = usage.RiderId,
                         IssuedAt = DateTime.UtcNow.AddHours(3),
-                       Cost = accessory.Price
+                        Cost = accessory.Price
                     };
 
                     await _dbcontext.RiderAccessoryUsages.AddAsync(accessoryUsage);
@@ -151,11 +149,11 @@ public class RiderAccessoryService(ApplicationDbcontext dbcontext) : IRiderAcces
         var response = accessories.Select(MapToResponse);
         return Result.Success<IEnumerable<RiderAccessoryResponse>>(response);
     }
-  
+
     public async Task<Result<IEnumerable<RiderAccessoryResponse>>> GetAllAsync2()
     {
         var accessories = await _dbcontext.RiderAccessories
-            .Where(a=>a.Location== "الشركة")
+            .Where(a => a.Location == "الشركة")
             .Include(a => a.RiderAccessoryUsages)
             .AsNoTracking()
             .OrderBy(a => a.Name)

@@ -1,9 +1,6 @@
 ﻿using Domain.Entities.Spare;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
-using System;
-using System.Collections.Generic;
-using System.Text;
 
 namespace Domain.EntitiesConfigrations;
 
@@ -18,7 +15,7 @@ public class SparePartUsageConfigration : IEntityTypeConfiguration<SparePartUsag
             .WithMany(sp => sp.SparePartUsages)
             .HasForeignKey(spu => spu.SparePartId);
 
-        builder.Property(c=>c.Cost).HasColumnType("decimal(18,2)");
+        builder.Property(c => c.Cost).HasColumnType("decimal(18,2)");
 
         builder.HasOne(spu => spu.Vehicle)
             .WithMany()

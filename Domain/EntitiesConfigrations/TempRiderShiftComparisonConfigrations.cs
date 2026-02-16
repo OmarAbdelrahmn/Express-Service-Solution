@@ -1,9 +1,5 @@
-﻿using DocumentFormat.OpenXml.Vml.Office;
-using Domain.Entities;
+﻿using Domain.Entities;
 using Microsoft.EntityFrameworkCore;
-using System;
-using System.Collections.Generic;
-using System.Text;
 
 namespace Domain.EntitiesConfigrations;
 

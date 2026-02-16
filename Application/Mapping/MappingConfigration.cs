@@ -15,8 +15,8 @@ public class MappingConfigration : IRegister
 
         config.NewConfig<HousingResponse, Employees>()
             .Map(des => des, src => src.Employees);
-        
-        
+
+
         config.NewConfig<EmpolyeeResponse, Employees>()
             .Map(des => des.NameAR, src => src.NameAR)
             .Map(des => des.NameEN, src => src.NameEN);

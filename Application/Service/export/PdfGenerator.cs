@@ -1,10 +1,6 @@
-﻿using DocumentFormat.OpenXml.Spreadsheet;
-using QuestPDF.Fluent;
+﻿using QuestPDF.Fluent;
 using QuestPDF.Helpers;
 using QuestPDF.Infrastructure;
-using System;
-using System.Collections.Generic;
-using System.Text;
 
 namespace Application.Service.export;
 

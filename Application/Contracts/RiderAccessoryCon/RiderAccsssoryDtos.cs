@@ -1,8 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
-
-namespace Application.Contracts.RiderAccessoryCon;
+﻿namespace Application.Contracts.RiderAccessoryCon;
 
 internal class RiderAccsssoryDtos
 {

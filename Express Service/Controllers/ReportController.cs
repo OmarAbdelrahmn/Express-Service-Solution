@@ -1,12 +1,6 @@
-﻿using Application.Service.export;
-using Application.Service.Import;
-using Application.Service.Reports;
-using Application.Service.Riders;
-using k8s.Models;
+﻿using Application.Service.Reports;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
-using System.Text.Json;
 
 namespace Express_Service.Controllers;
 
@@ -23,12 +17,12 @@ public class ReportController(IReportService service) : ControllerBase
     public async Task<IActionResult> GetDailyShiftSummaryByCompanies(
     CancellationToken cancellationToken)
     {
-        List<int> ids = [1 , 2];
+        List<int> ids = [1, 2];
 
-        var result = await service.GetDailyShiftSummaryByCompaniesAsync(ids , cancellationToken);
+        var result = await service.GetDailyShiftSummaryByCompaniesAsync(ids, cancellationToken);
 
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
-        
+
     }
 
     [HttpGet("all-riders-history")]
@@ -94,7 +88,7 @@ public class ReportController(IReportService service) : ControllerBase
     //[Authorize(Roles = "Master,Admin")]
     public async Task<IActionResult> GetHungerSummary(
        [FromQuery] DateOnly startDate,
-      [FromQuery]  DateOnly endDate,
+      [FromQuery] DateOnly endDate,
        CancellationToken cancellationToken = default)
     {
         var result = await service.GetCompany2MonthlyPerformanceDistributionAsync(
@@ -181,8 +175,8 @@ public class ReportController(IReportService service) : ControllerBase
             workingId, startDate, endDate);
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
-   
-    
+
+
     [HttpGet("rider-history")]
     public async Task<IActionResult> GetRiderHistory(
         [FromQuery] long riderIqamaNo)
@@ -733,7 +727,7 @@ public class ReportController(IReportService service) : ControllerBase
             ? Ok(result.Value)
             : result.ToProblem();
     }
-    
+
     [HttpGet("riders/compare-yearly/{WorkingId}")]
     //[Authorize(Roles = "Master,Admin,Member")]
 
@@ -820,15 +814,15 @@ public class ReportController(IReportService service) : ControllerBase
             Ok(result.Value) :
             result.ToProblem();
     }
-    
-    
+
+
     [HttpGet("top-riders/monthly")]
     //[Authorize(Roles = "Master,Admin")]
     public async Task<IActionResult> GetTopRidersFormonthAsync(int year, int month,
 
         int topCount = 10)
     {
-        var result = await service.GetTopRidersForMonthAsync(year,month, topCount);
+        var result = await service.GetTopRidersForMonthAsync(year, month, topCount);
 
         return result.IsSuccess ?
             Ok(result.Value) :
@@ -837,9 +831,9 @@ public class ReportController(IReportService service) : ControllerBase
 
     [HttpGet("top-riders/company")]
     //[Authorize(Roles = "Master,Admin")]
-    public async Task<IActionResult> GetTopRidersPerCompanyAsync(DateOnly Start , DateOnly End)
+    public async Task<IActionResult> GetTopRidersPerCompanyAsync(DateOnly Start, DateOnly End)
     {
-        var result = await service.GetTopRidersPerCompanyAsync(Start , End);
+        var result = await service.GetTopRidersPerCompanyAsync(Start, End);
 
         return result.IsSuccess ?
             Ok(result.Value) :
@@ -850,30 +844,30 @@ public class ReportController(IReportService service) : ControllerBase
     //[Authorize(Roles = "Master,Admin,Member")]
 
     public async Task<IActionResult> GetMonthlyStackedDeliveriesByWorkingIdAsync(string WorkingId,
-        [FromQuery]   int year,
-        [FromQuery]  int month,
+        [FromQuery] int year,
+        [FromQuery] int month,
         CancellationToken cancellationToken = default)
     {
-        var result = await service.GetMonthlyStackedDeliveriesByWorkingIdAsync(WorkingId,year,month,cancellationToken);
+        var result = await service.GetMonthlyStackedDeliveriesByWorkingIdAsync(WorkingId, year, month, cancellationToken);
         return result.IsSuccess
             ? Ok(result.Value)
             : result.ToProblem();
     }
-    
-    
+
+
     [HttpGet("stacked")]
     [Authorize(Roles = "Master,Admin")]
     public async Task<IActionResult> GetStackedDeliveriesByWorkingIdAsync(
         [FromQuery] DateOnly startDate,
-        [FromQuery]DateOnly endDate,
+        [FromQuery] DateOnly endDate,
         CancellationToken cancellationToken = default)
     {
-        var result = await service.GetAllRidersStackedDeliveriesAsync(startDate,endDate,cancellationToken);
+        var result = await service.GetAllRidersStackedDeliveriesAsync(startDate, endDate, cancellationToken);
         return result.IsSuccess
             ? Ok(result.Value)
             : result.ToProblem();
     }
-    
+
 
     [HttpGet("housing")]
     [Authorize(Roles = "Master,Admin")]

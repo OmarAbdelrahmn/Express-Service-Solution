@@ -1,8 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
-
-namespace Application.Service.export;
+﻿namespace Application.Service.export;
 
 
 public class ReportExportService : IReportExportService

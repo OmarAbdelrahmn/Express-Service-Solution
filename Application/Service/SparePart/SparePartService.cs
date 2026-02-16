@@ -1,11 +1,8 @@
 ﻿using Application.Abstraction;
-using Application.Abstraction.Errors;
 using Application.Contracts.SparePartCo;
 using Domain;
-using Domain.Entities;
 using Domain.Entities.Spare;
 using Microsoft.EntityFrameworkCore;
-using static Application.Service.Member.IMemberService;
 using static Application.Service.SparePart.ISparePartService;
 
 namespace Application.Service.SparePart;
@@ -946,7 +943,7 @@ public class SparePartService(ApplicationDbcontext dbcontext) : ISparePartServic
     public async Task<Result<IEnumerable<SparePartResponse>>> GetAllAsync2()
     {
         var spareParts = await _dbcontext.SpareParts
-            .Where(c=>c.Location=="الشركة")
+            .Where(c => c.Location == "الشركة")
             .AsNoTracking()
             .OrderBy(sp => sp.Name)
             .ToListAsync();

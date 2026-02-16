@@ -1,8 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
-
-namespace Application.Contracts.Employees;
+﻿namespace Application.Contracts.Employees;
 
 public record HousingRequest(
         string Name,

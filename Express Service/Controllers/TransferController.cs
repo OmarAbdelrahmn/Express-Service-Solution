@@ -3,7 +3,6 @@ using Application.Extensions;
 using Application.Service.Transfer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using System.Security.Claims;
 
 namespace Express_Service.Controllers;
 

@@ -144,13 +144,13 @@ public interface IReportService
         int month,
         CancellationToken cancellationToken = default);
 
-   
+
     Task<Result<IEnumerable<MonthlyRiderReport>>> GetAllRidersMonthlyReportAsync(
         int year,
         int month,
         CancellationToken cancellationToken = default);
 
-   
+
     Task<Result<YearlyRiderReport>> GetYearlyReportByWorkingIdAsync(
         string WorkingId,
         int year,
@@ -160,7 +160,7 @@ public interface IReportService
         int year,
         CancellationToken cancellationToken = default);
 
-  
+
     Task<Result<DateRangeReport>> GetCustomDateRangeReportByWorkingIdAsync(
         string WorkingId,
         DateOnly startDate,
@@ -194,7 +194,7 @@ public interface IReportService
         DateOnly endDate,
         CancellationToken cancellationToken = default);
 
-   
+
     Task<Result<RiderPeriodComparison>> CompareRiderPeriodsAsync(
         string WorkingId,
         DateOnly period1Start,
@@ -210,7 +210,7 @@ public interface IReportService
         DateOnly period2End,
         CancellationToken cancellationToken = default);
 
-  
+
     Task<Result<RiderPeriodComparison>> CompareRiderMonthsAsync(
         string WorkingId,
         int year1,
@@ -238,7 +238,7 @@ public interface IReportService
         DateOnly endDate,
         CancellationToken cancellationToken = default);
 
- 
+
     Task<Result<HousingPeriodComparison>> CompareSpecificHousingAsync(
         string housingName,
         DateOnly period1Start,
@@ -247,7 +247,7 @@ public interface IReportService
         DateOnly period2End,
         CancellationToken cancellationToken = default);
 
-   
+
     Task<Result<List<RiderHousingAssignment>>> GetRidersForHousingAsync(
         string housingName,
         DateOnly startDate,

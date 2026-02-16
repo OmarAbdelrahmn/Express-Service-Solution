@@ -1,10 +1,4 @@
-﻿using Domain.Entities;
-using System;
-using System.Collections.Generic;
-using System.Text;
-
-
-public record CompanyResponse
+﻿public record CompanyResponse
 (
     int Id,
     string Name,

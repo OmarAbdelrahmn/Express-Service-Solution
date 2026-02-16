@@ -1,11 +1,8 @@
 ﻿using Application.Abstraction;
-using System;
-using System.Collections.Generic;
-using System.Text;
 
 namespace Application.Service.Riders;
 
-public interface IRiderSub 
+public interface IRiderSub
 {
     Task<Result<RiderSubstitutionResponse>> StartSubstitution(StartSubstitutionRequest request, CancellationToken cancellationToken = default);
     Task<Result<RiderSubstitutionResponse>> StopSubstitutionByWorkingId(string WorkingId, CancellationToken cancellationToken = default);

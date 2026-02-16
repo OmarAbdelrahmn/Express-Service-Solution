@@ -1,6 +1,4 @@
-﻿using Domain.Entities;
-
-namespace Application.Contracts.Users;
+﻿namespace Application.Contracts.Users;
 
 public record UserResponse
 (

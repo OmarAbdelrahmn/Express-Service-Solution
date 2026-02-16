@@ -1,8 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
-
-namespace Application.Contracts.Employees;
+﻿namespace Application.Contracts.Employees;
 
 public record EmpolyeeResponse(
     long IqamaNo,
@@ -78,11 +74,11 @@ public record RiderResponse(
     bool INKSA,
     DateTime CreatedAt,
     string HousingAddress,
-    string? WorkingId, 
+    string? WorkingId,
     long EmployeeIqamaNo,
-    string? TshirtSize, 
-    string? LicenseNumber, 
-    string? CompanyName ,
+    string? TshirtSize,
+    string? LicenseNumber,
+    string? CompanyName,
     int? RiderId
     );
 

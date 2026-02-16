@@ -1,12 +1,8 @@
 ﻿using Application.Abstraction;
-using Application.Contracts.Employees;
 using Domain;
 using Domain.Entities;
 using Mapster;
 using Microsoft.EntityFrameworkCore;
-using System;
-using System.Collections.Generic;
-using System.Text;
 
 namespace Application.Service.Empolyee;
 
@@ -16,7 +12,7 @@ public class CompanyService(ApplicationDbcontext dbcontext) : ICompanyService
 
     public async Task<Result<CompanyResponse>> CreateAsync(CompanyRequest Request)
     {
-        var isExist =await dbcontext.Companies.AnyAsync(c => c.Name == Request.Name);
+        var isExist = await dbcontext.Companies.AnyAsync(c => c.Name == Request.Name);
 
         if (isExist)
             return Result.Failure<CompanyResponse>(new Error("Company.AlreadyExists", $"Company with name {Request.Name} already exists.", 409));
@@ -26,7 +22,7 @@ public class CompanyService(ApplicationDbcontext dbcontext) : ICompanyService
         dbcontext.Companies.Add(company);
 
         await dbcontext.SaveChangesAsync();
-        
+
         var companyResponses = company.Adapt<CompanyResponse>();
 
         return Result.Success(companyResponses);
@@ -55,7 +51,7 @@ public class CompanyService(ApplicationDbcontext dbcontext) : ICompanyService
 
         var companyResponses = companies.Adapt<IEnumerable<CompanyResponse>>();
 
-        return Result.Success(companyResponses); 
+        return Result.Success(companyResponses);
     }
 
     public async Task<Result<IEnumerable<CompanyResponse>>> GetAllEmployee()

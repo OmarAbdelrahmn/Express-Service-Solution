@@ -1,14 +1,13 @@
 ﻿using Application.Contracts.Employees;
 using Application.Service.Empolyee;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Express_Service.Controllers;
 
 [Route("api/[controller]")]
 [ApiController]
-public class HousingController(IHousingService service , IEmployeeService service1) : ControllerBase
+public class HousingController(IHousingService service, IEmployeeService service1) : ControllerBase
 {
     private readonly IHousingService service = service;
     private readonly IEmployeeService service1 = service1;
@@ -45,7 +44,7 @@ public class HousingController(IHousingService service , IEmployeeService servic
 
     [HttpGet("")]
     [Authorize(Roles = "Master,Admin,Member")]
- 
+
     public async Task<IActionResult> GetAll()
     {
         var response = await service.GetAllEmployee();
@@ -56,7 +55,7 @@ public class HousingController(IHousingService service , IEmployeeService servic
 
     [HttpGet("{Name}")]
     [Authorize(Roles = "Master,Admin,Member")]
- 
+
     public async Task<IActionResult> Get(string Name)
     {
         var response = await service.Get(Name);
@@ -67,7 +66,7 @@ public class HousingController(IHousingService service , IEmployeeService servic
 
     [HttpGet("manager/{ManagerIqamaNo}")]
     [Authorize(Roles = "Master,Admin,Member")]
- 
+
     public async Task<IActionResult> GetWithManagerIqama(int ManagerIqamaNo)
     {
         var response = await service.GetWithManagerIqama(ManagerIqamaNo);
@@ -78,7 +77,7 @@ public class HousingController(IHousingService service , IEmployeeService servic
 
     [HttpPost("")]
     [Authorize(Roles = "Master")]
-    public async Task<IActionResult> Create([FromBody]HousingRequest request)
+    public async Task<IActionResult> Create([FromBody] HousingRequest request)
     {
         var response = await service.CreateAsync(request);
         return response.IsSuccess ?
@@ -98,13 +97,13 @@ public class HousingController(IHousingService service , IEmployeeService servic
 
     [HttpPut("{editHousingName}")]
     [Authorize(Roles = "Master")]
-    public async Task<IActionResult> Update(string editHousingName ,[FromBody] HousingRequest request)
+    public async Task<IActionResult> Update(string editHousingName, [FromBody] HousingRequest request)
     {
-        var response = await service.UpdateAsync(editHousingName,request);
+        var response = await service.UpdateAsync(editHousingName, request);
         return response.IsSuccess ?
             Ok(response.Value) :
             response.ToProblem();
     }
 
-    
+
 }

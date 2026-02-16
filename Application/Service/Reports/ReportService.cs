@@ -5,10 +5,6 @@ using Application.Service.Riders;
 using Domain;
 using Domain.Entities;
 using Microsoft.EntityFrameworkCore;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
 
 namespace Application.Service.Reports;
 
@@ -68,7 +64,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
 
             // Group by date and company, then aggregate
             var dailySummaries = shifts
-                .GroupBy(s => new { s.ShiftDate, s.CompanyId})
+                .GroupBy(s => new { s.ShiftDate, s.CompanyId })
                 .Select(g => new DailyCompanyShiftSummary(
                     g.Key.ShiftDate,
                     g.Key.CompanyId,
@@ -301,7 +297,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
             // Get all riders who have shifts
             var ridersWithShiftsQuery = _dbcontext.RiderDetails
                 .Include(r => r.Employee)
-                .ThenInclude(c=>c.Housing)
+                .ThenInclude(c => c.Housing)
                 .Where(r => r.RiderShifts.Any());
 
             ridersWithShiftsQuery = ridersWithShiftsQuery.Where(r => !r.Employee.IsEmployee);
@@ -508,7 +504,8 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
 
             // Group by housing
             var housingGroups = validShifts
-                .GroupBy(s => new {
+                .GroupBy(s => new
+                {
                     HousingId = s.HousingId ?? 0,
                     HousingName = s.Housing?.Name ?? "Unknown"
                 });
@@ -602,7 +599,8 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
 
             // Group by housing
             var housingGroups = validShifts
-                .GroupBy(s => new {
+                .GroupBy(s => new
+                {
                     HousingId = s.HousingId ?? 0,
                     HousingName = s.Housing?.Name ?? "Unknown"
                 });
@@ -1704,42 +1702,42 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
     List<RiderMonthlyValidation> RiderValidations
 );
 
-public record RiderMonthlyValidation(
-    string HousingName,
-    int RiderId,
-    long IqamaNo,
-    string RiderNameAR,
-    string RiderNameEN,
-    string WorkingId,
-    int TotalExpectedDays,
-    int TotalWorkingDays,
-    int GoodDays,
-    int MissingDays,
-    List<int> MissingDaysList,
-    List<int> DaysWithLessThan10Hours,
-    int TotalOrders,
-    int TargetOrders,
-    float TotalWorkingHours,
-    float AverageHoursPerDay,
-    bool IsValidForMonth,
-    List<string> ValidationErrors,
-    List<DailyValidationDetail> DailyDetails
-);
+    public record RiderMonthlyValidation(
+        string HousingName,
+        int RiderId,
+        long IqamaNo,
+        string RiderNameAR,
+        string RiderNameEN,
+        string WorkingId,
+        int TotalExpectedDays,
+        int TotalWorkingDays,
+        int GoodDays,
+        int MissingDays,
+        List<int> MissingDaysList,
+        List<int> DaysWithLessThan10Hours,
+        int TotalOrders,
+        int TargetOrders,
+        float TotalWorkingHours,
+        float AverageHoursPerDay,
+        bool IsValidForMonth,
+        List<string> ValidationErrors,
+        List<DailyValidationDetail> DailyDetails
+    );
 
-public record DailyValidationDetail(
-    int Day,
-    DateOnly Date,
-    bool HasShift,
-    float WorkingHours,
-    int AcceptedOrders,
-    bool IsValid,
-    string Reason
-);
+    public record DailyValidationDetail(
+        int Day,
+        DateOnly Date,
+        bool HasShift,
+        float WorkingHours,
+        int AcceptedOrders,
+        bool IsValid,
+        string Reason
+    );
 
-public async Task<Result<HousingDetailedDailyPerformanceReport>> GetHousingDetailedDailyPerformanceAsync(
-    DateOnly startDate,
-    DateOnly endDate,
-    CancellationToken cancellationToken = default)
+    public async Task<Result<HousingDetailedDailyPerformanceReport>> GetHousingDetailedDailyPerformanceAsync(
+        DateOnly startDate,
+        DateOnly endDate,
+        CancellationToken cancellationToken = default)
     {
         if (endDate < startDate)
             return Result.Failure<HousingDetailedDailyPerformanceReport>(
@@ -1769,7 +1767,8 @@ public async Task<Result<HousingDetailedDailyPerformanceReport>> GetHousingDetai
 
             // Group by housing
             var housingGroups = shifts
-                .GroupBy(s => new {
+                .GroupBy(s => new
+                {
                     HousingId = s.Rider.Employee.Housing.Id,
                     HousingName = s.Rider.Employee.Housing.Name
                 });
@@ -2046,7 +2045,8 @@ public async Task<Result<HousingDetailedDailyPerformanceReport>> GetHousingDetai
         // Group by housing (from shift data)
         var housingGroups = shifts
             .Where(s => s.Rider?.Employee?.Housing != null)
-            .GroupBy(s => new {
+            .GroupBy(s => new
+            {
                 HousingId = s.Rider.Employee.Housing.Id,
                 HousingName = s.Rider.Employee.Housing.Name
             });
@@ -2100,7 +2100,8 @@ public async Task<Result<HousingDetailedDailyPerformanceReport>> GetHousingDetai
             return Result.Success(new List<HousingAllRidersSummaryReport>());
 
         // Group by housing from shift data
-        var housingGroups = shifts.GroupBy(s => new {
+        var housingGroups = shifts.GroupBy(s => new
+        {
             HousingId = s.Rider.Employee.Housing.Id,
             HousingName = s.Rider.Employee.Housing.Name
         });
@@ -2200,7 +2201,8 @@ public async Task<Result<HousingDetailedDailyPerformanceReport>> GetHousingDetai
             return Result.Success(new List<HousingAllRidersSummaryReport>());
 
         // Group by housing from shift data
-        var housingGroups = shifts.GroupBy(s => new {
+        var housingGroups = shifts.GroupBy(s => new
+        {
             HousingId = s.Rider.Employee.Housing.Id,
             HousingName = s.Rider.Employee.Housing.Name
         });
@@ -2303,7 +2305,8 @@ public async Task<Result<HousingDetailedDailyPerformanceReport>> GetHousingDetai
             return Result.Success(new List<HousingRejectionReport>());
 
         // Group by housing from shift data
-        var housingGroups = shifts.GroupBy(s => new {
+        var housingGroups = shifts.GroupBy(s => new
+        {
             HousingId = s.Rider.Employee.Housing.Id,
             HousingName = s.Rider.Employee.Housing.Name
         });
@@ -2415,7 +2418,8 @@ public async Task<Result<HousingDetailedDailyPerformanceReport>> GetHousingDetai
             return Result.Success(new List<HousingRejectionReport>());
 
         // Group by housing from shift data
-        var housingGroups = shifts.GroupBy(s => new {
+        var housingGroups = shifts.GroupBy(s => new
+        {
             HousingId = s.Rider.Employee.Housing.Id,
             HousingName = s.Rider.Employee.Housing.Name
         });
@@ -3033,7 +3037,7 @@ public async Task<Result<HousingDetailedDailyPerformanceReport>> GetHousingDetai
         {
             var rider = await _dbcontext.RiderDetails
                 .Include(r => r.Employee)
-                .FirstOrDefaultAsync(r => r.WorkingId == workingId , cancellationToken);
+                .FirstOrDefaultAsync(r => r.WorkingId == workingId, cancellationToken);
 
             if (rider == null)
                 return Result.Failure<RiderDailyDetailReport>(
@@ -3142,7 +3146,7 @@ public async Task<Result<HousingDetailedDailyPerformanceReport>> GetHousingDetai
         {
             var rider = await _dbcontext.RiderDetails
                 .Include(r => r.Employee)
-                .FirstOrDefaultAsync(r => r.WorkingId == workingId , cancellationToken);
+                .FirstOrDefaultAsync(r => r.WorkingId == workingId, cancellationToken);
 
             if (rider == null)
                 return Result.Failure<RiderDailyDetailReport>(
@@ -3528,7 +3532,7 @@ public async Task<Result<HousingDetailedDailyPerformanceReport>> GetHousingDetai
         {
             // Get all shifts for the specified date with housing information
             var shifts = await _dbcontext.RiderShifts
-                .Include(m=>m.Housing)
+                .Include(m => m.Housing)
                 .Include(s => s.Rider)
                     .ThenInclude(r => r.Employee)
                 .Where(s => s.ShiftDate == reportDate && s.CompanyId == 1)
@@ -3558,7 +3562,8 @@ public async Task<Result<HousingDetailedDailyPerformanceReport>> GetHousingDetai
 
             // Group by housing
             var housingGroups = validShifts
-                .GroupBy(s => new {
+                .GroupBy(s => new
+                {
                     HousingId = s.HousingId,
                     HousingName = s.Housing?.Name
                 });
@@ -3624,7 +3629,7 @@ public async Task<Result<HousingDetailedDailyPerformanceReport>> GetHousingDetai
         {
             // Get all shifts for the specified date with full details
             var shifts = await _dbcontext.RiderShifts
-                .Include(m=>m.Housing)
+                .Include(m => m.Housing)
                 .Include(s => s.Rider)
                     .ThenInclude(r => r.Employee)
                 .Where(s => s.ShiftDate == reportDate && s.CompanyId == 1)
@@ -3654,7 +3659,8 @@ public async Task<Result<HousingDetailedDailyPerformanceReport>> GetHousingDetai
 
             // Group by housing
             var housingGroups = validShifts
-                .GroupBy(s => new {
+                .GroupBy(s => new
+                {
                     HousingId = s.Rider.Employee.Housing.Id,
                     HousingName = s.Rider.Employee.Housing.Name
                 });
@@ -3769,7 +3775,7 @@ public async Task<Result<HousingDetailedDailyPerformanceReport>> GetHousingDetai
 
             var allRiders = await _dbcontext.RiderDetails
                 .Include(r => r.Employee)
-                .Where(d=>!d.Employee.IsDeleted)
+                .Where(d => !d.Employee.IsDeleted)
                 .AsNoTracking()
                 .ToListAsync(cancellationToken);
 
@@ -3820,7 +3826,7 @@ public async Task<Result<HousingDetailedDailyPerformanceReport>> GetHousingDetai
                 Performance: performance,
                 Housing: housing,
                 Trends: trends,
-                Vehicle: vehicles  
+                Vehicle: vehicles
 
             );
 
@@ -4828,7 +4834,7 @@ public async Task<Result<HousingDetailedDailyPerformanceReport>> GetHousingDetai
         if (!shifts.Any())
         {
             return Result.Success(CreateEmptyDateRangeReport(
-                rider.Id,rider.EmployeeIqamaNo, rider.Employee.NameAR, WorkingId, startDate, endDate));
+                rider.Id, rider.EmployeeIqamaNo, rider.Employee.NameAR, WorkingId, startDate, endDate));
         }
 
         var workingIdHistory = DetectWorkingIdChanges(shifts);
@@ -5214,7 +5220,7 @@ public async Task<Result<HousingDetailedDailyPerformanceReport>> GetHousingDetai
 
         return Result.Success(comparison);
     }
-        
+
     public async Task<Result<RiderPeriodComparison>> CompareRiderMonthsAsync(
         string WorkingId,
         int year1,
@@ -5270,11 +5276,11 @@ public async Task<Result<HousingDetailedDailyPerformanceReport>> GetHousingDetai
             period2End,
             cancellationToken);
     }
-    
-    
-    
-    
-    
+
+
+
+
+
     private string DetermineOverallTrend(
     ComparisonMetrics companyMetrics,
     List<RiderPeriodComparison> riderComparisons)
@@ -6035,7 +6041,7 @@ public async Task<Result<HousingDetailedDailyPerformanceReport>> GetHousingDetai
         var shifts = await _dbcontext.RiderShifts
             .Include(s => s.Rider)
                 .ThenInclude(r => r.Employee)
-                .ThenInclude(e => e.Housing)    
+                .ThenInclude(e => e.Housing)
             .Where(s => s.Rider.Employee.Housing.Name == housingName
                    && s.ShiftDate >= startDate
                    && s.ShiftDate <= endDate)
@@ -6270,7 +6276,7 @@ public async Task<Result<HousingDetailedDailyPerformanceReport>> GetHousingDetai
                 // Generate achievements
                 var achievements = GenerateRiderAchievements(
                     totalAccepted, avgOrdersPerShift, completionRate,
-                    rejectionRate, totalShifts, performanceScore, totalStacked,avgStackedPerShift);
+                    rejectionRate, totalShifts, performanceScore, totalStacked, avgStackedPerShift);
 
                 // Check for active substitution
                 var hasSubstitution = substitutionDict.ContainsKey(rider.Id);
@@ -7118,7 +7124,7 @@ public async Task<Result<HousingDetailedDailyPerformanceReport>> GetHousingDetai
     }
 
     private DateRangeReport CreateEmptyDateRangeReport(
-        int riderId,long IqamaNo, string riderName, string WorkingId, DateOnly startDate, DateOnly endDate)
+        int riderId, long IqamaNo, string riderName, string WorkingId, DateOnly startDate, DateOnly endDate)
     {
         return new DateRangeReport(
             RiderId: riderId,

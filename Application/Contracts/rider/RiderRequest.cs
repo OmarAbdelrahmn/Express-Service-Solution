@@ -1,8 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
-
-namespace Application.Contracts.rider;
+﻿namespace Application.Contracts.rider;
 
 public record RiderRequest
 (

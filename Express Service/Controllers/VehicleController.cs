@@ -1,12 +1,7 @@
 ﻿using Application.Contracts.Employees;
-using Application.Service;
 using Application.Service.Empolyee;
-using Domain;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
-using System.Security.Claims;
-using System.Threading.Tasks;
 using static Application.Service.Empolyee.IVehicleService;
 
 namespace Express_Service.Controllers;
@@ -78,7 +73,7 @@ public class VehicleController(IVehicleService service) : ControllerBase
 
     [HttpGet]
     [Authorize(Roles = "Master,Admin,Member")]
- 
+
     public async Task<IActionResult> GetAll()
     {
         var result = await _service.GetAllEmployee();
@@ -86,7 +81,7 @@ public class VehicleController(IVehicleService service) : ControllerBase
     }
     [HttpGet("special")]
     [Authorize(Roles = "Master,Admin,Member")]
- 
+
     public async Task<IActionResult> GetwAll()
     {
         var result = await _service.GetAllVehiclesRidersAsync();
@@ -119,7 +114,7 @@ public class VehicleController(IVehicleService service) : ControllerBase
 
     [HttpGet("available")]
     [Authorize(Roles = "Master,Admin,Member")]
- 
+
     public async Task<IActionResult> GetAvailableVehicles()
     {
         var result = await _service.GetAvailableVehiclesAsync();
@@ -127,7 +122,7 @@ public class VehicleController(IVehicleService service) : ControllerBase
     }
     [HttpGet("stolen")]
     [Authorize(Roles = "Master,Admin,Member")]
- 
+
     public async Task<IActionResult> GetAvaieVehicles()
     {
         var result = await _service.GetStolenVehiclesAsync();
@@ -135,7 +130,7 @@ public class VehicleController(IVehicleService service) : ControllerBase
     }
     [HttpGet("problem")]
     [Authorize(Roles = "Master,Admin,Member")]
- 
+
     public async Task<IActionResult> GetAVehicles()
     {
         var result = await _service.GetProblemVehiclesAsync();
@@ -143,7 +138,7 @@ public class VehicleController(IVehicleService service) : ControllerBase
     }
     [HttpGet("breakup")]
     [Authorize(Roles = "Master,Admin,Member")]
- 
+
     public async Task<IActionResult> GetAvableVehicles()
     {
         var result = await _service.GetBreackupVehiclesAsync();
@@ -152,7 +147,7 @@ public class VehicleController(IVehicleService service) : ControllerBase
 
     [HttpGet("taken")]
     [Authorize(Roles = "Master,Admin,Member")]
- 
+
     public async Task<IActionResult> GetTakenVehicles([FromQuery] string statusFilter)
     {
         var result = await _service.GetUnavailableVehiclesAsync(statusFilter);
@@ -264,7 +259,7 @@ public class VehicleController(IVehicleService service) : ControllerBase
 
     [HttpGet("with-riders")]
     [Authorize(Roles = "Master,Admin,Member")]
- 
+
     public async Task<IActionResult> GetAllVehiclesWithRiders()
     {
         var result = await _service.GetAllVehiclesWithRidersAsync();
@@ -281,7 +276,7 @@ public class VehicleController(IVehicleService service) : ControllerBase
 
     [HttpGet("group-by-status")]
     [Authorize(Roles = "Master,Admin,Member")]
- 
+
     public async Task<IActionResult> GetVehiclesGroupedByStatus()
     {
         var result = await _service.GetVehiclesGroupedByStatusAsync();

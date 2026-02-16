@@ -3,25 +3,22 @@ using Domain.Entities.Spare;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
-using System;
-using System.Collections.Generic;
 using System.Reflection;
-using System.Text;
 
 namespace Domain;
 
-public class ApplicationDbcontext(DbContextOptions<ApplicationDbcontext> options) : IdentityDbContext<ApplicationUser,ApplicationRole,string>(options)
+public class ApplicationDbcontext(DbContextOptions<ApplicationDbcontext> options) : IdentityDbContext<ApplicationUser, ApplicationRole, string>(options)
 {
 
     public required DbSet<ApplicationUser> ApplicationUsers { get; set; }
     public required DbSet<ApplicationRole> ApplicationRoles { get; set; }
-    public required DbSet<Company> Companies{ get; set; }
-    public required DbSet<Employees> Employees{ get; set; }
-    public required DbSet<EmployeeDocuments> EmployeeDocuments{ get; set; }
-    public required DbSet<Housing> Housings{ get; set; }
-    public required DbSet<RiderDetails> RiderDetails{ get; set; }
-    public required DbSet<RiderShift> RiderShifts{ get; set; }
-    public required DbSet<RiderShiftSubstitution> RiderShiftSubstitutions{ get; set; }
+    public required DbSet<Company> Companies { get; set; }
+    public required DbSet<Employees> Employees { get; set; }
+    public required DbSet<EmployeeDocuments> EmployeeDocuments { get; set; }
+    public required DbSet<Housing> Housings { get; set; }
+    public required DbSet<RiderDetails> RiderDetails { get; set; }
+    public required DbSet<RiderShift> RiderShifts { get; set; }
+    public required DbSet<RiderShiftSubstitution> RiderShiftSubstitutions { get; set; }
     public required DbSet<Vehicle> Vehicles { get; set; }
     public required DbSet<DeletedEmployees> DeletedEmployees { get; set; }
     public required DbSet<RiderCompanyHistory> RiderCompanyHistory { get; set; }
@@ -32,12 +29,12 @@ public class ApplicationDbcontext(DbContextOptions<ApplicationDbcontext> options
     public required DbSet<TempVehicleOperation> TempVehicleOperations { get; set; }
     public required DbSet<RiderWorkingIdHistory> RiderWorkingIdHistories { get; set; }
     public required DbSet<SparePart> SpareParts { get; set; }
-    public required DbSet<RiderAccessory>RiderAccessories{ get; set; }
-    public required DbSet<RiderAccessoryUsage> RiderAccessoryUsages{ get; set; }
-    public required DbSet<SparePartUsage> SparePartUsages  { get; set; }
-    public required DbSet<Supplier> Suppliers{ get; set; }
+    public required DbSet<RiderAccessory> RiderAccessories { get; set; }
+    public required DbSet<RiderAccessoryUsage> RiderAccessoryUsages { get; set; }
+    public required DbSet<SparePartUsage> SparePartUsages { get; set; }
+    public required DbSet<Supplier> Suppliers { get; set; }
     public required DbSet<Bill> Bills { get; set; }
-    public required DbSet<BillItem> BillItems{ get; set; }
+    public required DbSet<BillItem> BillItems { get; set; }
     public required DbSet<Transfer> Transfers { get; set; }
     public required DbSet<TransferItem> TransferItems { get; set; }
     public required DbSet<Return> Returns { get; set; }
@@ -203,34 +200,34 @@ public class ApplicationDbcontext(DbContextOptions<ApplicationDbcontext> options
             entity.HasIndex(e => e.RequestedAt);
         });
 
-    
-    modelBuilder.Entity<RiderShiftSubstitution>(entity =>
-        {
-            entity.HasKey(s => s.Id);
 
-            entity.HasIndex(s => new { s.ActualRiderWorkingId, s.IsActive });
-            entity.HasIndex(s => new { s.SubstituteWorkingId, s.IsActive });
+        modelBuilder.Entity<RiderShiftSubstitution>(entity =>
+            {
+                entity.HasKey(s => s.Id);
 
-            entity.HasOne(s => s.ActualRider)
-                .WithMany()
-                .HasForeignKey(s => s.ActualRiderId)
-                .OnDelete(DeleteBehavior.Restrict)
-                .IsRequired(false); 
+                entity.HasIndex(s => new { s.ActualRiderWorkingId, s.IsActive });
+                entity.HasIndex(s => new { s.SubstituteWorkingId, s.IsActive });
 
-            entity.Navigation(s => s.ActualRider)
-                .IsRequired(false);
+                entity.HasOne(s => s.ActualRider)
+                    .WithMany()
+                    .HasForeignKey(s => s.ActualRiderId)
+                    .OnDelete(DeleteBehavior.Restrict)
+                    .IsRequired(false);
 
-            entity.Property(s => s.ActualRiderId)
-                .IsRequired(false);
-            
-            entity.Property(s => s.EndDate)
-                .IsRequired(false);
+                entity.Navigation(s => s.ActualRider)
+                    .IsRequired(false);
 
-            entity.HasOne(s => s.SubstituteRider)
-                .WithMany()
-                .HasForeignKey(s => s.SubstituteRiderId)
-                .OnDelete(DeleteBehavior.Restrict);
-        });
+                entity.Property(s => s.ActualRiderId)
+                    .IsRequired(false);
+
+                entity.Property(s => s.EndDate)
+                    .IsRequired(false);
+
+                entity.HasOne(s => s.SubstituteRider)
+                    .WithMany()
+                    .HasForeignKey(s => s.SubstituteRiderId)
+                    .OnDelete(DeleteBehavior.Restrict);
+            });
 
         modelBuilder.Entity<RiderWorkingIdHistory>(entity =>
         {
@@ -324,7 +321,7 @@ public class ApplicationDbcontext(DbContextOptions<ApplicationDbcontext> options
 
             entity.ToTable("HungerDisabilities");
         });
-    
+
 
     }
 

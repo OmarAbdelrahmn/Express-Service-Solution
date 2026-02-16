@@ -1,4 +1,5 @@
 ﻿namespace Application.Contracts.Auth;
+
 public record AuthResponse
 (
     string Id,

@@ -1,6 +1,5 @@
 ﻿using Application.Abstraction;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.IdentityModel.Abstractions;
 using ObjectResult = Microsoft.AspNetCore.Mvc.ObjectResult;
 
 namespace Express_Service;

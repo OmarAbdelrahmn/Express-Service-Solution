@@ -1,6 +1,5 @@
 ﻿using Application.Service.Riders;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Express_Service.Controllers;
@@ -13,7 +12,7 @@ public class SubstitutionController(IRiderSub service) : ControllerBase
     private readonly IRiderSub service = service;
 
     [HttpGet("")]
- 
+
     public async Task<IActionResult> GetAll()
     {
         var result = await service.GetAllSubstitutions();
@@ -23,7 +22,7 @@ public class SubstitutionController(IRiderSub service) : ControllerBase
     }
 
     [HttpGet("active")]
- 
+
     public async Task<IActionResult> GetActive()
     {
         var result = await service.GetActiveSubstitutions();
@@ -32,7 +31,7 @@ public class SubstitutionController(IRiderSub service) : ControllerBase
             : result.ToProblem();
     }
     [HttpGet("inactive")]
- 
+
     public async Task<IActionResult> GetInactive()
     {
         var result = await service.GetInactiveSubstitutions();

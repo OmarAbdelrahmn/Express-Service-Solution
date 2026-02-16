@@ -1,5 +1,4 @@
-﻿using Application.Extensions;
-using Application.Service.SparePart;
+﻿using Application.Service.SparePart;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 

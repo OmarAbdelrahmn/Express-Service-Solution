@@ -1,6 +1,4 @@
 ﻿using Application.Contracts.SparePartCo;
-using Application.Extensions;
-using Application.Service.Return;
 using Application.Service.SparePart;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;

@@ -3,11 +3,7 @@ using Application.Contracts.RiderAccessoryCon;
 using Application.Contracts.SparePartCo;
 using Application.Contracts.SupplierCon;
 using Application.Service.Reports;
-using Application.Service.Riders;
 using Domain.Entities.Spare;
-using System;
-using System.Collections.Generic;
-using System.Text;
 using static Application.Service.Member.MemberService;
 
 namespace Application.Service.Member;
@@ -534,7 +530,7 @@ public record HousingBasicInfo(
 public record HousingDashboardResponse(
     HousingInfo Housing,
     Statistics Stats,
-    List<RecentActivityItem> RecentActivities ,
+    List<RecentActivityItem> RecentActivities,
     PreviousDayCompanySummary Summary
 );
 

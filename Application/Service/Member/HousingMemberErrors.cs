@@ -1,10 +1,8 @@
 ﻿using Application.Abstraction;
 using Microsoft.AspNetCore.Http;
-using System;
-using System.Collections.Generic;
-using System.Text;
 
 namespace Application.Service.Member;
+
 public static class HousingMemberErrors
 {
     public static readonly Error NotAHousingManager = new(

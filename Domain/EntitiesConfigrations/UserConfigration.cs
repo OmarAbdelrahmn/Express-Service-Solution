@@ -20,7 +20,7 @@ public class UserConfigration : IEntityTypeConfiguration<ApplicationUser>
             SecurityStamp = DefaultUsers.AdminSecurityStamp,
             ConcurrencyStamp = DefaultUsers.AdminConcurrencyStamp
         });
-        
+
         builder.HasData(new ApplicationUser
         {
             Id = DefaultUsers.MasterId,

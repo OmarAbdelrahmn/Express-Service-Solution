@@ -1,12 +1,8 @@
 ﻿using Application.Abstraction;
+using ClosedXML.Excel;
 using Domain;
 using Domain.Entities;
 using Microsoft.EntityFrameworkCore;
-using ClosedXML.Excel;
-using System;
-using System.Collections.Generic;
-using System.ComponentModel;
-using System.Text;
 
 namespace Application.Service.temp;
 

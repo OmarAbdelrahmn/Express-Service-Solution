@@ -1,17 +1,9 @@
 ﻿using Application.Abstraction;
-using Application.Abstraction.Errors;
 using Application.Contracts.Employees;
-using Application.Contracts.Roles;
-using Azure.Core;
 using Domain;
 using Domain.Entities;
 using Mapster;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging;
-using System;
-using System.Collections.Generic;
-using System.Text;
-using System.Threading;
 
 namespace Application.Service.Empolyee;
 
@@ -686,7 +678,7 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
             // Mark status change as resolved
             statusChange.IsResolved = true;
             statusChange.Resolution = resolution;
-            statusChange.ResolvedBy = empname ?? resolvedBy ;
+            statusChange.ResolvedBy = empname ?? resolvedBy;
             statusChange.ResolvedAt = DateTime.UtcNow.AddHours(3);
             statusChange.AdminNotes = adminNotes ?? (resolution == "Rejected" ? "Request was rejected" : null);
 
@@ -971,7 +963,7 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
 
     public async Task<bool> Togle(long iqama)
     {
-        var emp =await dbcontext.Employees.FirstOrDefaultAsync(x => x.IqamaNo == iqama);
+        var emp = await dbcontext.Employees.FirstOrDefaultAsync(x => x.IqamaNo == iqama);
 
         if (emp == null)
             return false;

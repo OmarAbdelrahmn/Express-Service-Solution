@@ -1,9 +1,6 @@
 ﻿using Application.Abstraction;
 using Application.Contracts.RiderAccessoryCon;
 using Application.Contracts.SparePartCo;
-using System;
-using System.Collections.Generic;
-using System.Text;
 
 namespace Application.Service.RiderAccessory;
 

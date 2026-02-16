@@ -1,9 +1,6 @@
 ﻿using Application.Abstraction;
 using Application.Service.Reports;
 using Domain.Entities;
-using System;
-using System.Collections.Generic;
-using System.Text;
 using static Application.Service.Riders.RiderShiftService;
 
 namespace Application.Service.Riders;
@@ -26,10 +23,10 @@ public interface IRiderShiftService
         CancellationToken cancellationToken = default);
     Task<Result<BulkDeleteResult>> DeleteShiftsByDateRangeAsync(DateOnly startDate, DateOnly endDate, CancellationToken cancellationToken = default);
     Task<Result<BulkDeleteResult>> DeleteShiftsByRiderAndDateRangeAsync(string WorkingId, DateOnly startDate, DateOnly endDate, CancellationToken cancellationToken = default);
-    Task<Result<BulkComparisonResult>> CreateShiftComparisonsAsync(Stream excelStream,DateOnly shiftDate,int rejectionThreshold = 2, CancellationToken cancellationToken = default);
-    Task<Result<BulkImportResult>> ImportShiftsFromExcelAsync(Stream excelStream,DateOnly shiftDate,int rejectionThreshold = 2,CancellationToken cancellationToken = default);
-    Task<Result<ResolutionResult>> ResolveShiftComparisonsAsync(ResolveComparisonsRequest request,CancellationToken cancellationToken = default);
-    Task<Result<BulkComparisonResult>> GetPendingComparisonsAsync(DateOnly shiftDate,CancellationToken cancellationToken = default);
+    Task<Result<BulkComparisonResult>> CreateShiftComparisonsAsync(Stream excelStream, DateOnly shiftDate, int rejectionThreshold = 2, CancellationToken cancellationToken = default);
+    Task<Result<BulkImportResult>> ImportShiftsFromExcelAsync(Stream excelStream, DateOnly shiftDate, int rejectionThreshold = 2, CancellationToken cancellationToken = default);
+    Task<Result<ResolutionResult>> ResolveShiftComparisonsAsync(ResolveComparisonsRequest request, CancellationToken cancellationToken = default);
+    Task<Result<BulkComparisonResult>> GetPendingComparisonsAsync(DateOnly shiftDate, CancellationToken cancellationToken = default);
     // Add these methods to IRiderShiftService interface
 
     Task<Result<IEnumerable<AcceptedOrdersResponse>>> GetAcceptedOrdersByDateAsync(
@@ -74,7 +71,7 @@ public record AcceptedOrdersResponse(
    );
 
 public record CreateRiderShiftRequest(
-    string WorkingId,  
+    string WorkingId,
     DateOnly ShiftDate,
     int AcceptedDailyOrders,
     int RejectedDailyOrders,
@@ -84,7 +81,7 @@ public record CreateRiderShiftRequest(
 );
 
 public record UpdateRiderShiftRequest(
-    string WorkingId, 
+    string WorkingId,
     DateOnly ShiftDate,
     int? AcceptedDailyOrders,
     int? RejectedDailyOrders,
@@ -125,7 +122,7 @@ public record BulkDeleteResult(
 public record MonthlyRiderReport(
     int RiderId,
     string RiderName,
-    string WorkingId,  
+    string WorkingId,
     int Year,
     int Month,
 
@@ -170,7 +167,7 @@ public record CompanyPeriodBreakdown(
 public record YearlyRiderReport(
     int RiderId,
     string RiderName,
-    string WorkingId,  
+    string WorkingId,
     int Year,
 
     int TotalWorkingDays,
@@ -230,7 +227,7 @@ public record DateRangeReport(
     int RiderId,
     long IqamaNo,
     string RiderName,
-    string WorkingId,  
+    string WorkingId,
     DateOnly StartDate,
     DateOnly EndDate,
 
@@ -277,7 +274,7 @@ public record CompanyPerformanceReport(
 public record ProblemShiftDetail(
     int RiderId,
     string RiderName,
-    string WorkingId,  
+    string WorkingId,
     DateOnly ShiftDate,
     string CompanyName,
     int AcceptedOrders,
@@ -292,7 +289,7 @@ public record ProblemShiftDetail(
 public record RiderPerformanceSummary(
     int RiderId,
     string RiderName,
-    string WorkingId,  
+    string WorkingId,
     int TotalShifts,
     int CompletedShifts,
     int TotalAcceptedOrders,

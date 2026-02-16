@@ -1,6 +1,4 @@
-﻿using Application.Contracts.RiderAccessoryCon;
-using Application.Contracts.SparePartCo;
-using Application.Service.RiderAccessory;
+﻿using Application.Contracts.SparePartCo;
 using Application.Service.SparePart;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -76,7 +74,7 @@ public class SparePartController(ISparePartService service) : ControllerBase
         var response = await service.GetAllAsync();
         return response.IsSuccess ? Ok(response.Value) : response.ToProblem();
     }
-    
+
     [HttpGet("2")]
     public async Task<IActionResult> GetAll2()
     {

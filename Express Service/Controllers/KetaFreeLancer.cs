@@ -1,8 +1,6 @@
 ﻿using Application.Extensions;
 using Application.Service.Freelancer;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
-using System.Threading;
 
 namespace Express_Service.Controllers;
 

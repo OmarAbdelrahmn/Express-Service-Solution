@@ -1,8 +1,5 @@
 ﻿using Application.Extensions;
-using Application.Service.Empolyee;
 using Application.Service.Member;
-using k8s.Models;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using static Application.Service.Member.IMemberService;
 
@@ -113,7 +110,7 @@ public class MemberController(IMemberService housingService) : ControllerBase
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
 
-#endregion
+    #endregion
 
     #region Accessories
 

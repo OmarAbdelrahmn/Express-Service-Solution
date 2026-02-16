@@ -2,9 +2,6 @@
 using Application.Contracts.Employees;
 using Application.Contracts.rider;
 using Application.Service.Empolyee;
-using System;
-using System.Collections.Generic;
-using System.Text;
 
 namespace Application.Service.Riders;
 
@@ -20,7 +17,7 @@ public interface IRiderService
     Task<Result> DeleteAsync(long IqamaNo, string Reason, CancellationToken cancellationToken = default);
     Task<List<RiderResponse>> SmartSearch(string keyword);
     Task<Result> ChangeWorkinId(string OldWorkinId, string NewWorkingId);
-    Task<Result> AddETOR(long IqamaNo, EMTOR request );
+    Task<Result> AddETOR(long IqamaNo, EMTOR request);
     Task<Result<EmployeeStatisticsResponse>> GetEmployeeStatistics();
     Task<Result<IEnumerable<RiderResponse>>> Filter(EmployeeFilterr filter);
     Task<Result<VehicleResponse>> GetRiderVehicle(long IqamaNo);

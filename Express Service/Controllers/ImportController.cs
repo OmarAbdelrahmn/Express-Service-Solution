@@ -1,19 +1,16 @@
 ﻿using Application.Extensions;
 using Application.Service.Backgroundimports;
 using Application.Service.Import;
-using k8s.Models;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Timeouts;
 using Microsoft.AspNetCore.Mvc;
-using static Application.Service.Import.IImportService;
 using static Application.Service.Import.ImportService;
 
 namespace Express_Service.Controllers;
 
 [Route("api/[controller]")]
 [ApiController]
-public class ImportController(IImportService service , IBackgroundImportService service1) : ControllerBase
+public class ImportController(IImportService service, IBackgroundImportService service1) : ControllerBase
 {
     private readonly IImportService service = service;
     private readonly IBackgroundImportService service1 = service1;
@@ -28,7 +25,7 @@ public class ImportController(IImportService service , IBackgroundImportService 
         if (!file.FileName.EndsWith(".xlsx") && !file.FileName.EndsWith(".xls"))
             return BadRequest(new { error = "File must be Excel format (.xlsx or .xls)" });
 
-        var uploadedBy =  "System";
+        var uploadedBy = "System";
 
         var result = await service.UpdateSparePartQuantitiesAsync(file, uploadedBy);
 

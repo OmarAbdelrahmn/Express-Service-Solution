@@ -1,8 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
-
-namespace Domain.Entities;
+﻿namespace Domain.Entities;
 
 public class Employees
 {
@@ -33,5 +29,5 @@ public class Employees
 
     public EmployeeDocuments? EmployeeDocuments { get; set; }
 
-    }
+}
 

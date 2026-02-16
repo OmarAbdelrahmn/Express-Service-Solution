@@ -1,11 +1,5 @@
 ﻿using Application.Abstraction;
 using Application.Contracts.Employees;
-using Application.Contracts.Roles;
-using Application.Contracts.Users;
-using Domain.Entities;
-using System;
-using System.Collections.Generic;
-using System.Text;
 using static Application.Service.Empolyee.EmployeeService;
 
 namespace Application.Service.Empolyee;
@@ -13,15 +7,15 @@ namespace Application.Service.Empolyee;
 public interface IEmployeeService
 {
     Task<bool> Togle(long iqama);
-    Task<Result<IEnumerable<EmpolyeeResponse>>>GetAllEmployee();
+    Task<Result<IEnumerable<EmpolyeeResponse>>> GetAllEmployee();
     Task<Result<IEnumerable<DeletedEmployeeResponse>>> GetAlldeletedEmployee();
-    Task<Result<IEnumerable<EmpolyeeResponse>>>Get(long IqamaNo);
-    Task<Result<EmpolyeeResponse>>Get1(long IqamaNo);
+    Task<Result<IEnumerable<EmpolyeeResponse>>> Get(long IqamaNo);
+    Task<Result<EmpolyeeResponse>> Get1(long IqamaNo);
     Task<Result<EmpolyeeResponse>> CreateAsync(EmpolyeeRequest Request);
     Task<Result<EmpolyeeResponse>> UpdateAsync(long IqamaNo, UEmpolyeeRequest Request);
     Task<Result> DeleteAsync(long IqamaNo, CancellationToken cancellationToken = default);
-    Task<Result> AddEmployeeToHousing(long IqamaNo , string HousingName);
-    Task<Result> ChangeEmployeeToHousing(long IqamaNo , string oldHousingName , string NewHousingName);
+    Task<Result> AddEmployeeToHousing(long IqamaNo, string HousingName);
+    Task<Result> ChangeEmployeeToHousing(long IqamaNo, string oldHousingName, string NewHousingName);
     Task<Result<IEnumerable<EmpolyeeResponse>>> Filter(EmployeeFilter filter);
     Task<Result<PagedList<EmpolyeeResponse>>> Filter2(EmployeeFilter2 filter);
     Task<List<EmpolyeeResponse>> SmartSearch(string keyword);

@@ -1,8 +1,4 @@
 ﻿using Application.Abstraction;
-using Application.Service.Riders;
-using System;
-using System.Collections.Generic;
-using System.Text;
 
 namespace Application.Service.DE;
 

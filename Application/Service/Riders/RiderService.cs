@@ -2,20 +2,13 @@
 using Application.Contracts.Employees;
 using Application.Contracts.rider;
 using Application.Service.Empolyee;
-using Azure.Core;
 using Domain;
 using Domain.Entities;
-using Mapster;
 using Microsoft.EntityFrameworkCore;
-using System;
-using System.Collections.Generic;
-using System.Text;
-using System.Threading;
-using static Microsoft.EntityFrameworkCore.DbLoggerCategory.Database;
 
 namespace Application.Service.Riders;
 
-public class RiderService(ApplicationDbcontext dbcontext,IRiderWorkingIdHistoryService workingIdHistoryService) : IRiderService
+public class RiderService(ApplicationDbcontext dbcontext, IRiderWorkingIdHistoryService workingIdHistoryService) : IRiderService
 {
     private readonly ApplicationDbcontext dbcontext = dbcontext;
     private readonly IRiderWorkingIdHistoryService _workingIdHistoryService = workingIdHistoryService;
@@ -254,7 +247,7 @@ public class RiderService(ApplicationDbcontext dbcontext,IRiderWorkingIdHistoryS
         }
     }
 
-    public async Task<Result> DeleteAsync(long IqamaNo,string Reason, CancellationToken cancellationToken = default)
+    public async Task<Result> DeleteAsync(long IqamaNo, string Reason, CancellationToken cancellationToken = default)
     {
         using var transaction = await dbcontext.Database.BeginTransactionAsync(cancellationToken);
 
@@ -534,7 +527,7 @@ public class RiderService(ApplicationDbcontext dbcontext,IRiderWorkingIdHistoryS
         if (request.INKSA.HasValue)
             employee.INKSA = request.INKSA.Value;
 
-        if(request.HousingId.HasValue)
+        if (request.HousingId.HasValue)
             employee.HousingId = request.HousingId.Value;
     }
 
@@ -820,7 +813,7 @@ public class RiderService(ApplicationDbcontext dbcontext,IRiderWorkingIdHistoryS
             TshirtSize: employee.RiderDetails?.TshirtSize ?? "N/A",
             LicenseNumber: employee.RiderDetails?.LicenseNumber ?? "N/A",
             CompanyName: employee.RiderDetails?.Company?.Name ?? "N/A",
-            RiderId : employee.RiderDetails?.Id
+            RiderId: employee.RiderDetails?.Id
         );
     }
 }

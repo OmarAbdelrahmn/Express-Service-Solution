@@ -1,6 +1,4 @@
 ﻿using Application.Service.Riders;
-using k8s.Models;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Express_Service.Controllers;

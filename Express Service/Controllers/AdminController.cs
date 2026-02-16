@@ -1,16 +1,15 @@
 ﻿using Application.Service.Admin;
-using Application.Service.DE;
 using Application.Service.User;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.SignalR.Protocol;
 
 
 
 namespace Express_Service.Controllers;
+
 [Route("api/[controller]")]
 [ApiController]
-public class AdminController(IAdminService service,IUserService service1) : ControllerBase
+public class AdminController(IAdminService service, IUserService service1) : ControllerBase
 {
     private readonly IAdminService service = service;
     private readonly IUserService service1 = service1;
@@ -59,7 +58,7 @@ public class AdminController(IAdminService service,IUserService service1) : Cont
 
     [HttpPost("users/role")]
     [Authorize(Roles = "Master")]
- 
+
 
     public async Task<IActionResult> ChangeRoles([FromBody] Rer request)
     {
@@ -70,7 +69,7 @@ public class AdminController(IAdminService service,IUserService service1) : Cont
 
     [HttpGet("users/id/{Id}")]
     [Authorize(Roles = "Master")]
- 
+
 
     public async Task<IActionResult> GetUser(string Id)
     {
@@ -80,10 +79,10 @@ public class AdminController(IAdminService service,IUserService service1) : Cont
             Ok(user.Value) :
             user.ToProblem();
     }
-    
+
     [HttpGet("users/name/{UserName}")]
     [Authorize(Roles = "Master")]
- 
+
 
     public async Task<IActionResult> GetUser2(string UserName)
     {
@@ -96,7 +95,7 @@ public class AdminController(IAdminService service,IUserService service1) : Cont
 
     [HttpPut("users/{UserName}/toggle-status")]
     [Authorize(Roles = "Master")]
- 
+
 
     public async Task<IActionResult> ToggleStatusAsync(string UserName)
     {
@@ -121,4 +120,4 @@ public class AdminController(IAdminService service,IUserService service1) : Cont
 }
 
 
-public record Rer(string UserName,string NewRole);
+public record Rer(string UserName, string NewRole);

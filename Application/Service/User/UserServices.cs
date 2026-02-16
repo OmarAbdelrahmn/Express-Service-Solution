@@ -36,14 +36,14 @@ public class UserServices(UserManager<ApplicationUser> manager) : IUserService
 
         var Roles = await manager.GetRolesAsync(User);
 
-        if(Roles == null || Roles.Count ==0)
+        if (Roles == null || Roles.Count == 0)
             return Result.Failure(RolesErrors.somethingwrong);
-        
+
         if (Roles.Contains(NewRole))
             return Result.Failure(RolesErrors.haveit);
-        
+
         var RemoveRoleResult = await manager.RemoveFromRolesAsync(User, Roles);
-        
+
         if (!RemoveRoleResult.Succeeded)
             return Result.Failure(RolesErrors.somethingwrong);
 

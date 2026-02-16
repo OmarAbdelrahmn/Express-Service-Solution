@@ -1,8 +1,4 @@
 ﻿using Application.Abstraction;
-using Application.Contracts.Employees;
-using System;
-using System.Collections.Generic;
-using System.Text;
 
 namespace Application.Service.Empolyee;
 

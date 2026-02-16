@@ -9,7 +9,7 @@ public class RoleRequestValidator : AbstractValidator<RoleRequest>
         RuleFor(i => i.OldName)
             .NotEmpty()
             .Length(3, 256);
-        
+
         RuleFor(i => i.NewName)
             .NotEmpty()
             .Length(3, 256);

@@ -3,16 +3,12 @@ using Application.Abstraction.Consts;
 using Application.Abstraction.Errors;
 using Application.Authentication;
 using Application.Contracts.Auth;
-using Domain;
 using Domain.Entities;
 using Mapster;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
-using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
-using System.Security.Cryptography;
-using System.Text;
 
 namespace Application.Service.Auth;
 
@@ -42,9 +38,9 @@ public class AuthService(
         var userRole = await manager.GetRolesAsync(user);
 
 
-        if(userRole.Contains("Member"))
+        if (userRole.Contains("Member"))
             return Result.Failure<AuthResponse>(UserErrors.InvalidCredentials);
-        
+
 
         var result = await signInMaganager.PasswordSignInAsync(user, request.Password, false, true);
 

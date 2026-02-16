@@ -2,13 +2,9 @@
 using ClosedXML.Excel;
 using Domain;
 using Domain.Entities;
-using Domain.Migrations;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
-using System;
-using System.Collections.Generic;
 using System.Globalization;
-using System.Text;
 
 namespace Application.Service.Freelancer;
 

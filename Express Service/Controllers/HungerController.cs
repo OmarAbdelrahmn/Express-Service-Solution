@@ -1,8 +1,5 @@
 ﻿using Application.Service.Hungerdisa;
-using Application.Service.Riders;
-using Express_Service;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Express_Service.Controllers;
@@ -85,7 +82,7 @@ public class HungerController(IHungerDisabilityService service) : ControllerBase
 
 
     [HttpGet("date-range")]
- 
+
     public async Task<IActionResult> GetReportsByDateRange(
         [FromQuery] DateOnly startDate,
         [FromQuery] DateOnly endDate,
@@ -96,10 +93,10 @@ public class HungerController(IHungerDisabilityService service) : ControllerBase
     }
 
     [HttpGet("month")]
- 
+
     public async Task<IActionResult> GetReportsByMonth(
-        [FromQuery]int year,
-        [FromQuery]int month,
+        [FromQuery] int year,
+        [FromQuery] int month,
         CancellationToken cancellationToken = default)
     {
         if (month < 1 || month > 12)
@@ -111,9 +108,9 @@ public class HungerController(IHungerDisabilityService service) : ControllerBase
 
 
     [HttpGet("year")]
- 
+
     public async Task<IActionResult> GetReportsByYear(
-        [FromQuery]int year,
+        [FromQuery] int year,
         CancellationToken cancellationToken = default)
     {
         if (year < 2000 || year > 2100)
@@ -123,9 +120,9 @@ public class HungerController(IHungerDisabilityService service) : ControllerBase
         return response.IsSuccess ? Ok(response.Value) : response.ToProblem();
     }
 
- 
+
     [HttpGet("rider/{actualWorkingId}")]
- 
+
     public async Task<IActionResult> GetReportByRider(
         string actualWorkingId,
         [FromQuery] DateOnly startDate,
@@ -140,7 +137,7 @@ public class HungerController(IHungerDisabilityService service) : ControllerBase
 
 
     [HttpGet("summary")]
- 
+
     public async Task<IActionResult> GetOverallSummary(
         [FromQuery] DateOnly startDate,
         [FromQuery] DateOnly endDate,
