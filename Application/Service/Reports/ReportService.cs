@@ -298,7 +298,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
             var ridersWithShiftsQuery = _dbcontext.RiderDetails
                 .Include(r => r.Employee)
                 .ThenInclude(c => c.Housing)
-                .Where(r => r.RiderShifts.Any());
+                .Where(r => r.RiderShifts.Any() && r.CompanyId != 4);
 
             ridersWithShiftsQuery = ridersWithShiftsQuery.Where(r => !r.Employee.IsEmployee);
 
