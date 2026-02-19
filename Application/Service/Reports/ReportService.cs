@@ -97,7 +97,8 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
     decimal AverageOrdersPerMonth,
     DateOnly FirstWorkDate,
     DateOnly LastWorkDate,
-    List<MonthlyShiftSummary> ActiveMonths
+    List<MonthlyShiftSummary> ActiveMonths,
+    string? CompanyName
 );
 
     public async Task<Result<Company2StackedDeliveriesReport>> GetCompany2StackedDeliveriesReportAsync(
@@ -296,9 +297,10 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
 
             // Get all riders who have shifts
             var ridersWithShiftsQuery = _dbcontext.RiderDetails
+                .Include(C => C.Company)
                 .Include(r => r.Employee)
                 .ThenInclude(c => c.Housing)
-                .Where(r => r.RiderShifts.Any() && r.CompanyId != 4);
+                .Where(r => r.RiderShifts.Any());
 
             ridersWithShiftsQuery = ridersWithShiftsQuery.Where(r => !r.Employee.IsEmployee);
 
@@ -379,7 +381,8 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                     AverageOrdersPerMonth: avgOrdersPerMonth,
                     FirstWorkDate: firstShiftDate,
                     LastWorkDate: lastShiftDate,
-                    ActiveMonths: activeMonths
+                    ActiveMonths: activeMonths,
+                    rider.Company.Name
                 ));
             }
 
