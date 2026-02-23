@@ -170,7 +170,7 @@ public class BillService(ApplicationDbcontext dbcontext) : IBillService
         if (oldPrice != incomingPrice)
         {
             // Weighted average: ((Q1 × P1) + (Q2 × P2)) / (Q1 + Q2)
-            if (currentQuantity > 0)
+            if (currentQuantity > 0 && oldPrice > 0)
             {
                 newAveragePrice = ((currentQuantity * oldPrice) + (incomingQuantity * incomingPrice))
                                  / (currentQuantity + incomingQuantity);
