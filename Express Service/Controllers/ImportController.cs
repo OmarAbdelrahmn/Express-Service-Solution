@@ -15,6 +15,9 @@ public class ImportController(IImportService service, IBackgroundImportService s
     private readonly IImportService service = service;
     private readonly IBackgroundImportService service1 = service1;
 
+
+    
+
     [HttpPost("kita-monthly-orders")]
     public async Task<IActionResult> ImportKitaMonthlyOrders(IFormFile file)
     {
@@ -49,6 +52,28 @@ public class ImportController(IImportService service, IBackgroundImportService s
                         : "0%"
                 }
             });
+        }
+
+        return result.ToProblem();
+    }
+  
+    
+    [HttpPost("kita-monthly-validation")]
+    public async Task<IActionResult> ImportKidtaMonthlyOrders(IFormFile file)
+    {
+        if (file == null || file.Length == 0)
+            return BadRequest(new { error = "No file uploaded or file is empty" });
+
+        if (!file.FileName.EndsWith(".xlsx") && !file.FileName.EndsWith(".xls"))
+            return BadRequest(new { error = "File must be Excel format (.xlsx or .xls)" });
+
+        var uploadedBy = User?.Identity?.Name ?? "System";
+
+        var result = await service.ImportKitaMonthlyValidityAsync(file, uploadedBy);
+
+        if (result.IsSuccess)
+        {
+            return Ok(result.Value);
         }
 
         return result.ToProblem();

@@ -40,6 +40,7 @@ public class ApplicationDbcontext(DbContextOptions<ApplicationDbcontext> options
     public required DbSet<Return> Returns { get; set; }
     public required DbSet<ReturnItem> ReturnItems { get; set; }
     public required DbSet<KetaFreeLancer> KetaFreeLancers { get; set; }
+    public required DbSet<RiderMonthlyValidity> RiderMonthlyValidities { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

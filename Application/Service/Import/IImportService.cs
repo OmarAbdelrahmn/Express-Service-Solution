@@ -1,5 +1,6 @@
 ﻿using Application.Abstraction;
 using Application.Service.Empolyee;
+using Domain.Entities;
 using Microsoft.AspNetCore.Http;
 using static Application.Service.Import.ImportService;
 
@@ -7,6 +8,55 @@ namespace Application.Service.Import;
 
 public interface IImportService
 {
+    // ════════════════════════════════════════════════════════════════════════
+    //  ADD TO: Application/Service/Import/IImportService.cs
+    //  Place alongside the other Task<Result<...>> method signatures
+    // ════════════════════════════════════════════════════════════════════════
+
+    // ── Method signature ────────────────────────────────────────────────────
+
+    Task<Result<KitaValidityImportResponse>> ImportKitaMonthlyValidityAsync(
+        IFormFile file,
+        string uploadedBy,
+        Action<int, int>? progressCallback = null);
+
+    // ── Response records (add at the bottom of IImportService, with the others) ─
+
+    public record KitaValidityImportResponse(
+        int TotalRowsInExcel,
+        int EmployeesFound,
+        int EmployeesNotFound,
+        int NoRiderDetails,
+        int RecordsCreated,
+        int RecordsUpdated,
+        int MonthsSkipped,        // cells with value 0 – no record written
+        int ErrorRows,
+        List<KitaValidityEmployeeResult> Results,
+        List<string> ProcessingErrors,
+        DateTime ProcessedAt
+    );
+
+    public record KitaValidityEmployeeResult(
+        int RowNumber,
+        long IqamaNo,
+        string EmployeeNameAR,
+        bool Found,
+        string? WorkingId,
+        string? OverallStatusLabel,
+        List<KitaValidityMonthResult> MonthResults,
+        string? ErrorMessage
+    );
+
+    public record KitaValidityMonthResult(
+        int Month,
+        int ExcelOrderCount,             // value read from cell (0 = skipped)
+        int ActualShiftOrders,           // sum loaded from RiderShifts
+        ValidityStatus? Status,          // inherited from row-level status
+        bool Skipped,                    // true when ExcelOrderCount == 0
+        bool Created,
+        bool Updated,
+        string? ErrorMessage
+    );
     // ============================================================
     // ADD THESE TO: Application/Service/Import/IImportService.cs
     // Place alongside the other Task<Result<...>> method signatures

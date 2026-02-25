@@ -16,6 +16,517 @@ public class ImportService(ApplicationDbcontext dbcontext, IRiderSub riderSub) :
     private readonly ApplicationDbcontext _dbcontext = dbcontext;
     private readonly IRiderSub riderSub = riderSub;
 
+    // ════════════════════════════════════════════════════════════════════════
+    //  ADD TO: Application/Service/Import/ImportService.cs
+    //  Inside the ImportService class, alongside the other region blocks.
+    //
+    //  Depends on:
+    //    - Domain.Entities.RiderMonthlyValidity
+    //    - Domain.Entities.ValidityStatus  (the new enum)
+    //    - _dbcontext.RiderMonthlyValidities  (DbSet)
+    //    - _dbcontext.RiderShifts
+    //    - _dbcontext.RiderDetails
+    //    - _dbcontext.Employees
+    //    - Existing helpers: GetCellValue, TryParseInt, FindKitaHeaderRow,
+    //      BuildKitaColumnMapping (reused from KitaMonthlyOrders region)
+    // ════════════════════════════════════════════════════════════════════════
+
+    #region Kita Monthly Validity Import
+
+    public async Task<Result<KitaValidityImportResponse>> ImportKitaMonthlyValidityAsync(
+        IFormFile file,
+        string uploadedBy,
+        Action<int, int>? progressCallback = null)
+    {
+        if (file == null || file.Length == 0)
+            return Result.Failure<KitaValidityImportResponse>(
+                new Error("InvalidFile", "File is empty or null", 400));
+
+        if (!file.FileName.EndsWith(".xlsx") && !file.FileName.EndsWith(".xls"))
+            return Result.Failure<KitaValidityImportResponse>(
+                new Error("InvalidFormat", "File must be Excel format (.xlsx or .xls)", 400));
+
+        var results = new List<KitaValidityEmployeeResult>();
+        var globalErrors = new List<string>();
+
+        int employeesFound = 0;
+        int employeesNotFound = 0;
+        int noRiderDetails = 0;
+        int totalCreated = 0;
+        int totalUpdated = 0;
+        int totalSkipped = 0;
+        int errorRows = 0;
+
+        // Months present in the 2025 Kita file (Apr–Dec)
+        var validMonths = new HashSet<int> { 4, 5, 6, 7, 8, 9, 10, 11, 12 };
+
+        try
+        {
+            Console.WriteLine($"[KitaValidityImport] Starting import: {file.FileName}");
+
+            using var stream = file.OpenReadStream();
+            using var workbook = new XLWorkbook(stream);
+            var worksheet = workbook.Worksheet(1);
+
+            if (worksheet == null)
+                return Result.Failure<KitaValidityImportResponse>(
+                    new Error("InvalidWorksheet", "Could not read worksheet", 400));
+
+            // ── Locate header row ────────────────────────────────────────────
+            var headerRow = FindKitaValidityHeaderRow(worksheet);
+            if (headerRow == null)
+                return Result.Failure<KitaValidityImportResponse>(
+                    new Error("EmptyFile", "No header row found", 400));
+
+            Console.WriteLine($"[KitaValidityImport] Header at row {headerRow.RowNumber()}");
+
+            // ── Build column map (reuses Kita month-column logic) ─────────────
+            var colMap = BuildKitaValidityColumnMapping(headerRow);
+            if (!colMap.IsValid)
+                return Result.Failure<KitaValidityImportResponse>(
+                    new Error("InvalidColumns", colMap.ErrorMessage!, 400));
+
+            Console.WriteLine(
+                $"[KitaValidityImport] IqamaCol={colMap.IqamaNoCol} " +
+                $"StatusCol={colMap.StatusCol} " +
+                $"MonthCols={string.Join(",", colMap.MonthColumns.Select(m => $"M{m.Key}=C{m.Value}"))}");
+
+            // ── Data rows ────────────────────────────────────────────────────
+            var dataRows = worksheet.RowsUsed()
+                                      .Where(r => r.RowNumber() > headerRow.RowNumber())
+                                      .ToList();
+            int totalRows = dataRows.Count;
+
+            if (totalRows == 0)
+                return Result.Failure<KitaValidityImportResponse>(
+                    new Error("EmptyFile", "No data rows found in Excel file", 400));
+
+            Console.WriteLine($"[KitaValidityImport] Data rows: {totalRows}");
+
+            // ── Bulk-load riders ─────────────────────────────────────────────
+            var riderLookup = await _dbcontext.RiderDetails
+                .Include(r => r.Employee)
+                .Select(r => new
+                {
+                    r.Id,
+                    r.EmployeeIqamaNo,
+                    r.WorkingId,
+                    NameAR = r.Employee.NameAR
+                })
+                .AsNoTracking()
+                .ToListAsync();
+
+            var riderByIqama = riderLookup.ToDictionary(r => r.EmployeeIqamaNo);
+            Console.WriteLine($"[KitaValidityImport] Loaded {riderByIqama.Count} riders");
+
+            progressCallback?.Invoke(0, totalRows);
+
+            int processed = 0;
+            int rowNumber = headerRow.RowNumber();
+
+            foreach (var row in dataRows)
+            {
+                rowNumber++;
+                processed++;
+
+                try
+                {
+                    // ── IqamaNo ──────────────────────────────────────────────
+                    var iqamaStr = GetCellValue(row, colMap.IqamaNoCol)
+                                       ?.Replace(" ", "").Trim();
+
+                    if (string.IsNullOrWhiteSpace(iqamaStr) ||
+                        !long.TryParse(iqamaStr, out long iqamaNo) || iqamaNo <= 0)
+                    {
+                        errorRows++;
+                        results.Add(new KitaValidityEmployeeResult(
+                            rowNumber, 0,
+                            GetCellValue(row, colMap.NameARCol) ?? "N/A",
+                            false, null, null,
+                            new List<KitaValidityMonthResult>(),
+                            $"Invalid or missing IqamaNo: '{iqamaStr}'"
+                        ));
+                        continue;
+                    }
+
+                    string nameAR = GetCellValue(row, colMap.NameARCol)?.Trim() ?? "N/A";
+
+                    // ── Row-level validity status (last column) ───────────────
+                    ValidityStatus? overallStatus = null;
+                    string? overallLabel = null;
+                    var statusRaw =
+                        colMap.StatusCol > 0
+                            ? GetCellValue(row, colMap.StatusCol)?.Trim()
+                            : null;
+
+                    if (!string.IsNullOrWhiteSpace(statusRaw))
+                    {
+                        (overallStatus, overallLabel) = ParseValidityStatus(statusRaw);
+                    }
+
+                    // ── Rider lookup ──────────────────────────────────────────
+                    if (!riderByIqama.TryGetValue(iqamaNo, out var riderInfo))
+                    {
+                        bool empExists = await _dbcontext.Employees
+                            .AnyAsync(e => e.IqamaNo == iqamaNo);
+
+                        if (empExists)
+                        {
+                            noRiderDetails++;
+                            results.Add(new KitaValidityEmployeeResult(
+                                rowNumber, iqamaNo, nameAR,
+                                true, null, overallLabel,
+                                new List<KitaValidityMonthResult>(),
+                                "Employee found but has no RiderDetails record"
+                            ));
+                        }
+                        else
+                        {
+                            employeesNotFound++;
+                            results.Add(new KitaValidityEmployeeResult(
+                                rowNumber, iqamaNo, nameAR,
+                                false, null, overallLabel,
+                                new List<KitaValidityMonthResult>(),
+                                "Employee not found in system"
+                            ));
+                        }
+                        continue;
+                    }
+
+                    employeesFound++;
+                    int riderId = riderInfo.Id;
+                    string workingId = !string.IsNullOrWhiteSpace(riderInfo.WorkingId)
+                                       ? riderInfo.WorkingId
+                                       : "0";
+
+                    // ── Load existing validity records for this rider / year ───
+                    var existingValidity = await _dbcontext.RiderMonthlyValidities
+                        .Where(v => v.EmployeeIqamaNo == iqamaNo && v.Year == 2025)
+                        .ToListAsync();
+
+                    var existingByMonth = existingValidity.ToDictionary(v => v.Month);
+
+                    // ── Load actual shift orders per month from RiderShifts ────
+                    var shiftOrders = await _dbcontext.RiderShifts
+                        .Where(s => s.RiderId == riderId &&
+                                    s.ShiftDate.Year == 2025 &&
+                                    s.ShiftDate.Month >= 4 &&
+                                    s.ShiftDate.Month <= 12)
+                        .GroupBy(s => s.ShiftDate.Month)
+                        .Select(g => new
+                        {
+                            Month = g.Key,
+                            TotalOrders = g.Sum(s => s.AcceptedDailyOrders)
+                        })
+                        .ToListAsync();
+
+                    var shiftOrdersMap = shiftOrders.ToDictionary(x => x.Month, x => x.TotalOrders);
+
+                    // ── Process each month column ─────────────────────────────
+                    var monthResults = new List<KitaValidityMonthResult>();
+
+                    foreach (var monthEntry in colMap.MonthColumns)
+                    {
+                        int month = monthEntry.Key;
+                        int colIndex = monthEntry.Value;
+
+                        var cellStr = GetCellValue(row, colIndex);
+                        if (string.IsNullOrWhiteSpace(cellStr) ||
+                            !TryParseInt(cellStr, out int excelOrderCount))
+                        {
+                            // Treat unreadable as 0 → skip
+                            excelOrderCount = 0;
+                        }
+
+                        shiftOrdersMap.TryGetValue(month, out int actualShiftOrders);
+
+                        // ── SKIP months where Excel value is 0 ────────────────
+                        if (excelOrderCount == 0)
+                        {
+                            totalSkipped++;
+                            monthResults.Add(new KitaValidityMonthResult(
+                                month, 0, actualShiftOrders, null,
+                                Skipped: true,
+                                Created: false,
+                                Updated: false,
+                                ErrorMessage: null
+                            ));
+                            continue;
+                        }
+
+                        // ── Upsert RiderMonthlyValidity ───────────────────────
+                        bool created = false;
+                        bool updated = false;
+                        string? monthError = null;
+
+                        try
+                        {
+                            if (existingByMonth.TryGetValue(month, out var existing))
+                            {
+                                // UPDATE
+                                existing.TotalOrders = actualShiftOrders; // use real shift data
+                                if (overallStatus.HasValue)
+                                    existing.Status = overallStatus.Value;
+
+                                updated = true;
+                                totalUpdated++;
+                            }
+                            else
+                            {
+                                // CREATE
+                                var newRecord = new RiderMonthlyValidity
+                                {
+                                    Year = 2025,
+                                    Month = month,
+                                    EmployeeIqamaNo = iqamaNo,
+                                    Status = overallStatus ?? ValidityStatus.Invalid,
+                                    TotalOrders = actualShiftOrders,
+                                    CreatedAt = DateTime.UtcNow.AddHours(3)
+                                };
+
+                                await _dbcontext.RiderMonthlyValidities.AddAsync(newRecord);
+
+                                // Keep local map in sync
+                                existingByMonth[month] = newRecord;
+
+                                created = true;
+                                totalCreated++;
+                            }
+                        }
+                        catch (Exception mEx)
+                        {
+                            monthError = mEx.Message;
+                            globalErrors.Add(
+                                $"Row {rowNumber} (IqamaNo={iqamaNo}) Month={month}: {mEx.Message}");
+                        }
+
+                        monthResults.Add(new KitaValidityMonthResult(
+                            month,
+                            excelOrderCount,
+                            actualShiftOrders,
+                            overallStatus,
+                            Skipped: false,
+                            Created: created,
+                            Updated: updated,
+                            ErrorMessage: monthError
+                        ));
+                    }
+
+                    // ── Save this employee's changes ──────────────────────────
+                    await _dbcontext.SaveChangesAsync();
+
+                    results.Add(new KitaValidityEmployeeResult(
+                        rowNumber, iqamaNo, nameAR,
+                        true, workingId,
+                         overallLabel,
+                        monthResults,
+                        null
+                    ));
+
+                    Console.WriteLine(
+                        $"[KitaValidityImport] ✓ Row {rowNumber} | IqamaNo={iqamaNo} " +
+                        $"| Status={overallLabel ?? "N/A"} " +
+                        $"| Created={monthResults.Count(m => m.Created)} " +
+                        $"| Updated={monthResults.Count(m => m.Updated)}");
+                }
+                catch (Exception ex)
+                {
+                    errorRows++;
+                    globalErrors.Add($"Row {rowNumber}: {ex.Message}");
+
+                    results.Add(new KitaValidityEmployeeResult(
+                        rowNumber, 0, "N/A",
+                        false, null, null,
+                        new List<KitaValidityMonthResult>(),
+                        $"Exception: {ex.Message}"
+                    ));
+
+                    Console.WriteLine($"[KitaValidityImport] ERROR Row {rowNumber}: {ex.Message}");
+                }
+
+                if (processed % 50 == 0)
+                {
+                    try { progressCallback?.Invoke(processed, totalRows); } catch { }
+                    Console.WriteLine($"[KitaValidityImport] Progress: {processed}/{totalRows}");
+                }
+            }
+
+            try { progressCallback?.Invoke(totalRows, totalRows); } catch { }
+
+            Console.WriteLine($"[KitaValidityImport] Import complete:");
+            Console.WriteLine($"  Total rows:         {totalRows}");
+            Console.WriteLine($"  Employees found:    {employeesFound}");
+            Console.WriteLine($"  Employees missing:  {employeesNotFound}");
+            Console.WriteLine($"  No rider details:   {noRiderDetails}");
+            Console.WriteLine($"  Records created:    {totalCreated}");
+            Console.WriteLine($"  Records updated:    {totalUpdated}");
+            Console.WriteLine($"  Months skipped (0): {totalSkipped}");
+            Console.WriteLine($"  Error rows:         {errorRows}");
+
+            var response = new KitaValidityImportResponse(
+                TotalRowsInExcel: totalRows,
+                EmployeesFound: employeesFound,
+                EmployeesNotFound: employeesNotFound,
+                NoRiderDetails: noRiderDetails,
+                RecordsCreated: totalCreated,
+                RecordsUpdated: totalUpdated,
+                MonthsSkipped: totalSkipped,
+                ErrorRows: errorRows,
+                Results: results,
+                ProcessingErrors: globalErrors,
+                ProcessedAt: DateTime.UtcNow.AddHours(3)
+            );
+
+            return Result.Success(response);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[KitaValidityImport] FATAL: {ex}");
+            return Result.Failure<KitaValidityImportResponse>(
+                new Error("ProcessingError", $"Failed to process file: {ex.Message}", 500));
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  PRIVATE HELPERS  (add alongside other private helpers in ImportService)
+    // ════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Finds the header row for the Kita validity Excel.
+    /// Accepts the same header format as the KitaMonthlyOrders file
+    /// (column 1 = IqamaNo, columns named 4–12 = months, last column = status).
+    /// </summary>
+    private IXLRow? FindKitaValidityHeaderRow(IXLWorksheet worksheet)
+    {
+        var iqamaVariants = new[]
+        {
+        "رقم الإقامة", "رقم الاقامة", "IqamaNumber",
+        "Iqama Number", "IqamaNo", "الاقامة", "الإقامة"
+    };
+
+        var monthValues = new HashSet<string>
+        { "4","5","6","7","8","9","10","11","12" };
+
+        for (int i = 1; i <= Math.Min(10, worksheet.RowsUsed().Count()); i++)
+        {
+            var row = worksheet.Row(i);
+            var cells = row.CellsUsed()
+                           .Select(c => c.IsMerged()
+                               ? c.MergedRange().FirstCell().GetString().Trim()
+                               : c.GetString().Trim())
+                           .Where(v => !string.IsNullOrWhiteSpace(v))
+                           .ToList();
+
+            bool hasIqama = cells.Any(cv => iqamaVariants.Any(iv =>
+                                    cv.Equals(iv, StringComparison.OrdinalIgnoreCase)));
+            int monthCount = cells.Count(cv => monthValues.Contains(cv));
+
+            if (hasIqama && monthCount >= 1)
+                return row;
+        }
+
+        return worksheet.Row(1);
+    }
+
+    /// <summary>
+    /// Builds the column mapping for the Kita validity file.
+    /// Same as KitaColumnMapping but also detects the status column.
+    /// </summary>
+    private KitaValidityColumnMapping BuildKitaValidityColumnMapping(IXLRow headerRow)
+    {
+        var mapping = new KitaValidityColumnMapping();
+        var cells = headerRow.CellsUsed().ToList();
+
+        // IqamaNo
+        mapping.IqamaNoCol = FindColumn(cells,
+            "رقم الإقامة", "رقم الاقامة", "IqamaNumber",
+            "Iqama Number", "IqamaNo", "الاقامة", "الإقامة");
+
+        // Arabic name (optional – for logging)
+        mapping.NameARCol = FindColumn(cells,
+            "اسم الموظف", "اسم الموظف بالعربي", "Name AR", "NameAR", "الاسم");
+
+        // Status column (last column – contains صالح / غير صالح / فري لانسر)
+        mapping.StatusCol = FindColumn(cells,
+            "الحالة", "Status", "التصنيف", "صالح", "ValidityStatus",
+            "حالة السائق", "التقييم");
+
+        // Month columns (headers are the month number as a string: "4" … "12")
+        foreach (var cell in cells)
+        {
+            try
+            {
+                string val = cell.IsMerged()
+                    ? cell.MergedRange().FirstCell().GetString().Trim()
+                    : cell.GetString().Trim();
+
+                if (int.TryParse(val, out int month) && month >= 4 && month <= 12)
+                    mapping.MonthColumns[month] = cell.Address.ColumnNumber;
+            }
+            catch { /* skip bad cells */ }
+        }
+
+        // If status column not found by name, assume it is the last used column
+        // (the file uses Arabic status values directly as the column header is sometimes blank)
+        if (mapping.StatusCol == 0 && cells.Count > 0)
+        {
+            int lastColNumber = cells.Max(c => c.Address.ColumnNumber);
+            // Only treat it as status col if it is not already a month col
+            if (!mapping.MonthColumns.ContainsValue(lastColNumber))
+                mapping.StatusCol = lastColNumber;
+        }
+
+        // Validation
+        var missing = new List<string>();
+        if (mapping.IqamaNoCol == 0) missing.Add("Iqama Number (رقم الإقامة)");
+        if (mapping.MonthColumns.Count == 0) missing.Add("Month columns (4–12)");
+
+        mapping.IsValid = !missing.Any();
+        mapping.ErrorMessage = missing.Any()
+            ? $"Required columns not found: {string.Join(", ", missing)}"
+            : null;
+
+        return mapping;
+    }
+
+    /// <summary>
+    /// Maps Arabic / English status text to the ValidityStatus enum.
+    /// Returns (null, null) for unrecognised values.
+    /// </summary>
+    private static (ValidityStatus? status, string? label) ParseValidityStatus(string raw)
+    {
+        var normalised = raw.Trim()
+                            .Replace("\u200f", "")   // remove RTL mark
+                            .Replace("\u200e", "");  // remove LTR mark
+
+        return normalised switch
+        {
+            "صالح" or "Valid" or "valid" => (ValidityStatus.Valid, "صالح"),
+            "غير صالح" or "Invalid" or "invalid" => (ValidityStatus.Invalid, "غير صالح"),
+            "فري لانسر" or "Freelancer" or "freelancer"
+                          or "فري لانسرز" or "فريلانسر" => (ValidityStatus.Freelancer, "فري لانسر"),
+            _ => (null, null)
+        };
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  INTERNAL CLASSES (add alongside other internal classes in ImportService)
+    // ════════════════════════════════════════════════════════════════════════
+
+    internal class KitaValidityColumnMapping
+    {
+        public bool IsValid { get; set; }
+        public string? ErrorMessage { get; set; }
+        public int IqamaNoCol { get; set; }
+        public int NameARCol { get; set; }
+        public int StatusCol { get; set; }
+
+        // Key = month number (4–12), Value = Excel column number
+        public Dictionary<int, int> MonthColumns { get; set; } = new();
+    }
+
+    #endregion
+
     #region Kita Monthly Orders Import (April–December 2025)
 
     public async Task<Result<KitaMonthlyOrdersImportResponse>> ImportKitaMonthlyOrdersAsync(

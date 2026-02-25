@@ -19,7 +19,7 @@ public class RiderMonthlyValidity
 
 
     /// <summary>Whether the rider passed all validation rules for this month</summary>
-    public bool IsValid { get; set; }
+    public ValidityStatus Status { get; set; }
 
     /// <summary>Snapshot: total accepted orders in that month</summary>
     public int TotalOrders { get; set; }
@@ -27,4 +27,11 @@ public class RiderMonthlyValidity
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow.AddHours(3);
     // ── Navigation ──────────────────────────────────────────────────────────
     public Employees Employee { get; set; } = default!;
+}
+
+public enum ValidityStatus
+{
+    Valid = 1,
+    Invalid = 2,
+    Freelancer = 3,
 }
