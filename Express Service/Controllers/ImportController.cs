@@ -15,6 +15,80 @@ public class ImportController(IImportService service, IBackgroundImportService s
     private readonly IImportService service = service;
     private readonly IBackgroundImportService service1 = service1;
 
+    [HttpPost("kita-monthly-orders")]
+    public async Task<IActionResult> ImportKitaMonthlyOrders(IFormFile file)
+    {
+        if (file == null || file.Length == 0)
+            return BadRequest(new { error = "No file uploaded or file is empty" });
+
+        if (!file.FileName.EndsWith(".xlsx") && !file.FileName.EndsWith(".xls"))
+            return BadRequest(new { error = "File must be Excel format (.xlsx or .xls)" });
+
+        var uploadedBy = User?.Identity?.Name ?? "System";
+
+        var result = await service.ImportKitaMonthlyOrdersAsync(file, uploadedBy);
+
+        if (result.IsSuccess)
+        {
+            return Ok(new
+            {
+                success = true,
+                data = result.Value,
+                summary = new
+                {
+                    totalRowsInExcel = result.Value.TotalRowsInExcel,
+                    employeesFound = result.Value.EmployeesFound,
+                    employeesNotFound = result.Value.EmployeesNotFound,
+                    noRiderDetails = result.Value.NoRiderDetails,
+                    totalShiftsCreated = result.Value.TotalShiftsCreated,
+                    totalShiftsUpdated = result.Value.TotalShiftsUpdated,
+                    totalDaysSkipped = result.Value.TotalShiftsSkipped,
+                    errorRows = result.Value.ErrorRows,
+                    successRate = result.Value.TotalRowsInExcel > 0
+                        ? $"{(result.Value.EmployeesFound * 100.0 / result.Value.TotalRowsInExcel):F1}%"
+                        : "0%"
+                }
+            });
+        }
+
+        return result.ToProblem();
+    }
+
+
+    [HttpPost("check-iqamas")]
+    public async Task<IActionResult> CheckIqamasFromExcel(IFormFile file)
+    {
+        if (file == null || file.Length == 0)
+            return BadRequest(new { error = "No file uploaded or file is empty" });
+
+        if (!file.FileName.EndsWith(".xlsx") && !file.FileName.EndsWith(".xls"))
+            return BadRequest(new { error = "File must be Excel format (.xlsx or .xls)" });
+
+        var result = await service.CheckIqamasFromExcelAsync(file, "omar");
+
+        if (result.IsSuccess)
+        {
+            return Ok(new
+            {
+                success = true,
+                data = result.Value,
+                summary = new
+                {
+                    totalRecords = result.Value.TotalRecords,
+                    foundWithRiderAndWorkingId = result.Value.FoundWithRiderAndWorkingId,
+                    foundWithRiderNoWorkingId = result.Value.FoundWithRiderNoWorkingId,
+                    foundNoRiderDetails = result.Value.FoundNoRiderDetails,
+                    notFound = result.Value.NotFound,
+                    failedRecords = result.Value.FailedRecords,
+                    successRate = result.Value.TotalRecords > 0
+                        ? $"{(result.Value.FoundWithRiderAndWorkingId * 100.0 / result.Value.TotalRecords):F1}%"
+                        : "0%"
+                }
+            });
+        }
+
+        return result.ToProblem();
+    }
 
     [HttpPost("spare-parts/update-quantities")]
     public async Task<IActionResult> UpdateSparePartQuantities(IFormFile file)

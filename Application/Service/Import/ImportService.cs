@@ -16,9 +16,708 @@ public class ImportService(ApplicationDbcontext dbcontext, IRiderSub riderSub) :
     private readonly ApplicationDbcontext _dbcontext = dbcontext;
     private readonly IRiderSub riderSub = riderSub;
 
+    #region Kita Monthly Orders Import (April–December 2025)
 
-    // Add this method to ImportService.cs
+    public async Task<Result<KitaMonthlyOrdersImportResponse>> ImportKitaMonthlyOrdersAsync(
+        IFormFile file,
+        string uploadedBy,
+        Action<int, int>? progressCallback = null)
+    {
+        if (file == null || file.Length == 0)
+            return Result.Failure<KitaMonthlyOrdersImportResponse>(
+                new Error("InvalidFile", "File is empty or null", 400));
 
+        if (!file.FileName.EndsWith(".xlsx") && !file.FileName.EndsWith(".xls"))
+            return Result.Failure<KitaMonthlyOrdersImportResponse>(
+                new Error("InvalidFormat", "File must be Excel format (.xlsx or .xls)", 400));
+
+        var results = new List<KitaMonthlyEmployeeResult>();
+        var globalErrors = new List<string>();
+
+        int employeesFound = 0;
+        int employeesNotFound = 0;
+        int noRiderDetails = 0;
+        int totalCreated = 0;
+        int totalUpdated = 0;
+        int totalSkipped = 0;
+        int errorRows = 0;
+
+        // Days in each month for year 2025 (April = 4 … December = 12)
+        var daysInMonth2025 = new Dictionary<int, int>
+    {
+        { 4,  30 },  // April
+        { 5,  31 },  // May
+        { 6,  30 },  // June
+        { 7,  31 },  // July
+        { 8,  31 },  // August
+        { 9,  30 },  // September
+        { 10, 31 },  // October
+        { 11, 30 },  // November
+        { 12, 31 }   // December
+    };
+
+        try
+        {
+            Console.WriteLine($"[KitaMonthlyOrders] Starting import for file: {file.FileName}");
+
+            using var stream = file.OpenReadStream();
+            using var workbook = new XLWorkbook(stream);
+            var worksheet = workbook.Worksheet(1);
+
+            if (worksheet == null)
+                return Result.Failure<KitaMonthlyOrdersImportResponse>(
+                    new Error("InvalidWorksheet", "Could not read worksheet", 400));
+
+            Console.WriteLine($"[KitaMonthlyOrders] Worksheet loaded: {worksheet.Name}");
+
+            // ── Locate the header row ────────────────────────────────────────
+            var headerRow = FindKitaHeaderRow(worksheet);
+            if (headerRow == null)
+                return Result.Failure<KitaMonthlyOrdersImportResponse>(
+                    new Error("EmptyFile", "No header row found", 400));
+
+            Console.WriteLine($"[KitaMonthlyOrders] Header row at row {headerRow.RowNumber()}");
+
+            // ── Build column map ─────────────────────────────────────────────
+            var colMap = BuildKitaColumnMapping(headerRow);
+            if (!colMap.IsValid)
+                return Result.Failure<KitaMonthlyOrdersImportResponse>(
+                    new Error("InvalidColumns", colMap.ErrorMessage!, 400));
+
+            Console.WriteLine($"[KitaMonthlyOrders] Columns mapped. " +
+                              $"IqamaCol={colMap.IqamaNoCol}, " +
+                              $"MonthCols={string.Join(",", colMap.MonthColumns.Select(m => $"M{m.Key}=C{m.Value}"))}");
+
+            // ── Collect data rows ────────────────────────────────────────────
+            var dataRows = worksheet.RowsUsed()
+                                      .Where(r => r.RowNumber() > headerRow.RowNumber())
+                                      .ToList();
+            int totalRows = dataRows.Count;
+
+            Console.WriteLine($"[KitaMonthlyOrders] Data rows: {totalRows}");
+
+            if (totalRows == 0)
+                return Result.Failure<KitaMonthlyOrdersImportResponse>(
+                    new Error("EmptyFile", "No data rows found in Excel file", 400));
+
+            // ── Load riders into memory (fast lookup) ────────────────────────
+            Console.WriteLine("[KitaMonthlyOrders] Loading rider lookup…");
+            // Key = IqamaNo
+            var riderLookup = await _dbcontext.RiderDetails
+                .Include(r => r.Employee)
+                .Select(r => new
+                {
+                    r.Id,
+                    r.EmployeeIqamaNo,
+                    r.WorkingId,
+                    NameAR = r.Employee.NameAR
+                })
+                .AsNoTracking()
+                .ToListAsync();
+
+            var riderByIqama = riderLookup.ToDictionary(r => r.EmployeeIqamaNo);
+            Console.WriteLine($"[KitaMonthlyOrders] Loaded {riderByIqama.Count} riders");
+
+            // ── Load existing shifts for fast duplicate check ─────────────────
+            // We'll load per-rider as we go to avoid loading everything upfront.
+            // (If dataset is huge, a full load could be done similarly to riderLookup.)
+
+            progressCallback?.Invoke(0, totalRows);
+
+            int processed = 0;
+            int rowNumber = headerRow.RowNumber();
+
+            foreach (var row in dataRows)
+            {
+                rowNumber++;
+                processed++;
+
+                try
+                {
+                    // ── Parse IqamaNo ────────────────────────────────────────
+                    var iqamaStr = GetCellValue(row, colMap.IqamaNoCol)?.Replace(" ", "").Trim();
+
+                    if (string.IsNullOrWhiteSpace(iqamaStr) ||
+                        !long.TryParse(iqamaStr, out long iqamaNo) || iqamaNo <= 0)
+                    {
+                        errorRows++;
+                        results.Add(new KitaMonthlyEmployeeResult(
+                            rowNumber, 0,
+                            GetCellValue(row, colMap.NameARCol) ?? "N/A",
+                            false, null, null,
+                            new List<KitaMonthResult>(),
+                            $"Invalid or missing IqamaNo: '{iqamaStr}'"
+                        ));
+                        continue;
+                    }
+
+                    string nameAR = GetCellValue(row, colMap.NameARCol)?.Trim() ?? "N/A";
+
+                    // ── Look up rider ────────────────────────────────────────
+                    if (!riderByIqama.TryGetValue(iqamaNo, out var riderInfo))
+                    {
+                        // Try via Employees table (employee exists but may not be a rider)
+                        var empExists = await _dbcontext.Employees
+                            .AnyAsync(e => e.IqamaNo == iqamaNo);
+
+                        if (empExists)
+                        {
+                            noRiderDetails++;
+                            results.Add(new KitaMonthlyEmployeeResult(
+                                rowNumber, iqamaNo, nameAR,
+                                true, null, null,
+                                new List<KitaMonthResult>(),
+                                "Employee found but has no RiderDetails record"
+                            ));
+                        }
+                        else
+                        {
+                            employeesNotFound++;
+                            results.Add(new KitaMonthlyEmployeeResult(
+                                rowNumber, iqamaNo, nameAR,
+                                false, null, null,
+                                new List<KitaMonthResult>(),
+                                "Employee not found in system"
+                            ));
+                        }
+                        continue;
+                    }
+
+                    employeesFound++;
+                    int riderId = riderInfo.Id;
+                    string workingId = !string.IsNullOrWhiteSpace(riderInfo.WorkingId)
+                                       ? riderInfo.WorkingId
+                                       : "0";
+
+                    // ── Load existing shifts for this rider (all 2025 months) ──
+                    var existingShifts = await _dbcontext.RiderShifts
+                        .Where(s => s.RiderId == riderId &&
+                                    s.ShiftDate.Year == 2025 &&
+                                    s.ShiftDate.Month >= 4 &&
+                                    s.ShiftDate.Month <= 12)
+                        .ToListAsync();
+
+                    // Key = ShiftDate for fast lookup
+                    var existingShiftMap = existingShifts.ToDictionary(s => s.ShiftDate);
+
+                    var monthResults = new List<KitaMonthResult>();
+
+                    // ── Process each month ────────────────────────────────────
+                    foreach (var monthEntry in colMap.MonthColumns)
+                    {
+                        int month = monthEntry.Key;
+                        int colIndex = monthEntry.Value;
+                        int daysCount = daysInMonth2025[month];
+
+                        // Read total orders for this month
+                        var totalStr = GetCellValue(row, colIndex);
+                        if (string.IsNullOrWhiteSpace(totalStr) ||
+                            !TryParseInt(totalStr, out int monthTotal))
+                        {
+                            // Treat unreadable cell as 0 → skip
+                            monthResults.Add(new KitaMonthResult(
+                                month, 0, daysCount, 0, 0, 0, 0, daysCount, null));
+                            totalSkipped += daysCount;
+                            continue;
+                        }
+
+                        if (monthTotal <= 0)
+                        {
+                            // Explicitly zero → skip entire month
+                            monthResults.Add(new KitaMonthResult(
+                                month, 0, daysCount, 0, 0, 0, 0, daysCount, null));
+                            totalSkipped += daysCount;
+                            continue;
+                        }
+
+                        // ── Distribute orders across days ─────────────────────
+                        int dailyBase = monthTotal / daysCount;   // floor
+                        int remainder = monthTotal % daysCount;   // leftover → goes to last day
+
+                        int monthCreated = 0;
+                        int monthUpdated = 0;
+                        int monthDaysSkipped = 0;
+
+                        for (int day = 1; day <= daysCount; day++)
+                        {
+                            // Last day absorbs the remainder
+                            int ordersForDay = (day == daysCount)
+                                               ? dailyBase + remainder
+                                               : dailyBase;
+
+                            if (ordersForDay <= 0)
+                            {
+                                // This day has no orders → no shift record
+                                monthDaysSkipped++;
+                                totalSkipped++;
+                                continue;
+                            }
+
+                            var shiftDate = new DateOnly(2025, month, day);
+                            string status = ordersForDay >= 14 ? "completed" : "failed";
+
+                            if (existingShiftMap.TryGetValue(shiftDate, out var existing))
+                            {
+                                // ── UPDATE existing shift ─────────────────────
+                                // NOTE: WorkingId is part of the composite PK — do NOT modify it
+                                existing.AcceptedDailyOrders = ordersForDay;
+                                existing.RejectedDailyOrders = 0;
+                                existing.StackedDeliveries = 0;
+                                existing.RealRejectedDailyOrders = 0;
+                                existing.WorkingHours = 11;
+                                existing.CompanyId = 2;
+                                existing.HousingId = null;
+                                existing.ShiftStatus = status;
+
+                                monthUpdated++;
+                                totalUpdated++;
+                            }
+                            else
+                            {
+                                // ── CREATE new shift ──────────────────────────
+                                var newShift = new RiderShift
+                                {
+                                    RiderId = riderId,
+                                    WorkingId = workingId,
+                                    ShiftDate = shiftDate,
+                                    AcceptedDailyOrders = ordersForDay,
+                                    RejectedDailyOrders = 0,
+                                    StackedDeliveries = 0,
+                                    RealRejectedDailyOrders = 0,
+                                    HousingId = null,
+                                    WorkingHours = 11,
+                                    CompanyId = 2,
+                                    ShiftStatus = status,
+                                    CreatedAt = DateTime.UtcNow.AddHours(3)
+                                };
+
+                                await _dbcontext.RiderShifts.AddAsync(newShift);
+
+                                // Keep existingShiftMap in sync so duplicates within same
+                                // rider + month don't try to insert twice
+                                existingShiftMap[shiftDate] = newShift;
+
+                                monthCreated++;
+                                totalCreated++;
+                            }
+                        }
+
+                        // ── Verify total integrity (defensive check) ──────────
+                        // Sum of all orders recorded for this month
+                        int recordedTotal = 0;
+                        for (int day = 1; day <= daysCount; day++)
+                        {
+                            int ordersForDay = (day == daysCount)
+                                               ? dailyBase + remainder
+                                               : dailyBase;
+                            if (ordersForDay > 0) recordedTotal += ordersForDay;
+                        }
+
+                        string? monthNote = null;
+                        if (recordedTotal != monthTotal)
+                        {
+                            monthNote = $"WARNING: Recorded {recordedTotal} but Excel shows {monthTotal}";
+                            globalErrors.Add($"Row {rowNumber} (IqamaNo={iqamaNo}) Month={month}: {monthNote}");
+                        }
+
+                        monthResults.Add(new KitaMonthResult(
+                            month,
+                            monthTotal,
+                            daysCount,
+                            dailyBase,
+                            remainder,
+                            monthCreated,
+                            monthUpdated,
+                            monthDaysSkipped,
+                            monthNote
+                        ));
+                    }
+
+                    // ── Save all changes for this employee in one shot ─────────
+                    await _dbcontext.SaveChangesAsync();
+
+                    results.Add(new KitaMonthlyEmployeeResult(
+                        rowNumber, iqamaNo, nameAR,
+                        true, workingId, riderId,
+                        monthResults,
+                        null
+                    ));
+
+                    Console.WriteLine($"[KitaMonthlyOrders] ✓ Row {rowNumber} | IqamaNo={iqamaNo} | " +
+                                      $"WorkingId={workingId} | Created={monthResults.Sum(m => m.ShiftsCreated)} | " +
+                                      $"Updated={monthResults.Sum(m => m.ShiftsUpdated)}");
+                }
+                catch (Exception ex)
+                {
+                    errorRows++;
+                    globalErrors.Add($"Row {rowNumber}: {ex.Message}");
+
+                    results.Add(new KitaMonthlyEmployeeResult(
+                        rowNumber, 0, "N/A",
+                        false, null, null,
+                        new List<KitaMonthResult>(),
+                        $"Exception: {ex.Message}"
+                    ));
+
+                    Console.WriteLine($"[KitaMonthlyOrders] ERROR Row {rowNumber}: {ex.Message}");
+                }
+
+                // Progress callback every 50 rows
+                if (processed % 50 == 0)
+                {
+                    try { progressCallback?.Invoke(processed, totalRows); }
+                    catch { /* swallow */ }
+                    Console.WriteLine($"[KitaMonthlyOrders] Progress: {processed}/{totalRows}");
+                }
+            } // end foreach row
+
+            // Final progress
+            try { progressCallback?.Invoke(totalRows, totalRows); }
+            catch { /* swallow */ }
+
+            Console.WriteLine($"[KitaMonthlyOrders] Import complete:");
+            Console.WriteLine($"  Total rows:           {totalRows}");
+            Console.WriteLine($"  Employees found:      {employeesFound}");
+            Console.WriteLine($"  Employees not found:  {employeesNotFound}");
+            Console.WriteLine($"  No rider details:     {noRiderDetails}");
+            Console.WriteLine($"  Shifts created:       {totalCreated}");
+            Console.WriteLine($"  Shifts updated:       {totalUpdated}");
+            Console.WriteLine($"  Days skipped (0 ord): {totalSkipped}");
+            Console.WriteLine($"  Error rows:           {errorRows}");
+
+            var response = new KitaMonthlyOrdersImportResponse(
+                TotalRowsInExcel: totalRows,
+                EmployeesFound: employeesFound,
+                EmployeesNotFound: employeesNotFound,
+                NoRiderDetails: noRiderDetails,
+                TotalShiftsCreated: totalCreated,
+                TotalShiftsUpdated: totalUpdated,
+                TotalShiftsSkipped: totalSkipped,
+                ErrorRows: errorRows,
+                Results: results,
+                ProcessingErrors: globalErrors,
+                ProcessedAt: DateTime.UtcNow.AddHours(3)
+            );
+
+            return Result.Success(response);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[KitaMonthlyOrders] FATAL: {ex}");
+            return Result.Failure<KitaMonthlyOrdersImportResponse>(
+                new Error("ProcessingError", $"Failed to process file: {ex.Message}", 500));
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════
+    //  HELPER METHODS  (add alongside other private helpers)
+    // ════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Find the header row that contains 'رقم الإقامة' and at least one numeric month column.
+    /// </summary>
+    private IXLRow? FindKitaHeaderRow(IXLWorksheet worksheet)
+    {
+        // Known identifiers in the header
+        var iqamaVariants = new[]
+        {
+        "رقم الإقامة", "رقم الاقامة", "IqamaNumber", "Iqama Number",
+        "IqamaNo", "الاقامة", "الإقامة"
+    };
+        var monthValues = new HashSet<string>
+        { "4","5","6","7","8","9","10","11","12" };
+
+        for (int i = 1; i <= Math.Min(10, worksheet.RowsUsed().Count()); i++)
+        {
+            var row = worksheet.Row(i);
+            var cells = row.CellsUsed()
+                           .Select(c => c.IsMerged()
+                               ? c.MergedRange().FirstCell().GetString().Trim()
+                               : c.GetString().Trim())
+                           .Where(v => !string.IsNullOrWhiteSpace(v))
+                           .ToList();
+
+            bool hasIqama = cells.Any(cv => iqamaVariants.Any(iv =>
+                                 cv.Equals(iv, StringComparison.OrdinalIgnoreCase)));
+            int monthCount = cells.Count(cv => monthValues.Contains(cv));
+
+            if (hasIqama && monthCount >= 1)
+                return row;
+        }
+
+        return worksheet.Row(1);
+    }
+
+    /// <summary>
+    /// Map the Kita Excel header columns to their column numbers.
+    /// </summary>
+    private KitaColumnMapping BuildKitaColumnMapping(IXLRow headerRow)
+    {
+        var mapping = new KitaColumnMapping();
+        var cells = headerRow.CellsUsed().ToList();
+
+        // ── IqamaNo column ──────────────────────────────────────────────────
+        mapping.IqamaNoCol = FindColumn(cells,
+            "رقم الإقامة", "رقم الاقامة", "IqamaNumber", "Iqama Number",
+            "IqamaNo", "Iqama No", "الاقامة", "الإقامة");
+
+        // ── Arabic name column (optional – used for logging) ────────────────
+        mapping.NameARCol = FindColumn(cells,
+            "اسم الموظف", "اسم الموظف بالعربي", "Name AR", "NameAR", "الاسم");
+
+        // ── Month columns: header cells whose value is "4" … "12" ───────────
+        foreach (var cell in cells)
+        {
+            try
+            {
+                string val = cell.IsMerged()
+                    ? cell.MergedRange().FirstCell().GetString().Trim()
+                    : cell.GetString().Trim();
+
+                if (int.TryParse(val, out int month) && month >= 4 && month <= 12)
+                {
+                    mapping.MonthColumns[month] = cell.Address.ColumnNumber;
+                }
+            }
+            catch { /* skip bad cells */ }
+        }
+
+        // ── Validate ─────────────────────────────────────────────────────────
+        var missing = new List<string>();
+        if (mapping.IqamaNoCol == 0) missing.Add("Iqama Number (رقم الإقامة)");
+        if (mapping.MonthColumns.Count == 0) missing.Add("Month columns (4–12)");
+
+        mapping.IsValid = !missing.Any();
+        mapping.ErrorMessage = missing.Any()
+            ? $"Required columns not found: {string.Join(", ", missing)}"
+            : null;
+
+        return mapping;
+    }
+
+    // ════════════════════════════════════════════════════════════
+    //  INTERNAL CLASSES  (add alongside other internal classes)
+    // ════════════════════════════════════════════════════════════
+
+    internal class KitaColumnMapping
+    {
+        public bool IsValid { get; set; }
+        public string? ErrorMessage { get; set; }
+        public int IqamaNoCol { get; set; }
+        public int NameARCol { get; set; }
+
+        // Key = month number (4–12), Value = Excel column number
+        public Dictionary<int, int> MonthColumns { get; set; } = new();
+    }
+    public async Task<Result<IqamaCheckResponse>> CheckIqamasFromExcelAsync(
+    IFormFile file,
+    string uploadedBy)
+    {
+        if (file == null || file.Length == 0)
+            return Result.Failure<IqamaCheckResponse>(
+                new Error("InvalidFile", "File is empty or null", 400));
+
+        if (!file.FileName.EndsWith(".xlsx") && !file.FileName.EndsWith(".xls"))
+            return Result.Failure<IqamaCheckResponse>(
+                new Error("InvalidFormat", "File must be Excel format (.xlsx or .xls)", 400));
+
+        var results = new List<IqamaCheckRowResult>();
+        var errors = new List<string>();
+
+        int foundWithRiderAndWorkingId = 0;
+        int foundWithRiderNoWorkingId = 0;
+        int foundNoRiderDetails = 0;
+        int notFound = 0;
+        int failedRecords = 0;
+
+        try
+        {
+            Console.WriteLine($"[CheckIqamas] Starting check for file: {file.FileName}");
+
+            using var stream = file.OpenReadStream();
+            using var workbook = new XLWorkbook(stream);
+            var worksheet = workbook.Worksheet(1);
+
+            if (worksheet == null)
+                return Result.Failure<IqamaCheckResponse>(
+                    new Error("InvalidWorksheet", "Could not read worksheet", 400));
+
+            // Find header row
+            var headerRow = FindIqamaOnlyHeaderRow(worksheet);
+            if (headerRow == null)
+                return Result.Failure<IqamaCheckResponse>(
+                    new Error("EmptyFile", "Excel file has no header row", 400));
+
+            // Reuse existing IqamaOnly column mapping
+            var columnMap = BuildIqamaOnlyColumnMapping(headerRow);
+            if (!columnMap.IsValid)
+                return Result.Failure<IqamaCheckResponse>(
+                    new Error("InvalidColumns", columnMap.ErrorMessage!, 400));
+
+            var dataRows = worksheet.RowsUsed()
+                .Where(r => r.RowNumber() > headerRow.RowNumber())
+                .ToList();
+
+            var totalRows = dataRows.Count;
+            Console.WriteLine($"[CheckIqamas] Total rows: {totalRows}");
+
+            if (totalRows == 0)
+                return Result.Failure<IqamaCheckResponse>(
+                    new Error("EmptyFile", "No data rows found in Excel file", 400));
+
+            // Load all needed data in bulk for performance
+            var allIqamas = new List<long>();
+            var rowNumber = headerRow.RowNumber();
+
+            foreach (var row in dataRows)
+            {
+                rowNumber++;
+                var rowData = ParseIqamaOnlyRowData(row, columnMap, rowNumber);
+                if (rowData.IsValid && rowData.IqamaNo.HasValue)
+                    allIqamas.Add(rowData.IqamaNo.Value);
+            }
+
+            // Bulk load employees with rider details
+            var employeeLookup = await _dbcontext.Employees
+                .Where(e => allIqamas.Contains(e.IqamaNo))
+                .Include(e => e.RiderDetails)
+                    .ThenInclude(rd => rd!.Company)
+                .AsNoTracking()
+                .ToDictionaryAsync(e => e.IqamaNo);
+
+            Console.WriteLine($"[CheckIqamas] Loaded {employeeLookup.Count} employees from DB");
+
+            // Process each row
+            rowNumber = headerRow.RowNumber();
+
+            foreach (var row in dataRows)
+            {
+                rowNumber++;
+
+                try
+                {
+                    var rowData = ParseIqamaOnlyRowData(row, columnMap, rowNumber);
+
+                    if (!rowData.IsValid)
+                    {
+                        failedRecords++;
+                        results.Add(new IqamaCheckRowResult(
+                            rowNumber,
+                            "N/A",
+                            IqamaCheckStatus.ValidationError,
+                            null, null, null, null,
+                            rowData.ErrorMessage
+                        ));
+                        continue;
+                    }
+
+                    var iqamaNo = rowData.IqamaNo!.Value;
+
+                    if (!employeeLookup.TryGetValue(iqamaNo, out var employee))
+                    {
+                        notFound++;
+                        results.Add(new IqamaCheckRowResult(
+                            rowNumber,
+                            iqamaNo.ToString(),
+                            IqamaCheckStatus.NotFound,
+                            null, null, null, null,
+                            "Employee not found in system"
+                        ));
+                        continue;
+                    }
+
+                    // Employee found — check rider details
+                    if (employee.RiderDetails == null)
+                    {
+                        foundNoRiderDetails++;
+                        results.Add(new IqamaCheckRowResult(
+                            rowNumber,
+                            iqamaNo.ToString(),
+                            IqamaCheckStatus.FoundNoRiderDetails,
+                            employee.NameEN,
+                            employee.NameAR,
+                            null,
+                            null,
+                            "Employee exists but has no RiderDetails"
+                        ));
+                        continue;
+                    }
+
+                    // Has rider details — check working ID
+                    bool hasWorkingId = !string.IsNullOrWhiteSpace(employee.RiderDetails.WorkingId);
+
+                    if (hasWorkingId)
+                    {
+                        foundWithRiderAndWorkingId++;
+                        results.Add(new IqamaCheckRowResult(
+                            rowNumber,
+                            iqamaNo.ToString(),
+                            IqamaCheckStatus.FoundWithRiderAndWorkingId,
+                            employee.NameEN,
+                            employee.NameAR,
+                            employee.RiderDetails.WorkingId,
+                            employee.RiderDetails.Company?.Name,
+                            null
+                        ));
+                    }
+                    else
+                    {
+                        foundWithRiderNoWorkingId++;
+                        results.Add(new IqamaCheckRowResult(
+                            rowNumber,
+                            iqamaNo.ToString(),
+                            IqamaCheckStatus.FoundWithRiderNoWorkingId,
+                            employee.NameEN,
+                            employee.NameAR,
+                            null,
+                            employee.RiderDetails.Company?.Name,
+                            "Has RiderDetails but WorkingId is empty"
+                        ));
+                    }
+                }
+                catch (Exception ex)
+                {
+                    failedRecords++;
+                    errors.Add($"Row {rowNumber}: {ex.Message}");
+                    results.Add(new IqamaCheckRowResult(
+                        rowNumber,
+                        "N/A",
+                        IqamaCheckStatus.ValidationError,
+                        null, null, null, null,
+                        $"Exception: {ex.Message}"
+                    ));
+                }
+            }
+
+            Console.WriteLine($"[CheckIqamas] Complete:");
+            Console.WriteLine($"  - Total: {totalRows}");
+            Console.WriteLine($"  - Found (Rider + WorkingId): {foundWithRiderAndWorkingId}");
+            Console.WriteLine($"  - Found (Rider, No WorkingId): {foundWithRiderNoWorkingId}");
+            Console.WriteLine($"  - Found (No Rider): {foundNoRiderDetails}");
+            Console.WriteLine($"  - Not Found: {notFound}");
+            Console.WriteLine($"  - Failed: {failedRecords}");
+
+            var response = new IqamaCheckResponse(
+                TotalRecords: totalRows,
+                FoundWithRiderAndWorkingId: foundWithRiderAndWorkingId,
+                FoundWithRiderNoWorkingId: foundWithRiderNoWorkingId,
+                FoundNoRiderDetails: foundNoRiderDetails,
+                NotFound: notFound,
+                FailedRecords: failedRecords,
+                Results: results,
+                Errors: errors,
+                ProcessedAt: DateTime.UtcNow.AddHours(3)
+            );
+
+            return Result.Success(response);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[CheckIqamas] FATAL ERROR: {ex}");
+            return Result.Failure<IqamaCheckResponse>(
+                new Error("ProcessingError", $"Failed to process Excel file: {ex.Message}", 500));
+        }
+    }
     public async Task<Result<CompanyTransferImportResponse>> TransferRidersByIqamaAsync(
         IFormFile file,
         int newCompanyId
@@ -8530,5 +9229,7 @@ public class ImportService(ApplicationDbcontext dbcontext, IRiderSub riderSub) :
         public string? CompanyName { get; set; }
         public int? CompanyId { get; set; }
     }
+
+    #endregion
 }
 

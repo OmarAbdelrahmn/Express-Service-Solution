@@ -7,6 +7,93 @@ namespace Application.Service.Import;
 
 public interface IImportService
 {
+    // ============================================================
+    // ADD THESE TO: Application/Service/Import/IImportService.cs
+    // Place alongside the other Task<Result<...>> method signatures
+    // ============================================================
+
+    Task<Result<KitaMonthlyOrdersImportResponse>> ImportKitaMonthlyOrdersAsync(
+        IFormFile file,
+        string uploadedBy,
+        Action<int, int>? progressCallback = null);
+
+    // -------------------------------------------------------
+    // RESPONSE RECORDS  (add at the bottom of IImportService)
+    // -------------------------------------------------------
+
+    public record KitaMonthlyOrdersImportResponse(
+        int TotalRowsInExcel,
+        int EmployeesFound,
+        int EmployeesNotFound,
+        int NoRiderDetails,
+        int TotalShiftsCreated,
+        int TotalShiftsUpdated,
+        int TotalShiftsSkipped,      // days with 0 orders (month total was 0)
+        int ErrorRows,
+        List<KitaMonthlyEmployeeResult> Results,
+        List<string> ProcessingErrors,
+        DateTime ProcessedAt
+    );
+
+    public record KitaMonthlyEmployeeResult(
+        int RowNumber,
+        long IqamaNo,
+        string EmployeeNameAR,
+        bool Found,
+        string? WorkingId,
+        int? RiderId,
+        List<KitaMonthResult> MonthResults,
+        string? ErrorMessage
+    );
+
+    public record KitaMonthResult(
+        int Month,            // 4–12
+        int TotalOrdersFromExcel,
+        int DaysInMonth,
+        int DailyBase,        // floor(total / days)
+        int Remainder,        // total % days  → added to last day
+        int ShiftsCreated,
+        int ShiftsUpdated,
+        int DaysSkipped,      // days assigned 0 orders (not recorded)
+        string? ErrorMessage
+    );
+
+    Task<Result<IqamaCheckResponse>> CheckIqamasFromExcelAsync(
+    IFormFile file,
+    string uploadedBy);
+
+    public record IqamaCheckResponse(
+        int TotalRecords,
+        int FoundWithRiderAndWorkingId,
+        int FoundWithRiderNoWorkingId,
+        int FoundNoRiderDetails,
+        int NotFound,
+        int FailedRecords,
+        List<IqamaCheckRowResult> Results,
+        List<string> Errors,
+        DateTime ProcessedAt
+    );
+
+    public record IqamaCheckRowResult(
+        int RowNumber,
+        string IqamaNo,
+        IqamaCheckStatus Status,
+        string? NameEN,
+        string? NameAR,
+        string? WorkingId,
+        string? CompanyName,
+        string? ErrorMessage
+    );
+
+    public enum IqamaCheckStatus
+    {
+        FoundWithRiderAndWorkingId = 1,
+        FoundWithRiderNoWorkingId = 2,
+        FoundNoRiderDetails = 3,
+        NotFound = 4,
+        ValidationError = 5
+    }
+
     Task<Result<SparePartQuantityUpdateResponse>> UpdateSparePartQuantitiesAsync(
     IFormFile file,
     string uploadedBy);
