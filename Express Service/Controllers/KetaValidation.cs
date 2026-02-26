@@ -11,25 +11,25 @@ public class KetaValidation(IMonthlyValidityService service) : ControllerBase
     private readonly IMonthlyValidityService service = service;
 
     [HttpGet]
-    public async Task<IActionResult> Get(int? year)
+    public async Task<IActionResult> Get()
     {
-        var result = await service.GetAllRidersValidityAsync(year);
+        var result = await service.GetAllRidersValidityAsync();
 
         if (result.IsFailure)
         {
             return result.ToProblem();
         }
-        return Ok(result);
+        return Ok(result.Value);
     }
 
     [HttpGet("{iqamano}")]
-    public async Task<IActionResult> GetByIqama(long iqamano, int? year)
+    public async Task<IActionResult> GetByIqama(long iqamano)
     {
-        var result = await service.GetRiderValidityByIqamaAsync(iqamano, year);
+        var result = await service.GetRiderValidityByIqamaAsync(iqamano);
         if (result.IsFailure)
         {
             return result.ToProblem();
         }
-        return Ok(result);
+        return Ok(result.Value);
     }
 }

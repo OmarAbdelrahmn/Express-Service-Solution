@@ -10,7 +10,6 @@ public class MonthlyValidityService(ApplicationDbcontext db) : IMonthlyValidityS
 {
     private readonly ApplicationDbcontext _db = db;
 
-    // Arabic month names (Gregorian)
     private static readonly Dictionary<int, string> MonthNames = new()
     {
         { 1,  "يناير"  }, { 2,  "فبراير" }, { 3,  "مارس"   },
@@ -26,79 +25,71 @@ public class MonthlyValidityService(ApplicationDbcontext db) : IMonthlyValidityS
     public async Task<Result<AllRidersValidityResponse>> GetAllRidersValidityAsync(
         int? year = null)
     {
-        int targetYear = year ?? 2025;
-
         try
         {
-            // ── 1. Load all validity records for the year ────────────────
-            var validityRecords = await _db.RiderMonthlyValidities
-                .Where(v => v.Year == targetYear)
-                .AsNoTracking()
-                .ToListAsync();
+            // ── 1. Load validity records (all years OR filtered year) ─────
+            var validityQuery = _db.RiderMonthlyValidities.AsNoTracking();
 
-            // ── 2. Load all riders with employee info ────────────────────
+            if (year.HasValue)
+                validityQuery = validityQuery.Where(v => v.Year == year.Value);
+
+            var validityRecords = await validityQuery.ToListAsync();
+
+            // ── 2. Determine available years and build (year, month) ranges ─
+            var today = DateTime.Now;
+
+            var availableYears = validityRecords
+                .Select(v => v.Year)
+                .Distinct()
+                .OrderBy(y => y)
+                .ToList();
+
+            // For each year: start = earliest month in DB, end = today's month if current year else 12
+            var yearRanges = availableYears.ToDictionary(
+                y => y,
+                y =>
+                {
+                    int start = validityRecords.Where(v => v.Year == y).Min(v => v.Month);
+                    int end = y == today.Year ? today.Month : 12;
+                    return (Start: start, End: end);
+                });
+
+            // ── 3. Load all riders ────────────────────────────────────────
             var riders = await _db.RiderDetails
                 .Include(r => r.Employee)
                 .Include(r => r.Company)
                 .AsNoTracking()
                 .ToListAsync();
 
-            // ── 3. Load shift orders for the year (group by rider + month) ─
-            var shiftOrders = await _db.RiderShifts
-                .Where(s => s.ShiftDate.Year == targetYear)
-                .GroupBy(s => new { s.RiderId, s.ShiftDate.Month })
-                .Select(g => new
-                {
-                    g.Key.RiderId,
-                    g.Key.Month,
-                    TotalOrders = g.Sum(s => s.AcceptedDailyOrders)
-                })
-                .AsNoTracking()
-                .ToListAsync();
-
-            // Build fast lookup: (riderId, month) → orders
-            var shiftOrdersMap = shiftOrders
-                .ToDictionary(x => (x.RiderId, x.Month), x => x.TotalOrders);
-
-            // Build validity lookup: (iqamaNo, month) → record
+            // Build validity lookup: (iqamaNo, year, month) → record
             var validityMap = validityRecords
-                .ToDictionary(v => (v.EmployeeIqamaNo, v.Month), v => v);
+                .ToDictionary(v => (v.EmployeeIqamaNo, v.Year, v.Month), v => v);
 
-            // ── 4. Build response per rider ───────────────────────────────
-            var riderSummaries = new List<RiderValiditySummary>();
-
-            foreach (var rider in riders)
+            // ── 4. Build month details for every rider ────────────────────
+            var riderSummaries = riders.Select(rider =>
             {
                 var monthDetails = new List<MonthValidityDetail>();
 
-                // Collect all months that have either a validity record or shift data
-                var monthsForRider = validityRecords
-                    .Where(v => v.EmployeeIqamaNo == rider.EmployeeIqamaNo)
-                    .Select(v => v.Month)
-                    .ToHashSet();
-
-                // Also include months with shift orders even if no validity record
-                foreach (var entry in shiftOrders.Where(s => s.RiderId == rider.Id))
-                    monthsForRider.Add(entry.Month);
-
-                foreach (var month in monthsForRider.OrderBy(m => m))
+                foreach (var y in availableYears)
                 {
-                    validityMap.TryGetValue((rider.EmployeeIqamaNo, month), out var validity);
-                    shiftOrdersMap.TryGetValue((rider.Id, month), out int actualOrders);
+                    var (start, end) = yearRanges[y];
 
-                    monthDetails.Add(BuildMonthDetail(
-                        targetYear, month, validity, actualOrders));
+                    for (int m = start; m <= end; m++)
+                    {
+                        validityMap.TryGetValue((rider.EmployeeIqamaNo, y, m), out var validity);
+                        monthDetails.Add(BuildMonthDetail(y, m, validity));
+                    }
                 }
 
-                riderSummaries.Add(new RiderValiditySummary(
+                return new RiderValiditySummary(
                     IqamaNo: rider.EmployeeIqamaNo,
                     NameAR: rider.Employee.NameAR,
                     NameEN: rider.Employee.NameEN,
                     WorkingId: rider.WorkingId,
                     CompanyName: rider.Company?.Name,
                     Months: monthDetails
-                ));
-            }
+                );
+            }).ToList();
 
             // ── 5. Aggregate counters ─────────────────────────────────────
             int totalValid = validityRecords.Count(v => v.Status == ValidityStatus.Valid);
@@ -107,17 +98,16 @@ public class MonthlyValidityService(ApplicationDbcontext db) : IMonthlyValidityS
             int unclassified = riders.Count(r =>
                 !validityRecords.Any(v => v.EmployeeIqamaNo == r.EmployeeIqamaNo));
 
-            var response = new AllRidersValidityResponse(
+            return Result.Success(new AllRidersValidityResponse(
                 TotalRiders: riders.Count,
                 TotalValidRecords: totalValid,
                 TotalInvalidRecords: totalInvalid,
                 TotalFreelancerRecords: totalFreelancer,
                 TotalUnclassifiedRiders: unclassified,
+                AvailableYears: availableYears,
                 Riders: riderSummaries,
                 RetrievedAt: DateTime.UtcNow.AddHours(3)
-            );
-
-            return Result.Success(response);
+            ));
         }
         catch (Exception ex)
         {
@@ -135,11 +125,9 @@ public class MonthlyValidityService(ApplicationDbcontext db) : IMonthlyValidityS
         long iqamaNo,
         int? year = null)
     {
-        int targetYear = year ?? 2025;
-
         try
         {
-            // ── 1. Find rider + employee info ────────────────────────────
+            // ── 1. Find rider ─────────────────────────────────────────────
             var rider = await _db.RiderDetails
                 .Include(r => r.Employee)
                 .Include(r => r.Company)
@@ -148,10 +136,7 @@ public class MonthlyValidityService(ApplicationDbcontext db) : IMonthlyValidityS
 
             if (rider == null)
             {
-                // Employee might exist but not be a rider
-                var empExists = await _db.Employees
-                    .AnyAsync(e => e.IqamaNo == iqamaNo);
-
+                var empExists = await _db.Employees.AnyAsync(e => e.IqamaNo == iqamaNo);
                 return Result.Failure<RiderValidityResponse>(
                     new Error(
                         empExists ? "NoRiderDetails" : "NotFound",
@@ -161,50 +146,60 @@ public class MonthlyValidityService(ApplicationDbcontext db) : IMonthlyValidityS
                         404));
             }
 
-            // ── 2. Load validity records for this rider + year ───────────
-            var validityRecords = await _db.RiderMonthlyValidities
-                .Where(v => v.EmployeeIqamaNo == iqamaNo && v.Year == targetYear)
-                .AsNoTracking()
-                .ToListAsync();
+            // ── 2. Load validity records (all years OR filtered year) ─────
+            var validityQuery = _db.RiderMonthlyValidities
+                .Where(v => v.EmployeeIqamaNo == iqamaNo)
+                .AsNoTracking();
 
-            // ── 3. Load shift orders per month ───────────────────────────
-            var shiftOrders = await _db.RiderShifts
-                .Where(s => s.RiderId == rider.Id && s.ShiftDate.Year == targetYear)
-                .GroupBy(s => s.ShiftDate.Month)
-                .Select(g => new
+            if (year.HasValue)
+                validityQuery = validityQuery.Where(v => v.Year == year.Value);
+
+            var validityRecords = await validityQuery.ToListAsync();
+
+            // ── 3. Determine available years and month ranges ─────────────
+            var today = DateTime.Now;
+
+            var availableYears = validityRecords
+                .Select(v => v.Year)
+                .Distinct()
+                .OrderBy(y => y)
+                .ToList();
+
+            var yearRanges = availableYears.ToDictionary(
+                y => y,
+                y =>
                 {
-                    Month = g.Key,
-                    TotalOrders = g.Sum(s => s.AcceptedDailyOrders)
-                })
-                .AsNoTracking()
-                .ToListAsync();
+                    int start = validityRecords.Where(v => v.Year == y).Min(v => v.Month);
+                    int end = y == today.Year ? today.Month : 12;
+                    return (Start: start, End: end);
+                });
 
-            var shiftOrdersMap = shiftOrders.ToDictionary(x => x.Month, x => x.TotalOrders);
-            var validityMap = validityRecords.ToDictionary(v => v.Month, v => v);
+            var validityMap = validityRecords
+                .ToDictionary(v => (v.Year, v.Month), v => v);
 
-            // Union of months with data
-            var months = validityRecords.Select(v => v.Month)
-                .Union(shiftOrders.Select(s => s.Month))
-                .OrderBy(m => m);
+            // ── 4. Build month details ────────────────────────────────────
+            var monthDetails = new List<MonthValidityDetail>();
 
-            var monthDetails = months.Select(month =>
+            foreach (var y in availableYears)
             {
-                validityMap.TryGetValue(month, out var validity);
-                shiftOrdersMap.TryGetValue(month, out int actualOrders);
-                return BuildMonthDetail(targetYear, month, validity, actualOrders);
-            }).ToList();
+                var (start, end) = yearRanges[y];
+                for (int m = start; m <= end; m++)
+                {
+                    validityMap.TryGetValue((y, m), out var validity);
+                    monthDetails.Add(BuildMonthDetail(y, m, validity));
+                }
+            }
 
-            var response = new RiderValidityResponse(
+            return Result.Success(new RiderValidityResponse(
                 IqamaNo: iqamaNo,
                 NameAR: rider.Employee.NameAR,
                 NameEN: rider.Employee.NameEN,
                 WorkingId: rider.WorkingId,
                 CompanyName: rider.Company?.Name,
+                AvailableYears: availableYears,
                 Months: monthDetails,
                 RetrievedAt: DateTime.UtcNow.AddHours(3)
-            );
-
-            return Result.Success(response);
+            ));
         }
         catch (Exception ex)
         {
@@ -219,10 +214,7 @@ public class MonthlyValidityService(ApplicationDbcontext db) : IMonthlyValidityS
     // ─────────────────────────────────────────────────────────────
 
     private static MonthValidityDetail BuildMonthDetail(
-        int year,
-        int month,
-        RiderMonthlyValidity? validity,
-        int actualShiftOrders)
+        int year, int month, RiderMonthlyValidity? validity)
     {
         string statusLabel = validity?.Status switch
         {
@@ -232,17 +224,13 @@ public class MonthlyValidityService(ApplicationDbcontext db) : IMonthlyValidityS
             _ => "غير مصنف"
         };
 
-        int recordedOrders = validity?.TotalOrders ?? 0;
-
         return new MonthValidityDetail(
             Year: year,
             Month: month,
             MonthName: MonthNames.GetValueOrDefault(month, month.ToString()),
             Status: validity?.Status,
             StatusLabel: statusLabel,
-            RecordedOrders: recordedOrders,
-            ActualShiftOrders: actualShiftOrders,
-            OrdersMismatch: recordedOrders != actualShiftOrders
+            RecordedOrders: validity?.TotalOrders ?? 0
         );
     }
 }

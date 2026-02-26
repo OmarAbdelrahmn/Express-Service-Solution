@@ -16,20 +16,6 @@ public class ImportService(ApplicationDbcontext dbcontext, IRiderSub riderSub) :
     private readonly ApplicationDbcontext _dbcontext = dbcontext;
     private readonly IRiderSub riderSub = riderSub;
 
-    // ════════════════════════════════════════════════════════════════════════
-    //  ADD TO: Application/Service/Import/ImportService.cs
-    //  Inside the ImportService class, alongside the other region blocks.
-    //
-    //  Depends on:
-    //    - Domain.Entities.RiderMonthlyValidity
-    //    - Domain.Entities.ValidityStatus  (the new enum)
-    //    - _dbcontext.RiderMonthlyValidities  (DbSet)
-    //    - _dbcontext.RiderShifts
-    //    - _dbcontext.RiderDetails
-    //    - _dbcontext.Employees
-    //    - Existing helpers: GetCellValue, TryParseInt, FindKitaHeaderRow,
-    //      BuildKitaColumnMapping (reused from KitaMonthlyOrders region)
-    // ════════════════════════════════════════════════════════════════════════
 
     #region Kita Monthly Validity Import
 
@@ -57,9 +43,6 @@ public class ImportService(ApplicationDbcontext dbcontext, IRiderSub riderSub) :
         int totalSkipped = 0;
         int errorRows = 0;
 
-        // Months present in the 2025 Kita file (Apr–Dec)
-        var validMonths = new HashSet<int> { 4, 5, 6, 7, 8, 9, 10, 11, 12 };
-
         try
         {
             Console.WriteLine($"[KitaValidityImport] Starting import: {file.FileName}");
@@ -80,7 +63,7 @@ public class ImportService(ApplicationDbcontext dbcontext, IRiderSub riderSub) :
 
             Console.WriteLine($"[KitaValidityImport] Header at row {headerRow.RowNumber()}");
 
-            // ── Build column map (reuses Kita month-column logic) ─────────────
+            // ── Build column map ─────────────────────────────────────────────
             var colMap = BuildKitaValidityColumnMapping(headerRow);
             if (!colMap.IsValid)
                 return Result.Failure<KitaValidityImportResponse>(
@@ -93,8 +76,8 @@ public class ImportService(ApplicationDbcontext dbcontext, IRiderSub riderSub) :
 
             // ── Data rows ────────────────────────────────────────────────────
             var dataRows = worksheet.RowsUsed()
-                                      .Where(r => r.RowNumber() > headerRow.RowNumber())
-                                      .ToList();
+                                       .Where(r => r.RowNumber() > headerRow.RowNumber())
+                                       .ToList();
             int totalRows = dataRows.Count;
 
             if (totalRows == 0)
@@ -151,17 +134,15 @@ public class ImportService(ApplicationDbcontext dbcontext, IRiderSub riderSub) :
 
                     string nameAR = GetCellValue(row, colMap.NameARCol)?.Trim() ?? "N/A";
 
-                    // ── Row-level validity status (last column) ───────────────
-                    ValidityStatus? overallStatus = null;
+                    // ── Optional text label from column P (display only) ──────
+                    // This is a summary label. The real per-month status comes
+                    // from the integer value in each month cell (1/2/3).
                     string? overallLabel = null;
-                    var statusRaw =
-                        colMap.StatusCol > 0
-                            ? GetCellValue(row, colMap.StatusCol)?.Trim()
-                            : null;
-
-                    if (!string.IsNullOrWhiteSpace(statusRaw))
+                    if (colMap.StatusCol > 0)
                     {
-                        (overallStatus, overallLabel) = ParseValidityStatus(statusRaw);
+                        var statusRaw = GetCellValue(row, colMap.StatusCol)?.Trim();
+                        if (!string.IsNullOrWhiteSpace(statusRaw))
+                            (_, overallLabel) = ParseValidityStatus(statusRaw);
                     }
 
                     // ── Rider lookup ──────────────────────────────────────────
@@ -230,22 +211,19 @@ public class ImportService(ApplicationDbcontext dbcontext, IRiderSub riderSub) :
                         int month = monthEntry.Key;
                         int colIndex = monthEntry.Value;
 
+                        // The cell value IS the status code: 1=Valid 2=Invalid 3=Freelancer 0=skip
                         var cellStr = GetCellValue(row, colIndex);
                         if (string.IsNullOrWhiteSpace(cellStr) ||
-                            !TryParseInt(cellStr, out int excelOrderCount))
+                            !TryParseInt(cellStr, out int statusCode) ||
+                            statusCode <= 0)
                         {
-                            // Treat unreadable as 0 → skip
-                            excelOrderCount = 0;
-                        }
-
-                        shiftOrdersMap.TryGetValue(month, out int actualShiftOrders);
-
-                        // ── SKIP months where Excel value is 0 ────────────────
-                        if (excelOrderCount == 0)
-                        {
+                            // 0 or unreadable → skip, no record written
                             totalSkipped++;
                             monthResults.Add(new KitaValidityMonthResult(
-                                month, 0, actualShiftOrders, null,
+                                month,
+                                ExcelOrderCount: 0,
+                                ActualShiftOrders: 0,
+                                Status: null,
                                 Skipped: true,
                                 Created: false,
                                 Updated: false,
@@ -254,7 +232,17 @@ public class ImportService(ApplicationDbcontext dbcontext, IRiderSub riderSub) :
                             continue;
                         }
 
-                        // ── Upsert RiderMonthlyValidity ───────────────────────
+                        // Map integer code → enum
+                        ValidityStatus monthStatus = statusCode switch
+                        {
+                            1 => ValidityStatus.Valid,
+                            2 => ValidityStatus.Invalid,
+                            3 => ValidityStatus.Freelancer,
+                            _ => ValidityStatus.Invalid   // safety fallback (won't reach here)
+                        };
+
+                        shiftOrdersMap.TryGetValue(month, out int actualShiftOrders);
+
                         bool created = false;
                         bool updated = false;
                         string? monthError = null;
@@ -263,10 +251,9 @@ public class ImportService(ApplicationDbcontext dbcontext, IRiderSub riderSub) :
                         {
                             if (existingByMonth.TryGetValue(month, out var existing))
                             {
-                                // UPDATE
-                                existing.TotalOrders = actualShiftOrders; // use real shift data
-                                if (overallStatus.HasValue)
-                                    existing.Status = overallStatus.Value;
+                                // UPDATE – always overwrite status and refresh order count
+                                existing.Status = monthStatus;
+                                existing.TotalOrders = actualShiftOrders;
 
                                 updated = true;
                                 totalUpdated++;
@@ -279,15 +266,13 @@ public class ImportService(ApplicationDbcontext dbcontext, IRiderSub riderSub) :
                                     Year = 2025,
                                     Month = month,
                                     EmployeeIqamaNo = iqamaNo,
-                                    Status = overallStatus ?? ValidityStatus.Invalid,
+                                    Status = monthStatus,
                                     TotalOrders = actualShiftOrders,
                                     CreatedAt = DateTime.UtcNow.AddHours(3)
                                 };
 
                                 await _dbcontext.RiderMonthlyValidities.AddAsync(newRecord);
-
-                                // Keep local map in sync
-                                existingByMonth[month] = newRecord;
+                                existingByMonth[month] = newRecord; // keep local map in sync
 
                                 created = true;
                                 totalCreated++;
@@ -302,9 +287,9 @@ public class ImportService(ApplicationDbcontext dbcontext, IRiderSub riderSub) :
 
                         monthResults.Add(new KitaValidityMonthResult(
                             month,
-                            excelOrderCount,
-                            actualShiftOrders,
-                            overallStatus,
+                            ExcelOrderCount: statusCode,
+                            ActualShiftOrders: actualShiftOrders,
+                            Status: monthStatus,
                             Skipped: false,
                             Created: created,
                             Updated: updated,
@@ -318,14 +303,14 @@ public class ImportService(ApplicationDbcontext dbcontext, IRiderSub riderSub) :
                     results.Add(new KitaValidityEmployeeResult(
                         rowNumber, iqamaNo, nameAR,
                         true, workingId,
-                         overallLabel,
+                        overallLabel,
                         monthResults,
                         null
                     ));
 
                     Console.WriteLine(
                         $"[KitaValidityImport] ✓ Row {rowNumber} | IqamaNo={iqamaNo} " +
-                        $"| Status={overallLabel ?? "N/A"} " +
+                        $"| Label={overallLabel ?? "N/A"} " +
                         $"| Created={monthResults.Count(m => m.Created)} " +
                         $"| Updated={monthResults.Count(m => m.Updated)}");
                 }
@@ -388,14 +373,9 @@ public class ImportService(ApplicationDbcontext dbcontext, IRiderSub riderSub) :
     }
 
     // ════════════════════════════════════════════════════════════════════════
-    //  PRIVATE HELPERS  (add alongside other private helpers in ImportService)
+    //  PRIVATE HELPERS
     // ════════════════════════════════════════════════════════════════════════
 
-    /// <summary>
-    /// Finds the header row for the Kita validity Excel.
-    /// Accepts the same header format as the KitaMonthlyOrders file
-    /// (column 1 = IqamaNo, columns named 4–12 = months, last column = status).
-    /// </summary>
     private IXLRow? FindKitaValidityHeaderRow(IXLWorksheet worksheet)
     {
         var iqamaVariants = new[]
@@ -428,10 +408,6 @@ public class ImportService(ApplicationDbcontext dbcontext, IRiderSub riderSub) :
         return worksheet.Row(1);
     }
 
-    /// <summary>
-    /// Builds the column mapping for the Kita validity file.
-    /// Same as KitaColumnMapping but also detects the status column.
-    /// </summary>
     private KitaValidityColumnMapping BuildKitaValidityColumnMapping(IXLRow headerRow)
     {
         var mapping = new KitaValidityColumnMapping();
@@ -446,12 +422,7 @@ public class ImportService(ApplicationDbcontext dbcontext, IRiderSub riderSub) :
         mapping.NameARCol = FindColumn(cells,
             "اسم الموظف", "اسم الموظف بالعربي", "Name AR", "NameAR", "الاسم");
 
-        // Status column (last column – contains صالح / غير صالح / فري لانسر)
-        mapping.StatusCol = FindColumn(cells,
-            "الحالة", "Status", "التصنيف", "صالح", "ValidityStatus",
-            "حالة السائق", "التقييم");
-
-        // Month columns (headers are the month number as a string: "4" … "12")
+        // Month columns: header cell value is the month number as a string ("4" … "12")
         foreach (var cell in cells)
         {
             try
@@ -466,14 +437,17 @@ public class ImportService(ApplicationDbcontext dbcontext, IRiderSub riderSub) :
             catch { /* skip bad cells */ }
         }
 
-        // If status column not found by name, assume it is the last used column
-        // (the file uses Arabic status values directly as the column header is sometimes blank)
+        // Status column: optional text summary (column P in the sample file).
+        // Try named headers first; fall back to the last used column that is
+        // not already mapped as a month column.
+        mapping.StatusCol = FindColumn(cells,
+            "الحالة", "Status", "التصنيف", "ValidityStatus", "حالة السائق", "التقييم");
+
         if (mapping.StatusCol == 0 && cells.Count > 0)
         {
-            int lastColNumber = cells.Max(c => c.Address.ColumnNumber);
-            // Only treat it as status col if it is not already a month col
-            if (!mapping.MonthColumns.ContainsValue(lastColNumber))
-                mapping.StatusCol = lastColNumber;
+            int lastCol = cells.Max(c => c.Address.ColumnNumber);
+            if (!mapping.MonthColumns.ContainsValue(lastCol) && lastCol != mapping.IqamaNoCol)
+                mapping.StatusCol = lastCol;
         }
 
         // Validation
@@ -491,26 +465,34 @@ public class ImportService(ApplicationDbcontext dbcontext, IRiderSub riderSub) :
 
     /// <summary>
     /// Maps Arabic / English status text to the ValidityStatus enum.
-    /// Returns (null, null) for unrecognised values.
+    /// Used only for the optional display label in column P.
     /// </summary>
     private static (ValidityStatus? status, string? label) ParseValidityStatus(string raw)
     {
         var normalised = raw.Trim()
-                            .Replace("\u200f", "")   // remove RTL mark
-                            .Replace("\u200e", "");  // remove LTR mark
+                            .Replace("\u200f", "")
+                            .Replace("\u200e", "")
+                            .Replace("\u200b", "")
+                            .Replace("\u00a0", " ");
 
-        return normalised switch
-        {
-            "صالح" or "Valid" or "valid" => (ValidityStatus.Valid, "صالح"),
-            "غير صالح" or "Invalid" or "invalid" => (ValidityStatus.Invalid, "غير صالح"),
-            "فري لانسر" or "Freelancer" or "freelancer"
-                          or "فري لانسرز" or "فريلانسر" => (ValidityStatus.Freelancer, "فري لانسر"),
-            _ => (null, null)
-        };
+        if (normalised.Contains("غير صالح") ||
+            normalised.Equals("Invalid", StringComparison.OrdinalIgnoreCase))
+            return (ValidityStatus.Invalid, "غير صالح");
+
+        // Check Valid AFTER Invalid so "صالح" doesn't match inside "غير صالح"
+        if (normalised.Contains("صالح") ||
+            normalised.Equals("Valid", StringComparison.OrdinalIgnoreCase))
+            return (ValidityStatus.Valid, "صالح");
+
+        if (normalised.Contains("فري") ||
+            normalised.Equals("Freelancer", StringComparison.OrdinalIgnoreCase))
+            return (ValidityStatus.Freelancer, "فري لانسر");
+
+        return (null, null);
     }
 
     // ════════════════════════════════════════════════════════════════════════
-    //  INTERNAL CLASSES (add alongside other internal classes in ImportService)
+    //  INTERNAL CLASS
     // ════════════════════════════════════════════════════════════════════════
 
     internal class KitaValidityColumnMapping
@@ -519,7 +501,7 @@ public class ImportService(ApplicationDbcontext dbcontext, IRiderSub riderSub) :
         public string? ErrorMessage { get; set; }
         public int IqamaNoCol { get; set; }
         public int NameARCol { get; set; }
-        public int StatusCol { get; set; }
+        public int StatusCol { get; set; }   // optional – column P text label
 
         // Key = month number (4–12), Value = Excel column number
         public Dictionary<int, int> MonthColumns { get; set; } = new();

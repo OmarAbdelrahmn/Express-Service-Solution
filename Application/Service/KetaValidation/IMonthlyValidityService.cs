@@ -1,36 +1,30 @@
 ﻿using Application.Abstraction;
 using Domain.Entities;
-using System;
-using System.Collections.Generic;
-using System.Text;
 
 namespace Application.Service.KetaValidation;
 
 public interface IMonthlyValidityService
 {
     /// <summary>
-    /// Returns all riders with their monthly validity records and
-    /// actual accepted-order counts for each month in 2025 (Apr–Dec).
+    /// Returns all riders with their monthly validity records.
+    /// Pass year to filter a specific year; omit to get all years in the DB.
     /// </summary>
-    Task<Result<AllRidersValidityResponse>> GetAllRidersValidityAsync(
-        int? year = null);
+    Task<Result<AllRidersValidityResponse>> GetAllRidersValidityAsync(int? year = null);
 
     /// <summary>
-    /// Returns a single rider's monthly validity records and actual
-    /// accepted-order counts, looked up by IqamaNo.
+    /// Returns a single rider's monthly validity records by IqamaNo.
+    /// Pass year to filter a specific year; omit to get all years in the DB.
     /// </summary>
-    Task<Result<RiderValidityResponse>> GetRiderValidityByIqamaAsync(
-        long iqamaNo,
-        int? year = null);
+    Task<Result<RiderValidityResponse>> GetRiderValidityByIqamaAsync(long iqamaNo, int? year = null);
 }
-
 
 public record AllRidersValidityResponse(
     int TotalRiders,
     int TotalValidRecords,
     int TotalInvalidRecords,
     int TotalFreelancerRecords,
-    int TotalUnclassifiedRiders,       // riders with no validity row at all
+    int TotalUnclassifiedRiders,
+    List<int> AvailableYears,           // all years found in the DB (or just the filtered year)
     List<RiderValiditySummary> Riders,
     DateTime RetrievedAt
 );
@@ -41,7 +35,7 @@ public record RiderValiditySummary(
     string NameEN,
     string? WorkingId,
     string? CompanyName,
-    List<MonthValidityDetail> Months   // one entry per month that has a record
+    List<MonthValidityDetail> Months
 );
 
 public record RiderValidityResponse(
@@ -50,6 +44,7 @@ public record RiderValidityResponse(
     string NameEN,
     string? WorkingId,
     string? CompanyName,
+    List<int> AvailableYears,
     List<MonthValidityDetail> Months,
     DateTime RetrievedAt
 );
@@ -58,9 +53,7 @@ public record MonthValidityDetail(
     int Year,
     int Month,
     string MonthName,
-    ValidityStatus? Status,            // null if no record exists for that month
-    string StatusLabel,                // "صالح" / "غير صالح" / "فري لانسر" / "غير مصنف"
-    int RecordedOrders,                // orders stored in RiderMonthlyValidity.TotalOrders
-    int ActualShiftOrders,             // sum of AcceptedDailyOrders from RiderShifts
-    bool OrdersMismatch                // true when the two counts differ
+    ValidityStatus? Status,
+    string StatusLabel,                 // "صالح" / "غير صالح" / "فري لانسر" / "غير مصنف"
+    int RecordedOrders
 );

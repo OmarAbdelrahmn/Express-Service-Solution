@@ -8,7 +8,9 @@ using Application.Service.Empolyee;
 using Application.Service.Freelancer;
 using Application.Service.Hungerdisa;
 using Application.Service.Import;
+using Application.Service.KetaValidation;
 using Application.Service.Member;
+using Application.Service.MonthlyValidity;
 using Application.Service.Reports;
 using Application.Service.Return;
 using Application.Service.RiderAccessory;
@@ -65,6 +67,7 @@ public static class ApplicationDependencies
         Services.AddScoped<ISupplierService, SupplierService>();
         Services.AddScoped<IReturnService, ReturnService>();
         Services.AddScoped<IFreelancerService, FreelancerService>();
+        Services.AddScoped<IMonthlyValidityService, MonthlyValidityService>();
 
 
 
