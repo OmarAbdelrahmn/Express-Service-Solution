@@ -54,10 +54,16 @@ public class MonthlyValidityService(ApplicationDbcontext db) : IMonthlyValidityS
                     return (Start: start, End: end);
                 });
 
-            // ── 3. Load all riders ────────────────────────────────────────
+            // ── 3. Load only riders who have validity records ─────────────
+            var iqamasWithRecords = validityRecords
+                .Select(v => v.EmployeeIqamaNo)
+                .Distinct()
+                .ToHashSet();
+
             var riders = await _db.RiderDetails
                 .Include(r => r.Employee)
                 .Include(r => r.Company)
+                .Where(r => iqamasWithRecords.Contains(r.EmployeeIqamaNo))
                 .AsNoTracking()
                 .ToListAsync();
 
