@@ -1,4 +1,5 @@
 ﻿using Domain.Entities;
+using Domain.Entities.Keeta;
 using Domain.Entities.Spare;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
@@ -41,6 +42,7 @@ public class ApplicationDbcontext(DbContextOptions<ApplicationDbcontext> options
     public required DbSet<ReturnItem> ReturnItems { get; set; }
     public required DbSet<KetaFreeLancer> KetaFreeLancers { get; set; }
     public required DbSet<RiderMonthlyValidity> RiderMonthlyValidities { get; set; }
+    public required DbSet<Company2ValidationConfig> Company2ValidationConfigs{ get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

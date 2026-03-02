@@ -1,6 +1,7 @@
 ﻿using Application.Service.Reports;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using static Application.Service.Reports.IReportService;
 
 namespace Express_Service.Controllers;
 
@@ -11,6 +12,23 @@ public class ReportController(IReportService service) : ControllerBase
 {
 
     private readonly IReportService service = service;
+
+
+    [HttpGet("config/validation")]
+    public async Task<IActionResult> GetValidationConfig(CancellationToken ct)
+    {
+        var result = await service.GetCompany2ValidationConfigAsync(ct);
+        return result.IsSuccess ? Ok(result.Value) : BadRequest(result.Error);
+    }
+
+    [HttpPut("config/validation")]
+    public async Task<IActionResult> UpdateValidationConfig(
+        [FromBody] UpsertCompany2ValidationConfigRequest request,
+        CancellationToken ct)
+    {
+        var result = await service.UpsertCompany2ValidationConfigAsync(request, ct);
+        return result.IsSuccess ? Ok(result.Value) : BadRequest(result.Error);
+    }
 
 
     [HttpGet("from-start")]
@@ -477,6 +495,21 @@ public class ReportController(IReportService service) : ControllerBase
         return result.IsSuccess
             ? Ok(result.Value)
             : result.ToProblem();
+    }
+    [HttpGet("special7")]
+    public async Task<IActionResult> GetHousingPeriodSummaryForCompany(
+    [FromQuery] int companyId,
+    [FromQuery] DateOnly startDate,
+    [FromQuery] DateOnly endDate,
+    CancellationToken cancellationToken = default)
+    {
+        var result = await service.GetHousingPeriodSummaryForCompanyAsync(
+            companyId,
+            startDate,
+            endDate,
+            cancellationToken);
+
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
 
     [HttpGet("special5")]

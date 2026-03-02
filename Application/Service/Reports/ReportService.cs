@@ -4,7 +4,9 @@ using Application.Service.Member;
 using Application.Service.Riders;
 using Domain;
 using Domain.Entities;
+using Domain.Entities.Keeta;
 using Microsoft.EntityFrameworkCore;
+using static Application.Service.Reports.IReportService;
 
 namespace Application.Service.Reports;
 
@@ -34,6 +36,101 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
     private const int FIRST_CRITICAL_DAYS = 3;
     private const int LAST_CRITICAL_DAYS = 4;
 
+
+
+    public async Task<Result<HousingPeriodSummaryReport>> GetHousingPeriodSummaryForCompanyAsync(
+    int companyId,
+    DateOnly startDate,
+    DateOnly endDate,
+    CancellationToken cancellationToken = default)
+    {
+        if (endDate < startDate)
+            return Result.Failure<HousingPeriodSummaryReport>(
+                new Error("End date must be after or equal to start date", "invalid_input", 400));
+
+        try
+        {
+            var shifts = await _dbcontext.RiderShifts
+                .Include(m => m.Housing)
+                .Include(s => s.Rider)
+                    .ThenInclude(r => r.Employee)
+                .Where(s => s.ShiftDate >= startDate &&
+                           s.ShiftDate <= endDate &&
+                           s.CompanyId == companyId)
+                .AsNoTracking()
+                .ToListAsync(cancellationToken);
+
+            if (!shifts.Any())
+                return Result.Failure<HousingPeriodSummaryReport>(
+                    new Error($"No shifts found for company {companyId} between {startDate:yyyy-MM-dd} and {endDate:yyyy-MM-dd}", "no_data", 404));
+
+            var validShifts = shifts
+                .Where(s => s.Housing != null)
+                .ToList();
+
+            if (!validShifts.Any())
+                return Result.Failure<HousingPeriodSummaryReport>(
+                    new Error($"No shifts with housing information found for the specified period", "no_data", 404));
+
+            var totalOrders = validShifts.Sum(s => s.AcceptedDailyOrders);
+            var totalRiders = validShifts.Select(s => s.RiderId).Distinct().Count();
+
+            var housingGroups = validShifts
+                .GroupBy(s => new
+                {
+                    HousingId = s.HousingId ?? 0,
+                    HousingName = s.Housing?.Name ?? "Unknown"
+                });
+
+            var housingSummaries = new List<HousingDailySummary>();
+
+            foreach (var group in housingGroups)
+            {
+                var housingShifts = group.ToList();
+                var housingOrders = housingShifts.Sum(s => s.AcceptedDailyOrders);
+                var activeRiders = housingShifts.Select(s => s.RiderId).Distinct().Count();
+                var avgOrdersPerRider = activeRiders > 0
+                    ? Math.Round((decimal)housingOrders / activeRiders, 2)
+                    : 0;
+                var percentageOfTotal = totalOrders > 0
+                    ? Math.Round((decimal)housingOrders / totalOrders * 100, 2)
+                    : 0;
+
+                housingSummaries.Add(new HousingDailySummary(
+                    HousingId: group.Key.HousingId,
+                    HousingName: group.Key.HousingName,
+                    TotalOrders: housingOrders,
+                    ActiveRiders: activeRiders,
+                    AverageOrdersPerRider: avgOrdersPerRider,
+                    PercentageOfTotalOrders: percentageOfTotal
+                ));
+            }
+
+            housingSummaries = housingSummaries
+                .OrderByDescending(h => h.TotalOrders)
+                .ToList();
+
+            var avgOrdersPerRiderOverall = totalRiders > 0
+                ? Math.Round((decimal)totalOrders / totalRiders, 2)
+                : 0;
+
+            var report = new HousingPeriodSummaryReport(
+                StartDate: startDate,
+                EndDate: endDate,
+                HousingSummaries: housingSummaries,
+                TotalOrders: totalOrders,
+                TotalRiders: totalRiders,
+                AverageOrdersPerRider: avgOrdersPerRiderOverall
+            );
+
+            return Result.Success(report);
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<HousingPeriodSummaryReport>(
+                new Error($"Error generating housing period summary: {ex.Message}", "server_error", 500));
+        }
+    }
 
     public async Task<Result<IEnumerable<DailyCompanyShiftSummary>>> GetDailyShiftSummaryByCompaniesAsync(
     List<int> companyIds,
@@ -934,10 +1031,76 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
     }
 
 
+    /// <summary>
+    /// Returns the singleton config, seeding a default row when absent.
+    /// </summary>
+    public async Task<Result<Company2ValidationConfigDto>> GetCompany2ValidationConfigAsync(
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var cfg = await GetOrCreateConfigAsync(cancellationToken);
+            return Result.Success(MapToDto(cfg));
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<Company2ValidationConfigDto>(
+                new Error($"Error reading validation config: {ex.Message}", "server_error", 500));
+        }
+    }
+
+    /// <summary>
+    /// Creates the config row if missing, otherwise patches only the provided fields.
+    /// </summary>
+    public async Task<Result<Company2ValidationConfigDto>> UpsertCompany2ValidationConfigAsync(
+        UpsertCompany2ValidationConfigRequest req,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var cfg = await GetOrCreateConfigAsync(cancellationToken);
+
+            // Patch only non-null fields (PATCH semantics)
+            if (req.TargetOrdersPerDay.HasValue) cfg.TargetOrdersPerDay = req.TargetOrdersPerDay.Value;
+            if (req.TargetHoursPerDay.HasValue) cfg.TargetHoursPerDay = req.TargetHoursPerDay.Value;
+            if (req.MinWorkingHoursPerDay.HasValue) cfg.MinWorkingHoursPerDay = req.MinWorkingHoursPerDay.Value;
+            if (req.FullMonthTargetOrders.HasValue) cfg.FullMonthTargetOrders = req.FullMonthTargetOrders.Value;
+            if (req.FirstCriticalDaysCount.HasValue) cfg.FirstCriticalDaysCount = req.FirstCriticalDaysCount.Value;
+            if (req.LastCriticalDaysCount.HasValue) cfg.LastCriticalDaysCount = req.LastCriticalDaysCount.Value;
+            if (req.MaxStartDayForExistingRiders.HasValue) cfg.MaxStartDayForExistingRiders = req.MaxStartDayForExistingRiders.Value;
+            if (req.AllowedMissingDays28.HasValue) cfg.AllowedMissingDays28 = req.AllowedMissingDays28.Value;
+            if (req.AllowedMissingDays29.HasValue) cfg.AllowedMissingDays29 = req.AllowedMissingDays29.Value;
+            if (req.AllowedMissingDays30.HasValue) cfg.AllowedMissingDays30 = req.AllowedMissingDays30.Value;
+            if (req.AllowedMissingDays31.HasValue) cfg.AllowedMissingDays31 = req.AllowedMissingDays31.Value;
+            if (req.SundayIsSpecialDay.HasValue) cfg.SundayIsSpecialDay = req.SundayIsSpecialDay.Value;
+            if (req.MondayIsSpecialDay.HasValue) cfg.MondayIsSpecialDay = req.MondayIsSpecialDay.Value;
+            if (req.TuesdayIsSpecialDay.HasValue) cfg.TuesdayIsSpecialDay = req.TuesdayIsSpecialDay.Value;
+            if (req.WednesdayIsSpecialDay.HasValue) cfg.WednesdayIsSpecialDay = req.WednesdayIsSpecialDay.Value;
+            if (req.ThursdayIsSpecialDay.HasValue) cfg.ThursdayIsSpecialDay = req.ThursdayIsSpecialDay.Value;
+            if (req.FridayIsSpecialDay.HasValue) cfg.FridayIsSpecialDay = req.FridayIsSpecialDay.Value;
+            if (req.SaturdayIsSpecialDay.HasValue) cfg.SaturdayIsSpecialDay = req.SaturdayIsSpecialDay.Value;
+            if (req.UpdatedBy is not null) cfg.UpdatedBy = req.UpdatedBy;
+
+            cfg.UpdatedAt = DateTime.UtcNow.AddHours(3);
+
+            await _dbcontext.SaveChangesAsync(cancellationToken);
+            return Result.Success(MapToDto(cfg));
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<Company2ValidationConfigDto>(
+                new Error($"Error saving validation config: {ex.Message}", "server_error", 500));
+        }
+    }
+
+    // =========================================================================
+    // MAIN VALIDATION ENTRY POINT  (replaces the old GetCompany2MonthlyRiderValidationAsync)
+    // =========================================================================
+
     public async Task<Result<MonthlyRiderValidationReport>> GetCompany2MonthlyRiderValidationAsync(
-       int year,
-       int month,
-       CancellationToken cancellationToken = default)
+        int year,
+        int month,
+        CancellationToken cancellationToken = default)
     {
         if (month < 1 || month > 12)
             return Result.Failure<MonthlyRiderValidationReport>(
@@ -945,41 +1108,41 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
 
         try
         {
+            // ── load dynamic config ──────────────────────────────────────
+            var cfg = await GetOrCreateConfigAsync(cancellationToken);
+
             var today = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3));
             var yesterday = today.AddDays(-1);
             var startDate = new DateOnly(year, month, 1);
 
-            // If it's the current month, use yesterday as end date, otherwise use last day of month
             var isCurrentMonth = year == today.Year && month == today.Month;
             var endDate = isCurrentMonth ? yesterday : startDate.AddMonths(1).AddDays(-1);
 
-            var totalExpectedDays = endDate.Day; // Days from 1 to current day or end of month
+            var totalExpectedDays = CountExpectedWorkingDays(startDate, endDate, cfg);
             var currentDayOfMonth = endDate.Day;
             var lastDayOfMonth = startDate.AddMonths(1).AddDays(-1).Day;
 
-            // Calculate target orders based on current day
+            // Target orders proportionally scaled to days elapsed
             var targetOrders = isCurrentMonth
-                ? (int)Math.Ceiling((decimal)currentDayOfMonth / lastDayOfMonth * FULL_MONTH_TARGET_ORDERS)
-                : FULL_MONTH_TARGET_ORDERS;
+                ? (int)Math.Ceiling((decimal)currentDayOfMonth / lastDayOfMonth * cfg.FullMonthTargetOrders)
+                : cfg.FullMonthTargetOrders;
 
-            // Get all shifts for company 2 in this period
+            // ── fetch shifts ─────────────────────────────────────────────
             var shifts = await _dbcontext.RiderShifts
                 .Include(s => s.Rider)
                     .ThenInclude(r => r.Employee)
-                                .ThenInclude(e => e.Housing)
+                        .ThenInclude(e => e.Housing)
                 .Where(s => s.CompanyId == 2 &&
-                           s.ShiftDate >= startDate &&
-                           s.ShiftDate <= endDate)
+                            s.ShiftDate >= startDate &&
+                            s.ShiftDate <= endDate)
                 .AsNoTracking()
                 .ToListAsync(cancellationToken);
 
             if (!shifts.Any())
-            {
                 return Result.Failure<MonthlyRiderValidationReport>(
                     new Error($"No shifts found for Company 2 in {year}-{month:D2}", "no_data", 404));
-            }
 
-            // Group by rider
+            // ── validate each rider ──────────────────────────────────────
             var riderGroups = shifts.GroupBy(s => s.RiderId);
             var validationResults = new List<RiderMonthlyValidation>();
 
@@ -988,12 +1151,8 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                 var rider = group.First().Rider;
                 if (rider?.Employee == null) continue;
 
-                // Check if rider worked in previous month
                 var workedPreviousMonth = await DidRiderWorkInPreviousMonthAsync(
-                    rider.Id,
-                    2, // Company 2 (Keta)
-                    startDate,
-                    cancellationToken);
+                    rider.Id, 2, startDate, cancellationToken);
 
                 var validation = ValidateRider(
                     rider,
@@ -1005,12 +1164,12 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                     targetOrders,
                     startDate,
                     endDate,
-                    workedPreviousMonth); // Add this parameter
+                    workedPreviousMonth,
+                    cfg);
 
                 validationResults.Add(validation);
             }
 
-            // Sort: valid riders first (by total orders desc), then invalid riders (by missing days asc)
             var sortedResults = validationResults
                 .OrderByDescending(r => r.IsValidForMonth)
                 .ThenByDescending(r => r.TotalOrders)
@@ -1041,286 +1200,221 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
         }
     }
 
-    private async Task<bool> DidRiderWorkInPreviousMonthAsync(
-    int riderId,
-    int companyId,
-    DateOnly monthStart,
-    CancellationToken cancellationToken)
+    // =========================================================================
+    // PRIVATE HELPERS
+    // =========================================================================
+
+    /// <summary>Gets the singleton config row, seeding defaults when absent.</summary>
+    private async Task<Company2ValidationConfig> GetOrCreateConfigAsync(
+        CancellationToken cancellationToken)
     {
-        // Calculate previous month range
-        var previousMonthStart = monthStart.AddMonths(-1);
-        var previousMonthEnd = monthStart.AddDays(-1);
+        var cfg = await _dbcontext.Set<Company2ValidationConfig>()
+            .FirstOrDefaultAsync(cancellationToken);
 
-        // Check if rider has any shifts in previous month for this company
-        var hasShifts = await _dbcontext.RiderShifts
-            .AnyAsync(s => s.RiderId == riderId &&
-                          s.CompanyId == companyId &&
-                          s.ShiftDate >= previousMonthStart &&
-                          s.ShiftDate <= previousMonthEnd,
-                          cancellationToken);
+        if (cfg is not null)
+            return cfg;
 
-        return hasShifts;
+        cfg = new Company2ValidationConfig();          // all defaults pre-set in entity
+        _dbcontext.Set<Company2ValidationConfig>().Add(cfg);
+        await _dbcontext.SaveChangesAsync(cancellationToken);
+        return cfg;
     }
 
-    private ValidationResult PerformValidation(
-        int totalMissingDays,
-        List<int> missingDays,
-        List<int> daysWithLessThan10Hours,
-        int totalOrders,
-        int targetOrders,
-        int currentDayOfMonth,
-        int lastDayOfMonth,
-        int allowedMissingDays,
-        int actualStartDay,
-        int expectedWorkingDays,
-        bool workedPreviousMonth,    // NEW PARAMETER
-        bool isNewRider)             // NEW PARAMETER
+    private static Company2ValidationConfigDto MapToDto(Company2ValidationConfig cfg) =>
+        new(
+            cfg.TargetOrdersPerDay,
+            cfg.TargetHoursPerDay,
+            cfg.MinWorkingHoursPerDay,
+            cfg.FullMonthTargetOrders,
+            cfg.FirstCriticalDaysCount,
+            cfg.LastCriticalDaysCount,
+            cfg.MaxStartDayForExistingRiders,
+            cfg.AllowedMissingDays28,
+            cfg.AllowedMissingDays29,
+            cfg.AllowedMissingDays30,
+            cfg.AllowedMissingDays31,
+            cfg.SundayIsSpecialDay,
+            cfg.MondayIsSpecialDay,
+            cfg.TuesdayIsSpecialDay,
+            cfg.WednesdayIsSpecialDay,
+            cfg.ThursdayIsSpecialDay,
+            cfg.FridayIsSpecialDay,
+            cfg.SaturdayIsSpecialDay,
+            cfg.UpdatedAt,
+            cfg.UpdatedBy
+        );
+
+    // ── special-day helpers ───────────────────────────────────────────────────
+
+    private static bool IsSpecialDay(DateOnly date, Company2ValidationConfig cfg)
     {
-        var isValid = true;
-        var errors = new List<string>();
-
-        // CRITICAL CHECK: Existing rider missing first 5 days
-        if (workedPreviousMonth && actualStartDay > 5)
+        return date.DayOfWeek switch
         {
-            isValid = false;
-            errors.Add($"❌ الموظف عمل الشهر الماضي ولكن غاب أول {actualStartDay - 1} أيام من هذا الشهر - غير صالح");
-        }
-
-        // Rule 1: Total missing days should not exceed allowed missing days
-        if (totalMissingDays > allowedMissingDays)
-        {
-            isValid = false;
-            errors.Add($"❌ عدد أيام الغياب كبير جدًا: {totalMissingDays} (الحد الأقصى المسموح: {allowedMissingDays})");
-        }
-
-        // Add info about rider's start date if mid-month AND is new rider
-        if (actualStartDay > 1 && isNewRider && !workedPreviousMonth)
-        {
-            errors.Add($"ℹ️ موظف جديد بدأ العمل من يوم {actualStartDay} من الشهر (الأيام المتوقعة: {expectedWorkingDays})");
-        }
-        else if (workedPreviousMonth)
-        {
-            errors.Add($"ℹ️ موظف مستمر من الشهر الماضي (متوقع العمل من يوم 1)");
-        }
-
-        // Rest of the validation logic remains the same...
-        // (Keep all the existing critical days checks, orders check, etc.)
-
-        // Rule 2: Check first 3 days
-        var first3Days = Enumerable.Range(Math.Max(1, actualStartDay), Math.Min(FIRST_CRITICAL_DAYS, currentDayOfMonth - actualStartDay + 1)).ToList();
-        var missingInFirst3 = first3Days.Intersect(missingDays).ToList();
-
-        // Rule 3: Check last 4 days (5 days for 31-day months to include day 31)
-        var lastCriticalDaysCount = lastDayOfMonth == 31 ? 5 : LAST_CRITICAL_DAYS;
-        var last4DaysStart = Math.Max(actualStartDay, lastDayOfMonth - lastCriticalDaysCount + 1);
-        var last4Days = Enumerable.Range(last4DaysStart, Math.Min(lastCriticalDaysCount, lastDayOfMonth - last4DaysStart + 1))
-            .Where(d => d <= currentDayOfMonth && d >= actualStartDay)
-            .ToList();
-        var missingInLast4 = last4Days.Intersect(missingDays).ToList();
-
-        var criticalDays = first3Days.Concat(last4Days).Distinct().ToList();
-        var missingInCritical = criticalDays.Intersect(missingDays).ToList();
-        var nonCriticalDays = Enumerable.Range(actualStartDay, expectedWorkingDays)
-            .Except(criticalDays)
-            .ToList();
-        var missingInNonCritical = nonCriticalDays.Intersect(missingDays).ToList();
-
-        // Check critical days violation with proper rules
-        // Rule: Max 1 missing in first 3 days, max 1 missing in last 4 days
-        // These limits are SEPARATE from the total missing days limit
-
-        bool criticalDaysViolation = false;
-
-        // Check first 3 days - max 1 missing allowed
-        if (missingInFirst3.Count > 1)
-        {
-            isValid = false;
-            criticalDaysViolation = true;
-            errors.Add($"❌ أيام مفقودة في أول {FIRST_CRITICAL_DAYS} أيام: {missingInFirst3.Count} أيام ({string.Join(", ", missingInFirst3)}) - المسموح فقط يوم واحد");
-        }
-        if (missingInFirst3.Any() && missingInLast4.Any())
-        {
-            isValid = false;
-            criticalDaysViolation = true;
-            errors.Add($"❌ غياب في كل من أول الشهر ({string.Join(", ", missingInFirst3)}) وآخر الشهر ({string.Join(", ", missingInLast4)}) - غير مسموح");
-        }
-        // Check last 4 days - max 1 missing allowed  
-        if (missingInLast4.Count > 1)
-        {
-            isValid = false;
-            criticalDaysViolation = true;
-            errors.Add($"❌ أيام مفقودة في آخر {LAST_CRITICAL_DAYS} أيام: {missingInLast4.Count} أيام ({string.Join(", ", missingInLast4)}) - المسموح فقط يوم واحد");
-        }
-
-        // Add informational message if there are missing days in critical periods (but still within limits)
-        if (!criticalDaysViolation && (missingInFirst3.Any() || missingInLast4.Any()))
-        {
-            var criticalInfo = new List<string>();
-            if (missingInFirst3.Any())
-            {
-                criticalInfo.Add($"يوم {missingInFirst3[0]} في أول 3 أيام");
-            }
-            if (missingInLast4.Any())
-            {
-                criticalInfo.Add($"يوم {missingInLast4[0]} في آخر 4 أيام");
-            }
-            errors.Add($"ℹ️ أيام غياب في الفترات الحرجة: {string.Join(" و ", criticalInfo)} (ضمن الحد المسموح)");
-        }
-
-        // Rule 4: Total orders should be >= target
-        if (totalOrders < targetOrders)
-        {
-            isValid = false;
-            var shortage = targetOrders - totalOrders;
-            errors.Add($"❌ عدد الطلبات غير كافٍ: {totalOrders} (المطلوب: {targetOrders}، النقص: {shortage})");
-        }
-
-        if (daysWithLessThan10Hours.Any())
-        {
-            errors.Add(
-                $"⚠️ أيام عمل أقل من {MIN_WORKING_HOURS_PER_DAY} ساعات (تُحتسب كأيام غياب): " +
-                $"الأيام {string.Join(", ", daysWithLessThan10Hours)}");
-        }
-
-        if (missingDays.Any() && !errors.Any(e => e.Contains("Missing days in")))
-        {
-            var regularMissingDays = missingDays.Except(daysWithLessThan10Hours).ToList();
-            if (regularMissingDays.Any())
-            {
-                errors.Add($"⚠️ تاريخ الأيام بدون دوام: {string.Join(", ", regularMissingDays)}");
-            }
-        }
-
-        if (!errors.Any())
-        {
-            errors.Add("✅ جميع شروط التحقق مستوفاة");
-        }
-
-        return new ValidationResult(isValid, errors);
+            DayOfWeek.Sunday => cfg.SundayIsSpecialDay,
+            DayOfWeek.Monday => cfg.MondayIsSpecialDay,
+            DayOfWeek.Tuesday => cfg.TuesdayIsSpecialDay,
+            DayOfWeek.Wednesday => cfg.WednesdayIsSpecialDay,
+            DayOfWeek.Thursday => cfg.ThursdayIsSpecialDay,
+            DayOfWeek.Friday => cfg.FridayIsSpecialDay,
+            DayOfWeek.Saturday => cfg.SaturdayIsSpecialDay,
+            _ => false
+        };
     }
+
+    /// <summary>Counts calendar days in [start, end] that are NOT special/off days.</summary>
+    private static int CountExpectedWorkingDays(
+        DateOnly start, DateOnly end, Company2ValidationConfig cfg)
+    {
+        int count = 0;
+        for (var d = start; d <= end; d = d.AddDays(1))
+            if (!IsSpecialDay(d, cfg))
+                count++;
+        return count;
+    }
+
+    // ── allowed missing days from config ─────────────────────────────────────
+
+    private static int GetBaseAllowedMissingDays(int lastDayOfMonth, Company2ValidationConfig cfg) =>
+        lastDayOfMonth switch
+        {
+            31 => cfg.AllowedMissingDays31,
+            30 => cfg.AllowedMissingDays30,
+            29 => cfg.AllowedMissingDays29,
+            _ => cfg.AllowedMissingDays28
+        };
+
+    // ── start-date / new-rider detection ─────────────────────────────────────
+
+    private static (DateOnly startDate, bool isNewRider) GetRiderStartInfoWithConfig(
+        List<RiderShift> riderShifts,
+        DateOnly monthStart,
+        bool workedPreviousMonth)
+    {
+        if (!riderShifts.Any())
+            return (monthStart, true);
+
+        var firstShiftDate = riderShifts.Min(s => s.ShiftDate);
+
+        if (workedPreviousMonth)
+            return (monthStart, false);
+
+        if (firstShiftDate <= monthStart)
+            return (monthStart, false);
+
+        return (firstShiftDate, true);
+    }
+
+    // ── core per-rider validation ─────────────────────────────────────────────
 
     private RiderMonthlyValidation ValidateRider(
-     RiderDetails rider,
-     List<RiderShift> riderShifts,
-     int year,
-     int month,
-     int currentDayOfMonth,
-     int lastDayOfMonth,
-     int targetOrders,
-     DateOnly monthStart,
-     DateOnly endDate,
-     bool workedPreviousMonth)  // NEW PARAMETER
+        RiderDetails rider,
+        List<RiderShift> riderShifts,
+        int year,
+        int month,
+        int currentDayOfMonth,
+        int lastDayOfMonth,
+        int targetOrders,
+        DateOnly monthStart,
+        DateOnly endDate,
+        bool workedPreviousMonth,
+        Company2ValidationConfig cfg)
     {
-        // Detect when rider actually started working this month
-        var (riderStartDate, isNewRider) = GetRiderStartInfo(
-            riderShifts,
-            monthStart,
-            endDate,
-            workedPreviousMonth);
+        var (riderStartDate, isNewRider) = GetRiderStartInfoWithConfig(
+            riderShifts, monthStart, workedPreviousMonth);
 
         var actualStartDay = riderStartDate.Day;
 
-        // **CRITICAL CHECK**: If rider worked previous month but missed first 5 days
-        if (workedPreviousMonth && actualStartDay > 5)
+        // Existing rider who skipped the first N days → force full-month accountability
+        if (workedPreviousMonth && actualStartDay > cfg.MaxStartDayForExistingRiders)
         {
-            // This rider is NOT a new starter, they just didn't show up
-            // Force them to be invalid with full month expectations
             actualStartDay = 1;
             isNewRider = false;
         }
 
-        // Calculate expected days based on when they started
-        var expectedWorkingDays = currentDayOfMonth - actualStartDay + 1;
+        // Days the rider is expected to cover (calendar days, special days excluded)
+        var checkStartDate = (workedPreviousMonth || !isNewRider)
+            ? monthStart
+            : new DateOnly(year, month, actualStartDay);
 
-        // Adjust target orders based on actual working period
-        // BUT: if rider worked previous month, they need full month target
+        var expectedWorkingDays = CountExpectedWorkingDays(checkStartDate, endDate, cfg);
+
+        // Adjust target orders
         int adjustedTargetOrders;
         if (workedPreviousMonth || !isNewRider)
         {
-            // Existing rider - use full month target
             adjustedTargetOrders = targetOrders;
         }
         else
         {
-            // New rider - adjust target based on start date
-            adjustedTargetOrders = (int)Math.Ceiling((decimal)expectedWorkingDays / lastDayOfMonth * FULL_MONTH_TARGET_ORDERS);
+            var fullMonthWorkingDays = CountExpectedWorkingDays(monthStart, endDate, cfg);
+            adjustedTargetOrders = fullMonthWorkingDays > 0
+                ? (int)Math.Ceiling((decimal)expectedWorkingDays / fullMonthWorkingDays * cfg.FullMonthTargetOrders)
+                : 0;
         }
 
-        // Determine allowed missing days based on month length and rider start date
-        int baseAllowedMissingDays;
-
-        // Calculate base allowed missing days based on total days in the month
-        if (lastDayOfMonth == 31)
-        {
-            baseAllowedMissingDays = 5;
-        }
-        else if (lastDayOfMonth == 30)
-        {
-            baseAllowedMissingDays = 4;
-        }
-        else // 28 or 29 days (February)
-        {
-            baseAllowedMissingDays = 3;
-        }
-
+        // Allowed missing days (proportional for new riders)
+        var baseAllowed = GetBaseAllowedMissingDays(lastDayOfMonth, cfg);
         int allowedMissingDays;
-
         if (workedPreviousMonth || !isNewRider)
         {
-            // Existing rider - use full month base allowed days
-            allowedMissingDays = baseAllowedMissingDays;
+            allowedMissingDays = baseAllowed;
         }
         else
         {
-            // New rider - calculate proportionally based on their working period
-            // Formula: (days they work / total days in month) * base allowed days
-            allowedMissingDays = (int)Math.Floor((decimal)expectedWorkingDays / lastDayOfMonth * baseAllowedMissingDays);
-
-            // Ensure at least 1 day is allowed even for very short periods
-            if (allowedMissingDays < 1)
-            {
-                allowedMissingDays = 1;
-            }
+            var fullMonthWorkingDays = CountExpectedWorkingDays(monthStart, endDate, cfg);
+            allowedMissingDays = fullMonthWorkingDays > 0
+                ? Math.Max(1, (int)Math.Floor((decimal)expectedWorkingDays / fullMonthWorkingDays * baseAllowed))
+                : 1;
         }
 
-        // Create a dictionary of shifts by date for easy lookup
+        // ── day-by-day loop ───────────────────────────────────────────────
         var shiftsByDate = riderShifts.ToDictionary(s => s.ShiftDate);
-
         var goodDays = 0;
         var missingDays = new List<int>();
-        var daysWithLessThan10Hours = new List<int>();
+        var lowHoursDays = new List<int>();
         var dailyDetails = new List<DailyValidationDetail>();
 
-        // For existing riders, check from day 1
-        // For new riders, check from their actual start date
-        int checkStartDay = (workedPreviousMonth || !isNewRider) ? 1 : actualStartDay;
-
-        for (int day = checkStartDay; day <= currentDayOfMonth; day++)
+        for (var d = checkStartDate; d <= endDate; d = d.AddDays(1))
         {
-            var currentDate = new DateOnly(year, month, day);
+            var dayNum = d.Day;
 
-            if (shiftsByDate.TryGetValue(currentDate, out var shift))
+            // Skip special (off) days entirely – not counted as present or absent
+            if (IsSpecialDay(d, cfg))
             {
-                if (shift.WorkingHours < MIN_WORKING_HOURS_PER_DAY)
+                dailyDetails.Add(new DailyValidationDetail(
+                    Day: dayNum,
+                    Date: d,
+                    HasShift: false,
+                    WorkingHours: 0,
+                    AcceptedOrders: 0,
+                    IsValid: true,
+                    Reason: $"🏖️ Special / off day ({d.DayOfWeek})"
+                ));
+                continue;
+            }
+
+            if (shiftsByDate.TryGetValue(d, out var shift))
+            {
+                if (shift.WorkingHours < cfg.MinWorkingHoursPerDay)
                 {
-                    daysWithLessThan10Hours.Add(day);
-                    missingDays.Add(day);
+                    lowHoursDays.Add(dayNum);
+                    missingDays.Add(dayNum);
                     dailyDetails.Add(new DailyValidationDetail(
-                        Day: day,
-                        Date: currentDate,
+                        Day: dayNum,
+                        Date: d,
                         HasShift: true,
                         WorkingHours: shift.WorkingHours,
                         AcceptedOrders: shift.AcceptedDailyOrders,
                         IsValid: false,
-                        Reason: $"ساعات العمل ({shift.WorkingHours:F1} ساعة) أقل من {MIN_WORKING_HOURS_PER_DAY} ساعات"
+                        Reason: $"ساعات العمل ({shift.WorkingHours:F1}h) أقل من {cfg.MinWorkingHoursPerDay}h"
                     ));
                 }
                 else
                 {
                     goodDays++;
                     dailyDetails.Add(new DailyValidationDetail(
-                        Day: day,
-                        Date: currentDate,
+                        Day: dayNum,
+                        Date: d,
                         HasShift: true,
                         WorkingHours: shift.WorkingHours,
                         AcceptedOrders: shift.AcceptedDailyOrders,
@@ -1331,10 +1425,10 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
             }
             else
             {
-                missingDays.Add(day);
+                missingDays.Add(dayNum);
                 dailyDetails.Add(new DailyValidationDetail(
-                    Day: day,
-                    Date: currentDate,
+                    Day: dayNum,
+                    Date: d,
                     HasShift: false,
                     WorkingHours: 0,
                     AcceptedOrders: 0,
@@ -1344,28 +1438,23 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
             }
         }
 
-        var totalMissingDays = missingDays.Count;
         var totalOrders = riderShifts.Sum(s => s.AcceptedDailyOrders);
         var totalHours = riderShifts.Sum(s => s.WorkingHours);
-        var totalWorkingDays = goodDays;
 
-        // Recalculate expected working days based on check start day
-        var actualExpectedDays = currentDayOfMonth - checkStartDay + 1;
-
-        // Perform validation with adjusted parameters
-        var validationResult = PerformValidation(
-            totalMissingDays,
-            missingDays,
-            daysWithLessThan10Hours,
-            totalOrders,
-            adjustedTargetOrders,
-            currentDayOfMonth,
-            lastDayOfMonth,
-            allowedMissingDays,
-            checkStartDay,           // Use checkStartDay instead of actualStartDay
-            actualExpectedDays,
-            workedPreviousMonth,     // NEW PARAMETER
-            isNewRider              // NEW PARAMETER
+        var validationResult = PerformValidationWithConfig(
+            totalMissingDays: missingDays.Count,
+            missingDays: missingDays,
+            daysWithLowHours: lowHoursDays,
+            totalOrders: totalOrders,
+            targetOrders: adjustedTargetOrders,
+            currentDayOfMonth: currentDayOfMonth,
+            lastDayOfMonth: lastDayOfMonth,
+            allowedMissingDays: allowedMissingDays,
+            checkStartDate: checkStartDate,
+            expectedWorkingDays: expectedWorkingDays,
+            workedPreviousMonth: workedPreviousMonth,
+            isNewRider: isNewRider,
+            cfg: cfg
         );
 
         return new RiderMonthlyValidation(
@@ -1375,21 +1464,130 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
             RiderNameAR: rider.Employee.NameAR,
             RiderNameEN: rider.Employee.NameEN,
             WorkingId: rider.WorkingId ?? "0",
-            TotalExpectedDays: actualExpectedDays,
-            TotalWorkingDays: totalWorkingDays,
+            TotalExpectedDays: expectedWorkingDays,
+            TotalWorkingDays: goodDays,
             GoodDays: goodDays,
-            MissingDays: totalMissingDays,
+            MissingDays: missingDays.Count,
             MissingDaysList: missingDays,
-            DaysWithLessThan10Hours: daysWithLessThan10Hours,
+            DaysWithLessThan10Hours: lowHoursDays,
             TotalOrders: totalOrders,
             TargetOrders: adjustedTargetOrders,
             TotalWorkingHours: totalHours,
-            AverageHoursPerDay: totalWorkingDays > 0 ? totalHours / totalWorkingDays : 0,
+            AverageHoursPerDay: goodDays > 0 ? totalHours / goodDays : 0,
             IsValidForMonth: validationResult.IsValid,
             ValidationErrors: validationResult.Errors,
             DailyDetails: dailyDetails
         );
     }
+
+    // ── validation rule engine ────────────────────────────────────────────────
+
+    private ValidationResult PerformValidationWithConfig(
+        int totalMissingDays,
+        List<int> missingDays,
+        List<int> daysWithLowHours,
+        int totalOrders,
+        int targetOrders,
+        int currentDayOfMonth,
+        int lastDayOfMonth,
+        int allowedMissingDays,
+        DateOnly checkStartDate,
+        int expectedWorkingDays,
+        bool workedPreviousMonth,
+        bool isNewRider,
+        Company2ValidationConfig cfg)
+    {
+        var isValid = true;
+        var errors = new List<string>();
+        var startDay = checkStartDate.Day;
+
+        // ── Rule: existing rider missed opening days ───────────────────────
+        if (workedPreviousMonth && startDay > cfg.MaxStartDayForExistingRiders)
+        {
+            isValid = false;
+            errors.Add($"❌ الموظف عمل الشهر الماضي ولكن غاب أول {startDay - 1} أيام - غير صالح");
+        }
+
+        // ── Rule: total missing days ──────────────────────────────────────
+        if (totalMissingDays > allowedMissingDays)
+        {
+            isValid = false;
+            errors.Add($"❌ عدد أيام الغياب كبير جدًا: {totalMissingDays} (الحد الأقصى: {allowedMissingDays})");
+        }
+
+        // ── Rider-type info line ──────────────────────────────────────────
+        if (!isNewRider || workedPreviousMonth)
+            errors.Add($"ℹ️ موظف مستمر من الشهر الماضي (متوقع العمل من يوم 1)");
+        else if (startDay > 1)
+            errors.Add($"ℹ️ موظف جديد بدأ العمل من يوم {startDay} (الأيام المتوقعة: {expectedWorkingDays})");
+
+        // ── Rule: critical days (first window) ───────────────────────────
+        var firstWindowEnd = Math.Min(startDay + cfg.FirstCriticalDaysCount - 1, currentDayOfMonth);
+        var firstWindowDays = Enumerable.Range(startDay, firstWindowEnd - startDay + 1).ToList();
+        var missingInFirst = firstWindowDays.Intersect(missingDays).ToList();
+
+        // ── Rule: critical days (last window) ────────────────────────────
+        var lastWindowCount = lastDayOfMonth == 31
+            ? cfg.LastCriticalDaysCount + 1
+            : cfg.LastCriticalDaysCount;
+        var lastWindowStart = Math.Max(startDay, lastDayOfMonth - lastWindowCount + 1);
+        var lastWindowDays = Enumerable.Range(lastWindowStart, lastDayOfMonth - lastWindowStart + 1)
+            .Where(d => d <= currentDayOfMonth && d >= startDay)
+            .ToList();
+        var missingInLast = lastWindowDays.Intersect(missingDays).ToList();
+
+        var criticalViolation = false;
+
+        if (missingInFirst.Count > 1)
+        {
+            isValid = criticalViolation = true ? (isValid = false) : false;
+            errors.Add($"❌ غياب في أول {cfg.FirstCriticalDaysCount} أيام: {missingInFirst.Count} أيام ({string.Join(", ", missingInFirst)}) - المسموح يوم واحد فقط");
+        }
+
+        if (missingInFirst.Any() && missingInLast.Any())
+        {
+            isValid = false;
+            criticalViolation = true;
+            errors.Add($"❌ غياب في أول ({string.Join(", ", missingInFirst)}) وآخر ({string.Join(", ", missingInLast)}) الشهر - غير مسموح");
+        }
+
+        if (missingInLast.Count > 1)
+        {
+            isValid = false;
+            criticalViolation = true;
+            errors.Add($"❌ غياب في آخر {cfg.LastCriticalDaysCount} أيام: {missingInLast.Count} أيام ({string.Join(", ", missingInLast)}) - المسموح يوم واحد فقط");
+        }
+
+        if (!criticalViolation && (missingInFirst.Any() || missingInLast.Any()))
+        {
+            var parts = new List<string>();
+            if (missingInFirst.Any()) parts.Add($"يوم {missingInFirst[0]} في أول {cfg.FirstCriticalDaysCount} أيام");
+            if (missingInLast.Any()) parts.Add($"يوم {missingInLast[0]} في آخر {cfg.LastCriticalDaysCount} أيام");
+            errors.Add($"ℹ️ غياب في الفترات الحرجة: {string.Join(" و ", parts)} (ضمن الحد المسموح)");
+        }
+
+        // ── Rule: order target ────────────────────────────────────────────
+        if (totalOrders < targetOrders)
+        {
+            isValid = false;
+            errors.Add($"❌ عدد الطلبات غير كافٍ: {totalOrders} (المطلوب: {targetOrders}، النقص: {targetOrders - totalOrders})");
+        }
+
+        // ── Info: low-hour days ───────────────────────────────────────────
+        if (daysWithLowHours.Any())
+            errors.Add($"⚠️ أيام عمل أقل من {cfg.MinWorkingHoursPerDay}h (تُحتسب غياباً): الأيام {string.Join(", ", daysWithLowHours)}");
+
+        // ── Info: regular absence dates ───────────────────────────────────
+        var regularMissing = missingDays.Except(daysWithLowHours).ToList();
+        if (regularMissing.Any())
+            errors.Add($"⚠️ أيام بدون دوام: {string.Join(", ", regularMissing)}");
+
+        if (!errors.Any())
+            errors.Add("✅ جميع شروط التحقق مستوفاة");
+
+        return new ValidationResult(isValid, errors);
+    }
+
     private record ValidationResult(bool IsValid, List<string> Errors);
 
     // Add these methods to ReportService.cs
@@ -1568,6 +1766,27 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
         }
     }
 
+
+    private async Task<bool> DidRiderWorkInPreviousMonthAsync(
+    int riderId,
+    int companyId,
+    DateOnly monthStart,
+    CancellationToken cancellationToken)
+    {
+        // Calculate previous month range
+        var previousMonthStart = monthStart.AddMonths(-1);
+        var previousMonthEnd = monthStart.AddDays(-1);
+
+        // Check if rider has any shifts in previous month for this company
+        var hasShifts = await _dbcontext.RiderShifts
+            .AnyAsync(s => s.RiderId == riderId &&
+                          s.CompanyId == companyId &&
+                          s.ShiftDate >= previousMonthStart &&
+                          s.ShiftDate <= previousMonthEnd,
+                          cancellationToken);
+
+        return hasShifts;
+    }
 
     /// <summary>
     /// Get daily rider details for Company 2 - Report 3: طلبات 13-01-2026

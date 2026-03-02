@@ -9,6 +9,87 @@ namespace Application.Service.Reports;
 
 public interface IReportService
 {
+
+    /// <summary>Read-model for the singleton validation config.</summary>
+    public record Company2ValidationConfigDto(
+        // Targets
+        int TargetOrdersPerDay,
+        float TargetHoursPerDay,
+        float MinWorkingHoursPerDay,
+        int FullMonthTargetOrders,
+
+        // Critical-day windows
+        int FirstCriticalDaysCount,
+        int LastCriticalDaysCount,
+        int MaxStartDayForExistingRiders,
+
+        // Allowed missing days per month-length bucket
+        int AllowedMissingDays28,
+        int AllowedMissingDays29,
+        int AllowedMissingDays30,
+        int AllowedMissingDays31,
+
+        // Special days of the week
+        bool SundayIsSpecialDay,
+        bool MondayIsSpecialDay,
+        bool TuesdayIsSpecialDay,
+        bool WednesdayIsSpecialDay,
+        bool ThursdayIsSpecialDay,
+        bool FridayIsSpecialDay,
+        bool SaturdayIsSpecialDay,
+
+        // Metadata
+        DateTime UpdatedAt,
+        string? UpdatedBy
+    );
+
+    /// <summary>Write-model – every field is optional; omitted fields keep their current value.</summary>
+    public record UpsertCompany2ValidationConfigRequest(
+        int? TargetOrdersPerDay = null,
+        float? TargetHoursPerDay = null,
+        float? MinWorkingHoursPerDay = null,
+        int? FullMonthTargetOrders = null,
+        int? FirstCriticalDaysCount = null,
+        int? LastCriticalDaysCount = null,
+        int? MaxStartDayForExistingRiders = null,
+        int? AllowedMissingDays28 = null,
+        int? AllowedMissingDays29 = null,
+        int? AllowedMissingDays30 = null,
+        int? AllowedMissingDays31 = null,
+        bool? SundayIsSpecialDay = null,
+        bool? MondayIsSpecialDay = null,
+        bool? TuesdayIsSpecialDay = null,
+        bool? WednesdayIsSpecialDay = null,
+        bool? ThursdayIsSpecialDay = null,
+        bool? FridayIsSpecialDay = null,
+        bool? SaturdayIsSpecialDay = null,
+        string? UpdatedBy = null
+    );
+
+
+
+    Task<Result<Company2ValidationConfigDto>> GetCompany2ValidationConfigAsync(
+    CancellationToken cancellationToken = default);
+
+    Task<Result<Company2ValidationConfigDto>> UpsertCompany2ValidationConfigAsync(
+    UpsertCompany2ValidationConfigRequest request,
+    CancellationToken cancellationToken = default);
+
+
+    Task<Result<HousingPeriodSummaryReport>> GetHousingPeriodSummaryForCompanyAsync(
+    int companyId,
+    DateOnly startDate,
+    DateOnly endDate,
+    CancellationToken cancellationToken = default);
+    public record HousingPeriodSummaryReport(
+    DateOnly StartDate,
+    DateOnly EndDate,
+    List<HousingDailySummary> HousingSummaries,
+    int TotalOrders,
+    int TotalRiders,
+    decimal AverageOrdersPerRider
+);
+
     Task<Result<IEnumerable<DailyCompanyShiftSummary>>> GetDailyShiftSummaryByCompaniesAsync(
     List<int> companyIds,
     CancellationToken cancellationToken = default);
