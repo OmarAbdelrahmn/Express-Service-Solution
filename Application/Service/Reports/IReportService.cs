@@ -38,9 +38,15 @@ public interface IReportService
         bool FridayIsSpecialDay,
         bool SaturdayIsSpecialDay,
 
+        // Critical weekdays — must meet TargetOrdersPerDay or day is invalid
+        bool IsFridayCritical,
+        bool IsSaturdayCritical,
+
         // Metadata
         DateTime UpdatedAt,
-        string? UpdatedBy
+        string? UpdatedBy,
+        bool IsThursdayCritical,    // ★ NEW
+        string CriticalDaysOfMonth // ★ NEW
     );
 
     /// <summary>Write-model – every field is optional; omitted fields keep their current value.</summary>
@@ -63,10 +69,12 @@ public interface IReportService
         bool? ThursdayIsSpecialDay = null,
         bool? FridayIsSpecialDay = null,
         bool? SaturdayIsSpecialDay = null,
-        string? UpdatedBy = null
+        bool? IsFridayCritical = null,
+        bool? IsSaturdayCritical = null,
+        string? UpdatedBy = null,
+        bool? IsThursdayCritical = null,    // ★ NEW
+        string? CriticalDaysOfMonth = null
     );
-
-
 
     Task<Result<Company2ValidationConfigDto>> GetCompany2ValidationConfigAsync(
     CancellationToken cancellationToken = default);

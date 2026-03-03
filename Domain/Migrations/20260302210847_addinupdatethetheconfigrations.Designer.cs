@@ -4,6 +4,7 @@ using Domain;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Domain.Migrations
 {
     [DbContext(typeof(ApplicationDbcontext))]
-    partial class ApplicationDbcontextModelSnapshot : ModelSnapshot
+    [Migration("20260302210847_addinupdatethetheconfigrations")]
+    partial class addinupdatethetheconfigrations
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -172,7 +175,7 @@ namespace Domain.Migrations
                             IsDisable = false,
                             LockoutEnabled = false,
                             NormalizedUserName = "ADMIN",
-                            PasswordHash = "AQAAAAIAAYagAAAAEJrAaEG9LVxZwajZur2uxHMX7xaAh2aCFR7ejXMZgPckumDSjp3Vw2GKS5miBkq7XQ==",
+                            PasswordHash = "AQAAAAIAAYagAAAAECWPHL40eOY3SP8lPM6XWSjOXpGEFNJUHp0YLIMUscPmsWzjBvACqNdohpADU6bkEw==",
                             PhoneNumberConfirmed = false,
                             SecurityStamp = "9FABB58491024B7BB140E4D6658B5BDA",
                             TwoFactorEnabled = false,
@@ -189,7 +192,7 @@ namespace Domain.Migrations
                             IsDisable = false,
                             LockoutEnabled = false,
                             NormalizedUserName = "MASTER",
-                            PasswordHash = "AQAAAAIAAYagAAAAELf5gwj0QKlxG30FTEiQXEocs/0TP7MZ9spCa76D5Uo8IaVb7+frE/QlwRLwCwu/kg==",
+                            PasswordHash = "AQAAAAIAAYagAAAAEH5U7XUfZkqdA+VCBIP7p/H5OhpApkItvyjXNNS+zwadmPt+KnmUAUGYEItML2Z/0w==",
                             PhoneNumberConfirmed = false,
                             SecurityStamp = "9FABB58491024B7BB140E4D6658B5BDA",
                             TwoFactorEnabled = false,
@@ -582,7 +585,7 @@ namespace Domain.Migrations
                     b.Property<int>("AllowedMissingDays31")
                         .HasColumnType("int");
 
-                    b.Property<string>("CriticalDaysOfMonth")
+                    b.Property<string>("CriticalDaysOfMonthRaw")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
@@ -594,15 +597,6 @@ namespace Domain.Migrations
 
                     b.Property<int>("FullMonthTargetOrders")
                         .HasColumnType("int");
-
-                    b.Property<bool>("IsFridayCritical")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("IsSaturdayCritical")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("IsThursdayCritical")
-                        .HasColumnType("bit");
 
                     b.Property<int>("LastCriticalDaysCount")
                         .HasColumnType("int");
@@ -627,6 +621,9 @@ namespace Domain.Migrations
 
                     b.Property<int>("TargetOrdersPerDay")
                         .HasColumnType("int");
+
+                    b.Property<bool>("ThursdayIsCriticalDay")
+                        .HasColumnType("bit");
 
                     b.Property<bool>("ThursdayIsSpecialDay")
                         .HasColumnType("bit");
@@ -659,13 +656,10 @@ namespace Domain.Migrations
                             AllowedMissingDays29 = 3,
                             AllowedMissingDays30 = 4,
                             AllowedMissingDays31 = 5,
-                            CriticalDaysOfMonth = "",
+                            CriticalDaysOfMonthRaw = "",
                             FirstCriticalDaysCount = 3,
                             FridayIsSpecialDay = true,
                             FullMonthTargetOrders = 300,
-                            IsFridayCritical = false,
-                            IsSaturdayCritical = false,
-                            IsThursdayCritical = false,
                             LastCriticalDaysCount = 4,
                             MaxStartDayForExistingRiders = 5,
                             MinWorkingHoursPerDay = 10f,
@@ -674,6 +668,7 @@ namespace Domain.Migrations
                             SundayIsSpecialDay = false,
                             TargetHoursPerDay = 10.5f,
                             TargetOrdersPerDay = 12,
+                            ThursdayIsCriticalDay = true,
                             ThursdayIsSpecialDay = true,
                             TuesdayIsSpecialDay = false,
                             UpdatedAt = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),

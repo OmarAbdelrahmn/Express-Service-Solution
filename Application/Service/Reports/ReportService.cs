@@ -1080,6 +1080,13 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
             if (req.FridayIsSpecialDay.HasValue) cfg.FridayIsSpecialDay = req.FridayIsSpecialDay.Value;
             if (req.SaturdayIsSpecialDay.HasValue) cfg.SaturdayIsSpecialDay = req.SaturdayIsSpecialDay.Value;
             if (req.UpdatedBy is not null) cfg.UpdatedBy = req.UpdatedBy;
+            if (req.IsFridayCritical.HasValue) cfg.IsFridayCritical = req.IsFridayCritical.Value;   // ★ NEW
+            if (req.IsSaturdayCritical.HasValue) cfg.IsSaturdayCritical = req.IsSaturdayCritical.Value; // ★ NEW
+
+            if (req.IsThursdayCritical.HasValue) cfg.IsThursdayCritical = req.IsThursdayCritical.Value;  // ★ NEW
+            if (req.IsFridayCritical.HasValue) cfg.IsFridayCritical = req.IsFridayCritical.Value;
+            if (req.IsSaturdayCritical.HasValue) cfg.IsSaturdayCritical = req.IsSaturdayCritical.Value;
+            if (req.CriticalDaysOfMonth != null) cfg.CriticalDaysOfMonth = req.CriticalDaysOfMonth;        // ★ NEW
 
             cfg.UpdatedAt = DateTime.UtcNow.AddHours(3);
 
@@ -1091,6 +1098,53 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
             return Result.Failure<Company2ValidationConfigDto>(
                 new Error($"Error saving validation config: {ex.Message}", "server_error", 500));
         }
+    }
+
+    private static bool IsCriticalDay(
+    DateOnly date,
+    int startDay,        // rider's effective start day in the month
+    int currentDayOfMonth,
+    int lastDayOfMonth,
+    Company2ValidationConfig cfg)
+    {
+        var dayNum = date.Day;
+
+        // First critical window: from riderStartDay to (riderStartDay + FirstCriticalDaysCount - 1)
+        var firstWindowEnd = Math.Min(startDay + cfg.FirstCriticalDaysCount - 1, currentDayOfMonth);
+        if (dayNum >= startDay && dayNum <= firstWindowEnd)
+            return true;
+
+        // Last critical window
+        var lastWindowCount = lastDayOfMonth == 31
+            ? cfg.LastCriticalDaysCount + 1
+            : cfg.LastCriticalDaysCount;
+        var lastWindowStart = lastDayOfMonth - lastWindowCount + 1;
+        if (dayNum >= lastWindowStart && dayNum <= lastDayOfMonth && dayNum <= currentDayOfMonth)
+            return true;
+
+        // Critical weekdays
+        if (date.DayOfWeek == DayOfWeek.Thursday && cfg.IsThursdayCritical) return true;  // ★ NEW
+        if (date.DayOfWeek == DayOfWeek.Friday && cfg.IsFridayCritical) return true;
+        if (date.DayOfWeek == DayOfWeek.Saturday && cfg.IsSaturdayCritical) return true;
+
+        // Explicit critical days of month                                                  // ★ NEW
+        if (cfg.GetCriticalDaysOfMonthSet().Contains(dayNum)) return true;                 // ★ NEW
+
+        return false;
+    }
+
+    /// <summary>
+    /// Returns the day-of-month numbers for every Thursday inside [start, end]
+    /// that is NOT itself an off/special day.
+    /// </summary>
+    private static List<int> GetThursdayDayNumbers(
+        DateOnly start, DateOnly end, Company2ValidationConfig cfg)
+    {
+        var result = new List<int>();
+        for (var d = start; d <= end; d = d.AddDays(1))
+            if (d.DayOfWeek == DayOfWeek.Thursday && !IsSpecialDay(d, cfg))
+                result.Add(d.Day);
+        return result;
     }
 
     // =========================================================================
@@ -1221,28 +1275,32 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
     }
 
     private static Company2ValidationConfigDto MapToDto(Company2ValidationConfig cfg) =>
-        new(
-            cfg.TargetOrdersPerDay,
-            cfg.TargetHoursPerDay,
-            cfg.MinWorkingHoursPerDay,
-            cfg.FullMonthTargetOrders,
-            cfg.FirstCriticalDaysCount,
-            cfg.LastCriticalDaysCount,
-            cfg.MaxStartDayForExistingRiders,
-            cfg.AllowedMissingDays28,
-            cfg.AllowedMissingDays29,
-            cfg.AllowedMissingDays30,
-            cfg.AllowedMissingDays31,
-            cfg.SundayIsSpecialDay,
-            cfg.MondayIsSpecialDay,
-            cfg.TuesdayIsSpecialDay,
-            cfg.WednesdayIsSpecialDay,
-            cfg.ThursdayIsSpecialDay,
-            cfg.FridayIsSpecialDay,
-            cfg.SaturdayIsSpecialDay,
-            cfg.UpdatedAt,
-            cfg.UpdatedBy
-        );
+    new(
+        cfg.TargetOrdersPerDay,
+        cfg.TargetHoursPerDay,
+        cfg.MinWorkingHoursPerDay,
+        cfg.FullMonthTargetOrders,
+        cfg.FirstCriticalDaysCount,
+        cfg.LastCriticalDaysCount,
+        cfg.MaxStartDayForExistingRiders,
+        cfg.AllowedMissingDays28,
+        cfg.AllowedMissingDays29,
+        cfg.AllowedMissingDays30,
+        cfg.AllowedMissingDays31,
+        cfg.SundayIsSpecialDay,
+        cfg.MondayIsSpecialDay,
+        cfg.TuesdayIsSpecialDay,
+        cfg.WednesdayIsSpecialDay,
+        cfg.ThursdayIsSpecialDay,
+        cfg.FridayIsSpecialDay,
+        cfg.SaturdayIsSpecialDay,
+        cfg.IsFridayCritical,    // ★ NEW
+        cfg.IsSaturdayCritical,  // ★ NEW
+        cfg.UpdatedAt,
+        cfg.UpdatedBy,
+        cfg.IsThursdayCritical,   // ★ NEW
+        cfg.CriticalDaysOfMonth
+    );
 
     // ── special-day helpers ───────────────────────────────────────────────────
 
@@ -1305,19 +1363,18 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
     }
 
     // ── core per-rider validation ─────────────────────────────────────────────
-
     private RiderMonthlyValidation ValidateRider(
-        RiderDetails rider,
-        List<RiderShift> riderShifts,
-        int year,
-        int month,
-        int currentDayOfMonth,
-        int lastDayOfMonth,
-        int targetOrders,
-        DateOnly monthStart,
-        DateOnly endDate,
-        bool workedPreviousMonth,
-        Company2ValidationConfig cfg)
+    RiderDetails rider,
+    List<RiderShift> riderShifts,
+    int year,
+    int month,
+    int currentDayOfMonth,
+    int lastDayOfMonth,
+    int targetOrders,
+    DateOnly monthStart,
+    DateOnly endDate,
+    bool workedPreviousMonth,
+    Company2ValidationConfig cfg)
     {
         var (riderStartDate, isNewRider) = GetRiderStartInfoWithConfig(
             riderShifts, monthStart, workedPreviousMonth);
@@ -1372,6 +1429,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
         var goodDays = 0;
         var missingDays = new List<int>();
         var lowHoursDays = new List<int>();
+        var lowOrdersOnCriticalDays = new List<int>();
         var dailyDetails = new List<DailyValidationDetail>();
 
         for (var d = checkStartDate; d <= endDate; d = d.AddDays(1))
@@ -1393,10 +1451,14 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                 continue;
             }
 
+            // Determine whether today is a critical day
+            var isDayCritical = IsCriticalDay(d, actualStartDay, currentDayOfMonth, lastDayOfMonth, cfg);
+
             if (shiftsByDate.TryGetValue(d, out var shift))
             {
                 if (shift.WorkingHours < cfg.MinWorkingHoursPerDay)
                 {
+                    // Worked but hours too low → counts as missing
                     lowHoursDays.Add(dayNum);
                     missingDays.Add(dayNum);
                     dailyDetails.Add(new DailyValidationDetail(
@@ -1407,6 +1469,21 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                         AcceptedOrders: shift.AcceptedDailyOrders,
                         IsValid: false,
                         Reason: $"ساعات العمل ({shift.WorkingHours:F1}h) أقل من {cfg.MinWorkingHoursPerDay}h"
+                    ));
+                }
+                else if (isDayCritical && shift.AcceptedDailyOrders < cfg.TargetOrdersPerDay)
+                {
+                    // Worked a critical day but orders below daily target → counts as missing
+                    lowOrdersOnCriticalDays.Add(dayNum);
+                    missingDays.Add(dayNum);
+                    dailyDetails.Add(new DailyValidationDetail(
+                        Day: dayNum,
+                        Date: d,
+                        HasShift: true,
+                        WorkingHours: shift.WorkingHours,
+                        AcceptedOrders: shift.AcceptedDailyOrders,
+                        IsValid: false,
+                        Reason: $"⚠️ يوم حرج: الطلبات ({shift.AcceptedDailyOrders}) أقل من الهدف ({cfg.TargetOrdersPerDay})"
                     ));
                 }
                 else
@@ -1445,6 +1522,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
             totalMissingDays: missingDays.Count,
             missingDays: missingDays,
             daysWithLowHours: lowHoursDays,
+            daysWithLowOrdersOnCriticalDay: lowOrdersOnCriticalDays,
             totalOrders: totalOrders,
             targetOrders: adjustedTargetOrders,
             currentDayOfMonth: currentDayOfMonth,
@@ -1470,6 +1548,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
             MissingDays: missingDays.Count,
             MissingDaysList: missingDays,
             DaysWithLessThan10Hours: lowHoursDays,
+            DaysWithLowOrdersOnCriticalDay: lowOrdersOnCriticalDays,
             TotalOrders: totalOrders,
             TargetOrders: adjustedTargetOrders,
             TotalWorkingHours: totalHours,
@@ -1479,13 +1558,15 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
             DailyDetails: dailyDetails
         );
     }
-
     // ── validation rule engine ────────────────────────────────────────────────
 
+
+    // REPLACE the method signature:
     private ValidationResult PerformValidationWithConfig(
         int totalMissingDays,
         List<int> missingDays,
         List<int> daysWithLowHours,
+        List<int> daysWithLowOrdersOnCriticalDay,   // ★ NEW parameter
         int totalOrders,
         int targetOrders,
         int currentDayOfMonth,
@@ -1566,6 +1647,34 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
             errors.Add($"ℹ️ غياب في الفترات الحرجة: {string.Join(" و ", parts)} (ضمن الحد المسموح)");
         }
 
+        // ★ NEW ── Rule: low orders on critical weekdays (Friday/Saturday) ──
+        //   Days that are critical weekdays (not inside first/last windows) and
+        //   where the rider worked but fell short of TargetOrdersPerDay.
+        var criticalWeekdayLowOrders = daysWithLowOrdersOnCriticalDay
+            .Except(firstWindowDays)
+            .Except(lastWindowDays)
+            .ToList();
+
+        if (criticalWeekdayLowOrders.Any())
+        {
+            isValid = false;
+            errors.Add($"❌ أيام حرجة (أسبوعية) بطلبات أقل من الهدف ({cfg.TargetOrdersPerDay}): " +
+                       $"الأيام {string.Join(", ", criticalWeekdayLowOrders)}");
+        }
+
+        // ★ NEW ── Info: critical window days with low orders (already inside ──
+        //   first/last windows — they are already counted in missingDays and the
+        //   window violation rules above, but we add an explanatory line).
+        var criticalWindowLowOrders = daysWithLowOrdersOnCriticalDay
+            .Intersect(firstWindowDays.Concat(lastWindowDays))
+            .ToList();
+
+        if (criticalWindowLowOrders.Any())
+        {
+            errors.Add($"⚠️ أيام حرجة (أول/آخر الشهر) بطلبات أقل من الهدف ({cfg.TargetOrdersPerDay}): " +
+                       $"الأيام {string.Join(", ", criticalWindowLowOrders)}");
+        }
+
         // ── Rule: order target ────────────────────────────────────────────
         if (totalOrders < targetOrders)
         {
@@ -1578,7 +1687,10 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
             errors.Add($"⚠️ أيام عمل أقل من {cfg.MinWorkingHoursPerDay}h (تُحتسب غياباً): الأيام {string.Join(", ", daysWithLowHours)}");
 
         // ── Info: regular absence dates ───────────────────────────────────
-        var regularMissing = missingDays.Except(daysWithLowHours).ToList();
+        var regularMissing = missingDays
+            .Except(daysWithLowHours)
+            .Except(daysWithLowOrdersOnCriticalDay)  // ★ exclude new category from "regular" list
+            .ToList();
         if (regularMissing.Any())
             errors.Add($"⚠️ أيام بدون دوام: {string.Join(", ", regularMissing)}");
 
@@ -1937,6 +2049,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
         int MissingDays,
         List<int> MissingDaysList,
         List<int> DaysWithLessThan10Hours,
+        List<int> DaysWithLowOrdersOnCriticalDay,  // ★ NEW
         int TotalOrders,
         int TargetOrders,
         float TotalWorkingHours,

@@ -68,8 +68,38 @@ public class Company2ValidationConfig
 
     /// <summary>Whether Saturday is a special (off / excluded) day</summary>
     public bool SaturdayIsSpecialDay { get; set; } = false;
+    public bool IsThursdayCritical { get; set; } = false;  // ★ NEW
+
+
+    // ── Critical Weekdays (must meet TargetOrdersPerDay) ─────────────────
+    /// <summary>
+    /// Whether Friday is a critical weekday. When true (and FridayIsSpecialDay is false),
+    /// a rider who works on Friday but records fewer than TargetOrdersPerDay accepted orders
+    /// has that day treated as invalid (counts toward missing days).
+    /// </summary>
+    public bool IsFridayCritical { get; set; } = false;
+
+    /// <summary>
+    /// Whether Saturday is a critical weekday. When true (and SaturdayIsSpecialDay is false),
+    /// a rider who works on Saturday but records fewer than TargetOrdersPerDay accepted orders
+    /// has that day treated as invalid (counts toward missing days).
+    /// </summary>
+    public bool IsSaturdayCritical { get; set; } = false;
 
     // ── Metadata ──────────────────────────────────────────────────────────
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow.AddHours(3);
     public string? UpdatedBy { get; set; }
+
+    public string CriticalDaysOfMonth { get; set; } = string.Empty;  // ★ NEW
+
+    /// <summary>Parses CriticalDaysOfMonth into a set for fast lookup.</summary>
+    public HashSet<int> GetCriticalDaysOfMonthSet()                   // ★ NEW
+    {
+        if (string.IsNullOrWhiteSpace(CriticalDaysOfMonth)) return [];
+        var result = new HashSet<int>();
+        foreach (var part in CriticalDaysOfMonth.Split(',', StringSplitOptions.RemoveEmptyEntries))
+            if (int.TryParse(part.Trim(), out var day) && day >= 1 && day <= 31)
+                result.Add(day);
+        return result;
+    }
 }
