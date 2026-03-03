@@ -47,27 +47,6 @@ public class Company2ValidationConfig
     /// <summary>Max absence days allowed in a 31-day month</summary>
     public int AllowedMissingDays31 { get; set; } = 5;
 
-    // ── Special / Off Days ────────────────────────────────────────────────
-    /// <summary>Whether Sunday is a special (off / excluded) day</summary>
-    public bool SundayIsSpecialDay { get; set; } = false;
-
-    /// <summary>Whether Monday is a special (off / excluded) day</summary>
-    public bool MondayIsSpecialDay { get; set; } = false;
-
-    /// <summary>Whether Tuesday is a special (off / excluded) day</summary>
-    public bool TuesdayIsSpecialDay { get; set; } = false;
-
-    /// <summary>Whether Wednesday is a special (off / excluded) day</summary>
-    public bool WednesdayIsSpecialDay { get; set; } = false;
-
-    /// <summary>Whether Thursday is a special (off / excluded) day</summary>
-    public bool ThursdayIsSpecialDay { get; set; } = true;
-
-    /// <summary>Whether Friday is a special (off / excluded) day</summary>
-    public bool FridayIsSpecialDay { get; set; } = true;
-
-    /// <summary>Whether Saturday is a special (off / excluded) day</summary>
-    public bool SaturdayIsSpecialDay { get; set; } = false;
     public bool IsThursdayCritical { get; set; } = false;  // ★ NEW
 
 

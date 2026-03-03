@@ -29,15 +29,6 @@ public interface IReportService
         int AllowedMissingDays30,
         int AllowedMissingDays31,
 
-        // Special days of the week
-        bool SundayIsSpecialDay,
-        bool MondayIsSpecialDay,
-        bool TuesdayIsSpecialDay,
-        bool WednesdayIsSpecialDay,
-        bool ThursdayIsSpecialDay,
-        bool FridayIsSpecialDay,
-        bool SaturdayIsSpecialDay,
-
         // Critical weekdays — must meet TargetOrdersPerDay or day is invalid
         bool IsFridayCritical,
         bool IsSaturdayCritical,
@@ -62,13 +53,6 @@ public interface IReportService
         int? AllowedMissingDays29 = null,
         int? AllowedMissingDays30 = null,
         int? AllowedMissingDays31 = null,
-        bool? SundayIsSpecialDay = null,
-        bool? MondayIsSpecialDay = null,
-        bool? TuesdayIsSpecialDay = null,
-        bool? WednesdayIsSpecialDay = null,
-        bool? ThursdayIsSpecialDay = null,
-        bool? FridayIsSpecialDay = null,
-        bool? SaturdayIsSpecialDay = null,
         bool? IsFridayCritical = null,
         bool? IsSaturdayCritical = null,
         string? UpdatedBy = null,

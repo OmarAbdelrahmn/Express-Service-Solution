@@ -55,13 +55,6 @@ public class Company2ValidationConfigConfiguration
             AllowedMissingDays29 = 3,
             AllowedMissingDays30 = 4,
             AllowedMissingDays31 = 5,
-            SundayIsSpecialDay = false,
-            MondayIsSpecialDay = false,
-            TuesdayIsSpecialDay = false,
-            WednesdayIsSpecialDay = false,
-            ThursdayIsSpecialDay = true,
-            FridayIsSpecialDay = true,
-            SaturdayIsSpecialDay = false,
             UpdatedAt = new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc),
             UpdatedBy = "System"
         });

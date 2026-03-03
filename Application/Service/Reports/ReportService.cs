@@ -1072,13 +1072,6 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
             if (req.AllowedMissingDays29.HasValue) cfg.AllowedMissingDays29 = req.AllowedMissingDays29.Value;
             if (req.AllowedMissingDays30.HasValue) cfg.AllowedMissingDays30 = req.AllowedMissingDays30.Value;
             if (req.AllowedMissingDays31.HasValue) cfg.AllowedMissingDays31 = req.AllowedMissingDays31.Value;
-            if (req.SundayIsSpecialDay.HasValue) cfg.SundayIsSpecialDay = req.SundayIsSpecialDay.Value;
-            if (req.MondayIsSpecialDay.HasValue) cfg.MondayIsSpecialDay = req.MondayIsSpecialDay.Value;
-            if (req.TuesdayIsSpecialDay.HasValue) cfg.TuesdayIsSpecialDay = req.TuesdayIsSpecialDay.Value;
-            if (req.WednesdayIsSpecialDay.HasValue) cfg.WednesdayIsSpecialDay = req.WednesdayIsSpecialDay.Value;
-            if (req.ThursdayIsSpecialDay.HasValue) cfg.ThursdayIsSpecialDay = req.ThursdayIsSpecialDay.Value;
-            if (req.FridayIsSpecialDay.HasValue) cfg.FridayIsSpecialDay = req.FridayIsSpecialDay.Value;
-            if (req.SaturdayIsSpecialDay.HasValue) cfg.SaturdayIsSpecialDay = req.SaturdayIsSpecialDay.Value;
             if (req.UpdatedBy is not null) cfg.UpdatedBy = req.UpdatedBy;
             if (req.IsFridayCritical.HasValue) cfg.IsFridayCritical = req.IsFridayCritical.Value;   // ★ NEW
             if (req.IsSaturdayCritical.HasValue) cfg.IsSaturdayCritical = req.IsSaturdayCritical.Value; // ★ NEW
@@ -1133,19 +1126,6 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
         return false;
     }
 
-    /// <summary>
-    /// Returns the day-of-month numbers for every Thursday inside [start, end]
-    /// that is NOT itself an off/special day.
-    /// </summary>
-    private static List<int> GetThursdayDayNumbers(
-        DateOnly start, DateOnly end, Company2ValidationConfig cfg)
-    {
-        var result = new List<int>();
-        for (var d = start; d <= end; d = d.AddDays(1))
-            if (d.DayOfWeek == DayOfWeek.Thursday && !IsSpecialDay(d, cfg))
-                result.Add(d.Day);
-        return result;
-    }
 
     // =========================================================================
     // MAIN VALIDATION ENTRY POINT  (replaces the old GetCompany2MonthlyRiderValidationAsync)
@@ -1287,13 +1267,6 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
         cfg.AllowedMissingDays29,
         cfg.AllowedMissingDays30,
         cfg.AllowedMissingDays31,
-        cfg.SundayIsSpecialDay,
-        cfg.MondayIsSpecialDay,
-        cfg.TuesdayIsSpecialDay,
-        cfg.WednesdayIsSpecialDay,
-        cfg.ThursdayIsSpecialDay,
-        cfg.FridayIsSpecialDay,
-        cfg.SaturdayIsSpecialDay,
         cfg.IsFridayCritical,    // ★ NEW
         cfg.IsSaturdayCritical,  // ★ NEW
         cfg.UpdatedAt,
@@ -1302,32 +1275,12 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
         cfg.CriticalDaysOfMonth
     );
 
-    // ── special-day helpers ───────────────────────────────────────────────────
-
-    private static bool IsSpecialDay(DateOnly date, Company2ValidationConfig cfg)
-    {
-        return date.DayOfWeek switch
-        {
-            DayOfWeek.Sunday => cfg.SundayIsSpecialDay,
-            DayOfWeek.Monday => cfg.MondayIsSpecialDay,
-            DayOfWeek.Tuesday => cfg.TuesdayIsSpecialDay,
-            DayOfWeek.Wednesday => cfg.WednesdayIsSpecialDay,
-            DayOfWeek.Thursday => cfg.ThursdayIsSpecialDay,
-            DayOfWeek.Friday => cfg.FridayIsSpecialDay,
-            DayOfWeek.Saturday => cfg.SaturdayIsSpecialDay,
-            _ => false
-        };
-    }
 
     /// <summary>Counts calendar days in [start, end] that are NOT special/off days.</summary>
     private static int CountExpectedWorkingDays(
         DateOnly start, DateOnly end, Company2ValidationConfig cfg)
     {
-        int count = 0;
-        for (var d = start; d <= end; d = d.AddDays(1))
-            if (!IsSpecialDay(d, cfg))
-                count++;
-        return count;
+        return end.DayNumber - start.DayNumber + 1;
     }
 
     // ── allowed missing days from config ─────────────────────────────────────
@@ -1436,20 +1389,6 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
         {
             var dayNum = d.Day;
 
-            // Skip special (off) days entirely – not counted as present or absent
-            if (IsSpecialDay(d, cfg))
-            {
-                dailyDetails.Add(new DailyValidationDetail(
-                    Day: dayNum,
-                    Date: d,
-                    HasShift: false,
-                    WorkingHours: 0,
-                    AcceptedOrders: 0,
-                    IsValid: true,
-                    Reason: $"🏖️ Special / off day ({d.DayOfWeek})"
-                ));
-                continue;
-            }
 
             // Determine whether today is a critical day
             var isDayCritical = IsCriticalDay(d, actualStartDay, currentDayOfMonth, lastDayOfMonth, cfg);
