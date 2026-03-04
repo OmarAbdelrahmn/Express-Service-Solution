@@ -1858,7 +1858,68 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
     }
     #endregion
 
+    public async Task<Result<IEnumerable<VehicleHistoryDto>>> GetVehicleHistoryByIqamaAsync(long iqamaNo)
+    {
+        try
+        {
+            var riderExists = await dbcontext.RiderDetails
+                .AnyAsync(r => r.EmployeeIqamaNo == iqamaNo);
 
+            if (!riderExists)
+                return Result.Failure<IEnumerable<VehicleHistoryDto>>(
+                    new Error("NoRider", $"No rider found with IqamaNo {iqamaNo}", 404));
+
+            var history = await dbcontext.RiderVehicleStatus
+                .Where(s => s.EmployeeIqamaNo == iqamaNo)
+                .OrderByDescending(s => s.Timestamp)
+                .ToListAsync();
+
+            if (!history.Any())
+                return Result.Failure<IEnumerable<VehicleHistoryDto>>(
+                    new Error("NoHistory", "No vehicle history found for this rider", 404));
+
+            var rider = await dbcontext.RiderDetails
+                .Include(r => r.Employee)
+                .FirstOrDefaultAsync(r => r.EmployeeIqamaNo == iqamaNo);
+
+            var historyDtos = new List<VehicleHistoryDto>();
+
+            foreach (var item in history)
+            {
+                var vehicle = await dbcontext.Vehicles
+                    .FirstOrDefaultAsync(v => v.VehicleNumber == item.VehicleNumber);
+
+                historyDtos.Add(new VehicleHistoryDto
+                {
+                    Id = item.Id,
+                    VehicleNumber = item.VehicleNumber,
+                    SerialNumber = vehicle?.SerialNumber ?? 0,
+                    PlateNumberA = vehicle?.PlateNumberA ?? string.Empty,
+                    PlateNumberE = vehicle?.PlateNumberE ?? string.Empty,
+                    OwnerId = vehicle?.OwnerId ?? 0,
+                    OwnerName = vehicle?.OwnerName ?? string.Empty,
+                    ManufactureYear = vehicle?.ManufactureYear ?? 0,
+                    Manufacturer = vehicle?.Manufacturer ?? string.Empty,
+                    EmployeeIqamaNo = iqamaNo,
+                    RiderName = rider?.Employee.NameAR ?? "N/A",
+                    RiderNameE = rider?.Employee.NameEN ?? "N/A",
+                    Location = vehicle?.Location ?? string.Empty,
+                    StatusType = item.StatusType,
+                    StatusTypeDisplay = item.StatusType.ToString(),
+                    Reason = item.Reason ?? "no reason",
+                    Timestamp = item.Timestamp,
+                    IsActive = item.IsActive
+                });
+            }
+
+            return Result.Success<IEnumerable<VehicleHistoryDto>>(historyDtos);
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<IEnumerable<VehicleHistoryDto>>(
+                new Error("HistoryError", $"Failed to retrieve history: {ex.Message}", 500));
+        }
+    }
     public async Task<Result<IEnumerable<VehicleWithRiderDto>>> GetAllVehiclesRidersAsync()
     {
         try

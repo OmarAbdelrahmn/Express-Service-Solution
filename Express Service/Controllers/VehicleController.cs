@@ -23,6 +23,14 @@ public class VehicleController(IVehicleService service) : ControllerBase
     //        : result.ToProblem();
     //}
 
+    [HttpGet("rider-history/{iqamaNo:long}")]
+    [Authorize(Roles = "Master,Admin,Member")]
+    public async Task<IActionResult> GetVehicleHistoryByIqama([FromRoute] long iqamaNo)
+    {
+        var result = await _service.GetVehicleHistoryByIqamaAsync(iqamaNo);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
 
     [HttpPost("switch")]
     [Authorize(Roles = "Master,Admin")]

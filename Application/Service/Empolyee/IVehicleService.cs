@@ -6,6 +6,7 @@ namespace Application.Service.Empolyee;
 
 public interface IVehicleService
 {
+    Task<Result<IEnumerable<VehicleHistoryDto>>> GetVehicleHistoryByIqamaAsync(long iqamaNo);
     Task<Result<IEnumerable<VehicleResponse>>> GetAllEmployee();
     Task<Result<IEnumerable<VehicleResponse>>> Get(string VehicleNumber);
     Task<Result<IEnumerable<VehicleResponse>>> Getplate(string PlateNumberA);
