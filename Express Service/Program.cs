@@ -1,4 +1,6 @@
+using Application.Service.DailyReport;
 using Express_Service;
+using Hangfire;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -38,6 +40,21 @@ app.UseSwaggerUI(c =>
     c.DocExpansion(Swashbuckle.AspNetCore.SwaggerUI.DocExpansion.None);
 });
 //}
+
+app.UseHangfireDashboard("/job", new DashboardOptions
+{
+    // Remove this line in production or add auth filter
+    Authorization = [new Hangfire.Dashboard.LocalRequestsOnlyAuthorizationFilter()]
+});
+
+RecurringJob.AddOrUpdate<IDailyReportJob>(
+    "daily-rider-report",
+    x => x.RunAsync(null),
+    "0 17 * * *",
+    new RecurringJobOptions
+    {
+        TimeZone = TimeZoneInfo.FindSystemTimeZoneById("Arab Standard Time")
+    });
 
 app.UseResponseCaching();
 

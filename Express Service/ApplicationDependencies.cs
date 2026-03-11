@@ -3,6 +3,7 @@ using Application.Roles;
 using Application.Service.Admin;
 using Application.Service.Auth;
 using Application.Service.Backgroundimports;
+using Application.Service.DailyReport;
 using Application.Service.DE;
 using Application.Service.Empolyee;
 using Application.Service.Freelancer;
@@ -24,6 +25,7 @@ using Application.Service.User;
 using Domain;
 using Domain.Entities;
 using FluentValidation;
+using Hangfire;
 using Mapster;
 using MapsterMapper;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -72,6 +74,27 @@ public static class ApplicationDependencies
         Services.AddScoped<IHungerReportService, HungerReportService>();
 
 
+        #region Hnagfire + Daily Report Job
+        // ── Hangfire ────────────────────────────────────────────────────────────────
+        Services.AddHangfire(config =>
+            config
+                .SetDataCompatibilityLevel(CompatibilityLevel.Version_180)
+                .UseSimpleAssemblyNameTypeSerializer()
+                .UseRecommendedSerializerSettings()
+                .UseSqlServerStorage(configuration.GetConnectionString("DefaultConnection")));
+
+        Services.AddHangfireServer(options =>
+        {
+            options.WorkerCount = 2;          // keep low — this isn't a heavy workload
+            options.Queues = ["daily-reports", "default"];
+        });
+
+        // ── Daily Report Services ────────────────────────────────────────────────────
+        Services.Configure<DailyReportSettings>(configuration.GetSection("DailyReport"));
+        Services.AddScoped<IDailyReportJob, DailyReportJob>();
+        Services.AddScoped<IDailyReportEmailSender, DailyReportEmailSender>();
+
+#endregion
 
         Services.AddAuth(configuration)
                 .AddMappester()
