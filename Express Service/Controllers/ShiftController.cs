@@ -79,14 +79,14 @@ public class ShiftController(IRiderShiftService service) : ControllerBase
     }
 
     [HttpPost("import")]
-    public async Task<IActionResult> ImportShiftsFromExcelAsync(IFormFile excelFile, [FromQuery] DateOnly ShiftDate)
+    public async Task<IActionResult> ImportShiftsFromExcelAsync(IFormFile excelFile, [FromQuery] DateOnly ShiftDate, [FromQuery] int CompanyId)
     {
         if (excelFile == null || excelFile.Length == 0)
         {
             return BadRequest("No file uploaded.");
         }
         using var stream = excelFile.OpenReadStream();
-        var result = await service.ImportShiftsFromExcelAsync(stream, ShiftDate);
+        var result = await service.ImportShiftsFromExcelAsync(stream, ShiftDate,CompanyId);
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
 

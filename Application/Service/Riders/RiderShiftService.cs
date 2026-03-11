@@ -119,6 +119,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext, IRiderWorkingIdHi
     public async Task<Result<BulkImportResult>> ImportShiftsFromExcelAsync(
         Stream excelStream,
         DateOnly shiftDate,
+        int CompanyId,
         int rejectionThreshold = 2,
         CancellationToken cancellationToken = default)
     {
@@ -223,7 +224,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext, IRiderWorkingIdHi
                         StackedDeliveries = shiftData.StackedDeliveries.GetValueOrDefault(),
                         HousingId = riderWhoWorked.Employee.HousingId,
                         WorkingHours = shiftData.WorkingHours!.Value,
-                        CompanyId = riderWhoWorked.CompanyId,
+                        CompanyId = CompanyId,
                         ShiftStatus = shiftStatus,
                         CreatedAt = DateTime.UtcNow.AddHours(3),
                         Rider = null
@@ -1262,8 +1263,8 @@ public class RiderShiftService(ApplicationDbcontext dbcontext, IRiderWorkingIdHi
     }
 
     public async Task<Result<RiderShiftResponse>> UpdateShiftAsync(
-        UpdateRiderShiftRequest request,
-        CancellationToken cancellationToken = default)
+     UpdateRiderShiftRequest request,
+     CancellationToken cancellationToken = default)
     {
         using var transaction = await dbcontext.Database.BeginTransactionAsync(cancellationToken);
 
@@ -1276,38 +1277,90 @@ public class RiderShiftService(ApplicationDbcontext dbcontext, IRiderWorkingIdHi
                     .ThenInclude(r => r.Employee)
                 .Include(s => s.Rider)
                     .ThenInclude(r => r.Company)
-                .FirstOrDefaultAsync(s => s.RiderId == riderId &&
-                                         s.WorkingId == request.WorkingId &&
-                                         s.ShiftDate == request.ShiftDate,
-                                    cancellationToken);
+                .Include(s => s.Company)      // ← was missing; needed by MapToResponse
+                .Include(s => s.Housing)      // ← needed for HousingId round-trip
+                .FirstOrDefaultAsync(s =>
+                    s.RiderId == riderId &&
+                    s.WorkingId == request.WorkingId &&
+                    s.ShiftDate == request.ShiftDate,
+                    cancellationToken);
 
             if (shift is null)
                 return Result.Failure<RiderShiftResponse>(
                     new Error("NotFound", "Shift not found", 404));
 
+            // ── Numeric order fields ────────────────────────────────────────────
             if (request.AcceptedDailyOrders.HasValue)
                 shift.AcceptedDailyOrders = request.AcceptedDailyOrders.Value;
 
             if (request.RejectedDailyOrders.HasValue)
                 shift.RejectedDailyOrders = request.RejectedDailyOrders.Value;
 
-            if (request.RejectedDailyOrders.HasValue)
+            // RealRejectedDailyOrders: honour explicit value from caller,
+            // otherwise recalculate from the (possibly updated) RejectedDailyOrders.
+            if (request.RealRejectedDailyOrders.HasValue)
+            {
+                shift.RealRejectedDailyOrders = request.RealRejectedDailyOrders.Value;
+            }
+            else if (request.RejectedDailyOrders.HasValue)
             {
                 const int rejectionThreshold = 2;
-                shift.RealRejectedDailyOrders = Math.Max(0, shift.RejectedDailyOrders - rejectionThreshold);
+                shift.RealRejectedDailyOrders =
+                    Math.Max(0, shift.RejectedDailyOrders - rejectionThreshold);
             }
 
-            if (request.WorkingHours.HasValue)
-                shift.WorkingHours = request.WorkingHours.Value;
             if (request.StackedDeliveries.HasValue)
                 shift.StackedDeliveries = request.StackedDeliveries.Value;
 
+            if (request.WorkingHours.HasValue)
+                shift.WorkingHours = request.WorkingHours.Value;
 
-            var newStatus = CalculateShiftStatus(
-                shift.AcceptedDailyOrders,
-                shift.Rider.Company.Name);
+            // ── Company ─────────────────────────────────────────────────────────
+            if (request.CompanyId.HasValue)
+            {
+                var company = await dbcontext.Set<Company>()
+                    .FirstOrDefaultAsync(c => c.Id == request.CompanyId.Value, cancellationToken);
 
-            shift.ShiftStatus = newStatus.ToString();
+                if (company is null)
+                    return Result.Failure<RiderShiftResponse>(
+                        new Error("NotFound",
+                            $"Company with ID {request.CompanyId.Value} not found", 404));
+
+                shift.CompanyId = request.CompanyId.Value;
+                shift.Company = company; // keep nav-prop in sync for MapToResponse below
+            }
+
+            // ── Housing ──────────────────────────────────────────────────────────
+            if (request.HousingId.HasValue)
+            {
+                // Allow clearing housing by passing 0
+                if (request.HousingId.Value == 0)
+                {
+                    shift.HousingId = null;
+                    shift.Housing = null;
+                }
+                else
+                {
+                    var housing = await dbcontext.Set<Housing>()
+                        .FirstOrDefaultAsync(h => h.Id == request.HousingId.Value, cancellationToken);
+
+                    if (housing is null)
+                        return Result.Failure<RiderShiftResponse>(
+                            new Error("NotFound",
+                                $"Housing with ID {request.HousingId.Value} not found", 404));
+
+                    shift.HousingId = request.HousingId.Value;
+                    shift.Housing = housing;
+                }
+            }
+
+            // ── Recalculate status using the effective company name ──────────────
+            // After a possible CompanyId change, shift.Company is already updated above.
+            var effectiveCompanyName = shift.Company?.Name
+                                       ?? shift.Rider?.Company?.Name
+                                       ?? string.Empty;
+
+            shift.ShiftStatus = CalculateShiftStatus(shift.AcceptedDailyOrders, effectiveCompanyName);
 
             await dbcontext.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);

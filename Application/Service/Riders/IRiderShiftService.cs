@@ -24,7 +24,7 @@ public interface IRiderShiftService
     Task<Result<BulkDeleteResult>> DeleteShiftsByDateRangeAsync(DateOnly startDate, DateOnly endDate, CancellationToken cancellationToken = default);
     Task<Result<BulkDeleteResult>> DeleteShiftsByRiderAndDateRangeAsync(string WorkingId, DateOnly startDate, DateOnly endDate, CancellationToken cancellationToken = default);
     Task<Result<BulkComparisonResult>> CreateShiftComparisonsAsync(Stream excelStream, DateOnly shiftDate, int rejectionThreshold = 2, CancellationToken cancellationToken = default);
-    Task<Result<BulkImportResult>> ImportShiftsFromExcelAsync(Stream excelStream, DateOnly shiftDate, int rejectionThreshold = 2, CancellationToken cancellationToken = default);
+    Task<Result<BulkImportResult>> ImportShiftsFromExcelAsync(Stream excelStream, DateOnly shiftDate,int CompanyId, int rejectionThreshold = 2, CancellationToken cancellationToken = default);
     Task<Result<ResolutionResult>> ResolveShiftComparisonsAsync(ResolveComparisonsRequest request, CancellationToken cancellationToken = default);
     Task<Result<BulkComparisonResult>> GetPendingComparisonsAsync(DateOnly shiftDate, CancellationToken cancellationToken = default);
     // Add these methods to IRiderShiftService interface
@@ -87,7 +87,9 @@ public record UpdateRiderShiftRequest(
     int? RejectedDailyOrders,
     int? StackedDeliveries,
     int? RealRejectedDailyOrders,
-    float? WorkingHours
+    float? WorkingHours,
+    int? CompanyId,
+    int? HousingId
 );
 
 public record RiderShiftResponse(
