@@ -7,6 +7,7 @@ using Application.Service.DE;
 using Application.Service.Empolyee;
 using Application.Service.Freelancer;
 using Application.Service.Hungerdisa;
+using Application.Service.HungerReports;
 using Application.Service.Import;
 using Application.Service.KetaValidation;
 using Application.Service.Member;
@@ -68,6 +69,7 @@ public static class ApplicationDependencies
         Services.AddScoped<IReturnService, ReturnService>();
         Services.AddScoped<IFreelancerService, FreelancerService>();
         Services.AddScoped<IMonthlyValidityService, MonthlyValidityService>();
+        Services.AddScoped<IHungerReportService, HungerReportService>();
 
 
 

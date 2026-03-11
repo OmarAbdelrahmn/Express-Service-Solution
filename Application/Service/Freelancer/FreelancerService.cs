@@ -10,8 +10,6 @@ namespace Application.Service.Freelancer;
 
 public class FreelancerService(ApplicationDbcontext dbcontext) : IFreelancerService
 {
-
-
     public async Task<Result<KetaFreelancerImportResponse>> ImportKetaFreelancersFromExcelAsync(
         IFormFile file,
         string uploadedBy,
@@ -81,7 +79,7 @@ public class FreelancerService(ApplicationDbcontext dbcontext) : IFreelancerServ
                     new Error("EmptyFile", "No data rows found in Excel file", 400));
             }
 
-            // Group by WorkingId and Month to calculate total orders
+            // ── Pass 1: Count orders per WorkingId + Month ────────────────────────
             var freelancerData = new Dictionary<string, KetaFreelancerRowData>();
             var rowNumber = headerRow.RowNumber();
 
@@ -97,24 +95,15 @@ public class FreelancerService(ApplicationDbcontext dbcontext) : IFreelancerServ
                     {
                         failedRecords++;
                         results.Add(new KetaFreelancerImportRowResult(
-                        rowNumber,
-                        false,
-                        "N/A",
-                        "N/A",
-                        "N/A",
-                        0,
-                        "N/A",
-                        "N/A",
-                        0,
-                        false,
-                        false,
-                        new List<string>(),
-                        $"Exception: {rowData.ErrorMessage}"
-                    ));
+                            rowNumber, false,
+                            "N/A", "N/A", "N/A",
+                            0, "N/A", "N/A", 0,
+                            false, false, [],
+                            $"Parse error: {rowData.ErrorMessage}"
+                        ));
                         continue;
                     }
 
-                    // Create unique key for WorkingId + Month combination
                     var key = $"{rowData.WorkingId}_{rowData.Month}";
 
                     if (!freelancerData.ContainsKey(key))
@@ -138,18 +127,10 @@ public class FreelancerService(ApplicationDbcontext dbcontext) : IFreelancerServ
                     errors.Add($"Row {rowNumber}: {ex.Message}");
 
                     results.Add(new KetaFreelancerImportRowResult(
-                        rowNumber,
-                        false,
-                        "N/A",
-                        "N/A",
-                        "N/A",
-                        0,
-                        "N/A",
-                        "N/A",
-                        0,
-                        false,
-                        false,
-                        new List<string>(),
+                        rowNumber, false,
+                        "N/A", "N/A", "N/A",
+                        0, "N/A", "N/A", 0,
+                        false, false, [],
                         $"Exception: {ex.Message}"
                     ));
                 }
@@ -157,10 +138,90 @@ public class FreelancerService(ApplicationDbcontext dbcontext) : IFreelancerServ
 
             Console.WriteLine($"[KetaFreelancer] Unique WorkingId+Month combinations: {freelancerData.Count}");
 
-            // Process each unique WorkingId + Month combination
-            int processedRow = headerRow.RowNumber() + 1;
+            // ── Pass 2: Resolve each WorkingId → RiderId, merge same rider+month ──
+            var resolvedData = new Dictionary<string, KetaFreelancerResolvedData>();
 
             foreach (var kvp in freelancerData)
+            {
+                var data = kvp.Value;
+
+                // 1) Try current RiderDetails
+                var rider = await dbcontext.RiderDetails
+                    .Include(r => r.Employee)
+                        .ThenInclude(e => e.Housing)
+                    .FirstOrDefaultAsync(r => r.WorkingId == data.WorkingId, cancellationToken);
+
+                // 2) Fallback: most recent RiderWorkingIdHistory entry for this WorkingId
+                if (rider == null)
+                {
+                    Console.WriteLine($"[KetaFreelancer] '{data.WorkingId}' not in RiderDetails, checking history...");
+
+                    var history = await dbcontext.RiderWorkingIdHistories
+                        .Where(h => h.WorkingId == data.WorkingId)
+                        .OrderByDescending(h => h.StartDate)
+                        .FirstOrDefaultAsync(cancellationToken);
+
+                    if (history != null)
+                    {
+                        rider = await dbcontext.RiderDetails
+                            .Include(r => r.Employee)
+                                .ThenInclude(e => e.Housing)
+                            .FirstOrDefaultAsync(r => r.EmployeeIqamaNo == history.RiderIqamaNo, cancellationToken);
+
+                        if (rider != null)
+                            Console.WriteLine($"[KetaFreelancer] Resolved '{data.WorkingId}' via history → RiderId {rider.Id}");
+                    }
+                }
+
+                // 3) Still not found → mark unresolved
+                if (rider == null)
+                {
+                    Console.WriteLine($"[KetaFreelancer] Could not resolve WorkingId '{data.WorkingId}'");
+
+                    var unresolvedKey = $"UNRESOLVED_{data.WorkingId}_{data.Month}";
+                    resolvedData[unresolvedKey] = new KetaFreelancerResolvedData
+                    {
+                        Month = data.Month!,
+                        TotalOrders = data.TotalOrders,
+                        WorkingIds = [data.WorkingId!],
+                        IsUnresolved = true,
+                        UnresolvedWorkingId = data.WorkingId
+                    };
+                    continue;
+                }
+
+                // 4) Resolved → merge into RiderId+Month bucket (handles two WorkingIds same rider)
+                var resolvedKey = $"{rider.Id}_{data.Month}";
+
+                if (!resolvedData.ContainsKey(resolvedKey))
+                {
+                    resolvedData[resolvedKey] = new KetaFreelancerResolvedData
+                    {
+                        RiderId = rider.Id,
+                        Rider = rider,
+                        Month = data.Month!,
+                        TotalOrders = data.TotalOrders,
+                        WorkingIds = [data.WorkingId!],
+                        IsUnresolved = false
+                    };
+                }
+                else
+                {
+                    // Same rider appeared under a different WorkingId in the same month → sum orders
+                    resolvedData[resolvedKey].TotalOrders += data.TotalOrders;
+                    resolvedData[resolvedKey].WorkingIds.Add(data.WorkingId!);
+                    Console.WriteLine(
+                        $"[KetaFreelancer] Merged WorkingId '{data.WorkingId}' into RiderId {rider.Id} " +
+                        $"for {data.Month} → new total: {resolvedData[resolvedKey].TotalOrders}");
+                }
+            }
+
+            Console.WriteLine($"[KetaFreelancer] Resolved buckets (unique rider+month): {resolvedData.Count}");
+
+            // ── Pass 3: Persist each resolved bucket ─────────────────────────────
+            int processedRow = headerRow.RowNumber() + 1;
+
+            foreach (var kvp in resolvedData)
             {
                 using var transaction = await dbcontext.Database.BeginTransactionAsync(cancellationToken);
 
@@ -169,31 +230,19 @@ public class FreelancerService(ApplicationDbcontext dbcontext) : IFreelancerServ
                     var data = kvp.Value;
                     var warnings = new List<string>();
 
-                    // Find the rider by WorkingId
-                    var rider = await dbcontext.RiderDetails
-                        .Include(r => r.Employee)
-                            .ThenInclude(e => e.Housing)
-                        .FirstOrDefaultAsync(r => r.WorkingId == data.WorkingId, cancellationToken);
-
-                    if (rider == null)
+                    // Handle unresolved WorkingIds
+                    if (data.IsUnresolved)
                     {
                         failedRecords++;
-                        errors.Add($"WorkingId {data.WorkingId} not found in RiderDetails");
+                        errors.Add($"WorkingId '{data.UnresolvedWorkingId}' not found in RiderDetails or history");
 
                         results.Add(new KetaFreelancerImportRowResult(
-                            processedRow,
-                            false,
-                            data.WorkingId!,
-                            "N/A",
-                            "N/A",
-                            null,
-                            null,
-                            data.Month!,
-                            data.TotalOrders,
-                            false,
-                            false,
-                            new List<string>(),
-                            $"Rider with WorkingId '{data.WorkingId}' not found"
+                            processedRow, false,
+                            data.UnresolvedWorkingId!, "N/A", "N/A",
+                            null, null,
+                            data.Month, data.TotalOrders,
+                            false, false, [],
+                            $"Rider with WorkingId '{data.UnresolvedWorkingId}' not found in RiderDetails or WorkingId history"
                         ));
 
                         await transaction.RollbackAsync(cancellationToken);
@@ -201,7 +250,18 @@ public class FreelancerService(ApplicationDbcontext dbcontext) : IFreelancerServ
                         continue;
                     }
 
-                    // Check if record already exists
+                    var rider = data.Rider;
+
+                    // Warn when orders were merged from multiple WorkingIds
+                    if (data.WorkingIds.Count > 1)
+                        warnings.Add(
+                            $"Orders merged from multiple WorkingIds: {string.Join(", ", data.WorkingIds)} " +
+                            $"→ summed total: {data.TotalOrders}");
+
+                    // Store the most recently merged WorkingId as the primary one
+                    var primaryWorkingId = data.WorkingIds.Last();
+
+                    // Check if a record already exists for this rider + month
                     var existing = await dbcontext.KetaFreeLancers
                         .FirstOrDefaultAsync(k =>
                             k.RiderId == rider.Id &&
@@ -213,12 +273,11 @@ public class FreelancerService(ApplicationDbcontext dbcontext) : IFreelancerServ
 
                     if (existing == null)
                     {
-                        // Create new record
                         var ketaFreelancer = new KetaFreeLancer
                         {
                             RiderId = rider.Id,
-                            WorkingId = data.WorkingId!,
-                            Month = data.Month!,
+                            WorkingId = primaryWorkingId,
+                            Month = data.Month,
                             TotalOrders = data.TotalOrders,
                             CreatedAt = DateTime.UtcNow.AddHours(3)
                         };
@@ -229,55 +288,49 @@ public class FreelancerService(ApplicationDbcontext dbcontext) : IFreelancerServ
                     }
                     else
                     {
-                        // Update existing record
                         var oldTotalOrders = existing.TotalOrders;
                         existing.TotalOrders = data.TotalOrders;
+                        existing.WorkingId = primaryWorkingId;
 
                         updated = true;
                         successfulImports++;
-                        warnings.Add($"Updated existing record - old total: {oldTotalOrders}, new total: {data.TotalOrders}");
+                        warnings.Add($"Updated existing record — old total: {oldTotalOrders}, new total: {data.TotalOrders}");
                     }
 
                     await dbcontext.SaveChangesAsync(cancellationToken);
                     await transaction.CommitAsync(cancellationToken);
 
                     results.Add(new KetaFreelancerImportRowResult(
-                        processedRow,
-                        true,
-                        data.WorkingId!,
+                        processedRow, true,
+                        string.Join(" + ", data.WorkingIds),
                         rider.Employee.NameEN,
                         rider.Employee.NameAR,
                         rider.Employee.IqamaNo,
                         rider.Employee.Housing?.Name,
-                        data.Month!,
+                        data.Month,
                         data.TotalOrders,
-                        created,
-                        updated,
+                        created, updated,
                         warnings,
                         null
                     ));
 
-                    Console.WriteLine($"[KetaFreelancer] ✓ Processed {data.WorkingId} ({rider.Employee.NameEN}) for {data.Month} - Total Orders: {data.TotalOrders}");
+                    Console.WriteLine(
+                        $"[KetaFreelancer] ✓ RiderId {rider.Id} ({rider.Employee.NameEN}) | " +
+                        $"Month: {data.Month} | WorkingIds: {string.Join("+", data.WorkingIds)} | " +
+                        $"Orders: {data.TotalOrders}");
                 }
                 catch (Exception ex)
                 {
                     await transaction.RollbackAsync(cancellationToken);
                     failedRecords++;
-                    errors.Add($"WorkingId {kvp.Value.WorkingId}, Month {kvp.Value.Month}: {ex.Message}");
+                    errors.Add($"RiderId {kvp.Value.RiderId}, Month {kvp.Value.Month}: {ex.Message}");
 
                     results.Add(new KetaFreelancerImportRowResult(
-                        processedRow,
-                        false,
-                        kvp.Value.WorkingId ?? "N/A",
-                        "N/A",
-                        "N/A",
-                        null,
-                        null,
-                        kvp.Value.Month ?? "N/A",
-                        kvp.Value.TotalOrders,
-                        false,
-                        false,
-                        new List<string>(),
+                        processedRow, false,
+                        string.Join("+", kvp.Value.WorkingIds),
+                        "N/A", "N/A", null, null,
+                        kvp.Value.Month, kvp.Value.TotalOrders,
+                        false, false, [],
                         $"Exception: {ex.Message}"
                     ));
                 }
@@ -286,10 +339,10 @@ public class FreelancerService(ApplicationDbcontext dbcontext) : IFreelancerServ
             }
 
             Console.WriteLine($"[KetaFreelancer] Import complete:");
-            Console.WriteLine($"  - Total Excel Rows: {totalRows}");
-            Console.WriteLine($"  - Unique Records: {freelancerData.Count}");
-            Console.WriteLine($"  - Successful: {successfulImports}");
-            Console.WriteLine($"  - Failed: {failedRecords}");
+            Console.WriteLine($"  - Total Excel Rows : {totalRows}");
+            Console.WriteLine($"  - Unique Records   : {resolvedData.Count}");
+            Console.WriteLine($"  - Successful       : {successfulImports}");
+            Console.WriteLine($"  - Failed           : {failedRecords}");
 
             var response = new KetaFreelancerImportResponse(
                 totalRows,
@@ -316,7 +369,6 @@ public class FreelancerService(ApplicationDbcontext dbcontext) : IFreelancerServ
     {
         try
         {
-            // Validate month format (yyyy-MM)
             if (!IsValidMonthFormat(month))
             {
                 return Result.Failure<IEnumerable<KetaFreelancerResponse>>(
@@ -442,10 +494,8 @@ public class FreelancerService(ApplicationDbcontext dbcontext) : IFreelancerServ
                 if (string.IsNullOrWhiteSpace(headerValue)) continue;
 
                 foreach (var name in possibleNames)
-                {
                     if (headerValue.Equals(name, StringComparison.OrdinalIgnoreCase))
                         return cell.Address.ColumnNumber;
-                }
 
                 string headerNoSpaces = headerValue.Replace(" ", "");
                 foreach (var name in possibleNames)
@@ -456,10 +506,8 @@ public class FreelancerService(ApplicationDbcontext dbcontext) : IFreelancerServ
                 }
 
                 foreach (var name in possibleNames)
-                {
                     if (headerValue.Contains(name, StringComparison.OrdinalIgnoreCase))
                         return cell.Address.ColumnNumber;
-                }
             }
             catch { }
         }
@@ -476,7 +524,6 @@ public class FreelancerService(ApplicationDbcontext dbcontext) : IFreelancerServ
 
         try
         {
-            // Parse WorkingId
             data.WorkingId = GetCellValue(row, map.WorkingIdCol)?.Trim();
             if (string.IsNullOrWhiteSpace(data.WorkingId))
             {
@@ -485,7 +532,6 @@ public class FreelancerService(ApplicationDbcontext dbcontext) : IFreelancerServ
                 return data;
             }
 
-            // Parse Month
             var monthStr = GetCellValue(row, map.MonthCol)?.Trim();
             if (string.IsNullOrWhiteSpace(monthStr))
             {
@@ -494,7 +540,6 @@ public class FreelancerService(ApplicationDbcontext dbcontext) : IFreelancerServ
                 return data;
             }
 
-            // Validate and normalize month format (yyyy-MM)
             data.Month = NormalizeMonthFormat(monthStr);
             if (string.IsNullOrWhiteSpace(data.Month))
             {
@@ -524,37 +569,24 @@ public class FreelancerService(ApplicationDbcontext dbcontext) : IFreelancerServ
             if (cell.IsEmpty()) return null;
 
             if (cell.IsMerged())
-            {
                 cell = cell.MergedRange().FirstCell();
-            }
 
             if (cell.DataType == XLDataType.Number)
             {
                 var numValue = cell.GetDouble();
-                if (numValue == Math.Floor(numValue))
-                {
-                    return ((long)numValue).ToString();
-                }
-                return numValue.ToString();
+                return numValue == Math.Floor(numValue)
+                    ? ((long)numValue).ToString()
+                    : numValue.ToString();
             }
 
             if (cell.DataType == XLDataType.DateTime)
             {
-                try
-                {
-                    var dateTime = cell.GetDateTime();
-                    return dateTime.ToString("yyyy-MM");
-                }
-                catch
-                {
-                    return cell.GetText().Trim();
-                }
+                try { return cell.GetDateTime().ToString("yyyy-MM"); }
+                catch { return cell.GetText().Trim(); }
             }
 
             if (cell.DataType == XLDataType.Text)
-            {
                 return cell.GetText().Trim();
-            }
 
             return cell.Value.ToString()?.Trim();
         }
@@ -572,39 +604,23 @@ public class FreelancerService(ApplicationDbcontext dbcontext) : IFreelancerServ
 
         monthStr = monthStr.Trim();
 
-        // Already in correct format (yyyy-MM)
         if (System.Text.RegularExpressions.Regex.IsMatch(monthStr, @"^\d{4}-\d{2}$"))
-        {
             return monthStr;
-        }
 
-        // Try various date formats
-        string[] formats = {
-            "yyyy-MM",
-            "yyyy/MM",
-            "MM/yyyy",
-            "MM-yyyy",
-            "MMM yyyy",
-            "MMMM yyyy",
-            "yyyy-MM-dd",
-            "MM/dd/yyyy",
-            "dd/MM/yyyy"
+        string[] formats =
+        {
+            "yyyy-MM", "yyyy/MM", "MM/yyyy", "MM-yyyy",
+            "MMM yyyy", "MMMM yyyy",
+            "yyyy-MM-dd", "MM/dd/yyyy", "dd/MM/yyyy"
         };
 
         foreach (var format in formats)
-        {
             if (DateTime.TryParseExact(monthStr, format,
-                CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime date))
-            {
+                    CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime date))
                 return date.ToString("yyyy-MM");
-            }
-        }
 
-        // Try general parse
         if (DateTime.TryParse(monthStr, out DateTime generalDate))
-        {
             return generalDate.ToString("yyyy-MM");
-        }
 
         return null;
     }
@@ -638,5 +654,15 @@ public class FreelancerService(ApplicationDbcontext dbcontext) : IFreelancerServ
         public string? Month { get; set; }
         public int TotalOrders { get; set; }
     }
-}
 
+    internal class KetaFreelancerResolvedData
+    {
+        public int RiderId { get; set; }
+        public RiderDetails Rider { get; set; } = default!;
+        public string Month { get; set; } = string.Empty;
+        public int TotalOrders { get; set; }
+        public List<string> WorkingIds { get; set; } = [];
+        public bool IsUnresolved { get; set; }
+        public string? UnresolvedWorkingId { get; set; }
+    }
+}
