@@ -8,7 +8,7 @@ namespace Application.Service.DailyReport;
 
 public interface IDailyReportJob
 {
-    Task RunAsync(DateOnly? targetDate = null);
+    Task RunAsync(DateOnly? targetDate = null,bool forcedResend = false);
 }
 
 public class DailyReportJob(
@@ -17,24 +17,17 @@ public class DailyReportJob(
     ILogger<DailyReportJob> logger,
     IBackgroundJobClient hangfire) : IDailyReportJob
 {
-    public async Task RunAsync(DateOnly? targetDate = null)
+    public async Task RunAsync(DateOnly? targetDate = null, bool forceResend = false)
     {
-        // ── 1. Determine which date to report on ────────────────────────
         var reportDate = targetDate ?? DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3).AddDays(-1));
 
-        logger.LogInformation("DailyReportJob starting for date {Date}", reportDate);
+        logger.LogInformation("DailyReportJob starting for {Date}", reportDate);
 
-        // ── 2. Guard: already successfully sent? ────────────────────────
+        // ── Fetch log entry if exists (for retry count tracking only) ───────
         var log = await db.DailyReportLogs
             .FirstOrDefaultAsync(x => x.ReportDate == reportDate);
 
-        if (log?.IsSent == true)
-        {
-            logger.LogInformation("Report for {Date} already sent. Skipping.", reportDate);
-            return;
-        }
-
-        // ── 3. Fetch yesterday's shifts with all needed nav properties ──
+        // ── Fetch shifts ─────────────────────────────────────────────────────
         var shifts = await db.RiderShifts
             .AsNoTracking()
             .Include(s => s.Rider)
@@ -45,15 +38,22 @@ public class DailyReportJob(
             .Where(s => s.ShiftDate == reportDate)
             .ToListAsync();
 
-        // ── 4. Empty data → schedule a retry in 1 hour ─────────────────
-        if (shifts.Count == 0)
-        {
-            var retryCount = log?.RetryCount ?? 0;
-            logger.LogWarning(
-                "No shifts found for {Date}. Retry #{Count} scheduled in 1 hour.",
-                reportDate, retryCount + 1);
+        // ── Guard: data must exist for company 1 AND company 2 ───────────────────
+        var companyIds = shifts.Select(s => s.CompanyId).ToHashSet();
 
-            // Update / create the log entry with the retry count
+        var missing = new List<string>();
+        if (shifts.Count == 0 || !companyIds.Contains(1)) missing.Add("الشركة الأولى (ID: 1)");
+        if (shifts.Count == 0 || !companyIds.Contains(2)) missing.Add("الشركة الثانية (ID: 2)");
+
+        if (missing.Count > 0)
+        {
+            var missingNames = string.Join(" و ", missing);
+            var retryCount = log?.RetryCount ?? 0;
+
+            logger.LogWarning(
+                "No shifts found for {Missing} on {Date}. Retry #{Count} scheduled in 1 hour.",
+                missingNames, reportDate, retryCount + 1);
+
             if (log is null)
             {
                 db.DailyReportLogs.Add(new DailyReportLog
@@ -61,37 +61,35 @@ public class DailyReportJob(
                     ReportDate = reportDate,
                     IsSent = false,
                     RetryCount = 1,
-                    ErrorMessage = "No shifts found — waiting for data"
+                    ErrorMessage = $"لا توجد ورديات لـ {missingNames}"
                 });
             }
             else
             {
                 log.RetryCount++;
-                log.ErrorMessage = $"No shifts after {log.RetryCount} attempt(s)";
+                log.ErrorMessage = $"لا توجد ورديات لـ {missingNames} — بعد {log.RetryCount} محاولة/محاولات";
             }
 
             await db.SaveChangesAsync();
 
-            // Schedule the retry — pass the exact date so it doesn't shift by timezone
             hangfire.Schedule<IDailyReportJob>(
-                job => job.RunAsync(reportDate),
+                job => job.RunAsync(reportDate, false),
                 TimeSpan.FromHours(1));
 
             return;
         }
 
-        // ── 5. Build the report payload ─────────────────────────────────
+        // ── Build → PDF → Send → Log ─────────────────────────────────────────────
+
+        // ── Build → PDF → Send → Log ──────────────────────────────────────────
         try
         {
             var payload = BuildPayload(reportDate, shifts);
-
-            // ── 6. Generate PDF ────────────────────────────────────────
             var pdfBytes = DailyReportPdfGenerator.Generate(payload);
 
-            // ── 7. Send emails ─────────────────────────────────────────
             await emailSender.SendAsync(payload, pdfBytes);
 
-            // ── 8. Mark as sent ────────────────────────────────────────
+            // Always upsert the log — never block future sends
             if (log is null)
             {
                 db.DailyReportLogs.Add(new DailyReportLog
@@ -99,7 +97,7 @@ public class DailyReportJob(
                     ReportDate = reportDate,
                     IsSent = true,
                     SentAt = DateTime.UtcNow.AddHours(3),
-                    RetryCount = log?.RetryCount ?? 0
+                    RetryCount = 0
                 });
             }
             else
@@ -112,7 +110,7 @@ public class DailyReportJob(
             await db.SaveChangesAsync();
 
             logger.LogInformation(
-                "Daily report for {Date} sent successfully. Companies: {Count}, Shifts: {Total}",
+                "Daily report for {Date} sent. Companies: {C}, Shifts: {S}",
                 reportDate, payload.Companies.Count, payload.GrandTotalShifts);
         }
         catch (Exception ex)
@@ -134,38 +132,29 @@ public class DailyReportJob(
             }
 
             await db.SaveChangesAsync();
-            throw; // let Hangfire's own retry handle transient failures
+            throw;
         }
     }
 
-    // ── Payload builder ──────────────────────────────────────────────────────
+    // ── Payload builder ───────────────────────────────────────────────────────
     private static DailyReportPayload BuildPayload(DateOnly date, List<RiderShift> shifts)
     {
         var companies = new List<CompanyReportBlock>();
 
-        // Group by company
         var byCompany = shifts.GroupBy(s => new
         {
             s.CompanyId,
-            CompanyName = s.Rider?.Company?.Name ?? $"Company {s.CompanyId}"
+            CompanyName = s.Rider?.Company?.Name ?? $"شركة {s.CompanyId}"
         });
 
         foreach (var companyGroup in byCompany.OrderBy(c => c.Key.CompanyName))
         {
-            var ordered = companyGroup
+            var allRows = companyGroup
                 .OrderByDescending(s => s.AcceptedDailyOrders)
+                .Select(MapToRow)
                 .ToList();
 
-            var top5 = ordered.Take(5).ToList();
-            var bottom5 = ordered.TakeLast(5).ToList();
-
-            var combined = top5
-                .Select(s => MapToRow(s, "أعلى 5"))
-                .Concat(bottom5.Select(s => MapToRow(s, "أدنى 5")))
-                .ToList();
-
-            // Sub-group by housing
-            var byHousing = combined
+            var byHousing = allRows
                 .GroupBy(r => r.HousingName)
                 .OrderBy(g => g.Key)
                 .ToDictionary(
@@ -184,13 +173,12 @@ public class DailyReportJob(
             GrandTotalShifts: shifts.Count);
     }
 
-    private static ShiftReportRow MapToRow(RiderShift s, string section) =>
+    private static ShiftReportRow MapToRow(RiderShift s) =>
         new(
             RiderNameAR: s.Rider?.Employee?.NameAR ?? "—",
             IqamaNo: s.Rider?.EmployeeIqamaNo ?? 0,
-            HousingName: s.Housing?.Name ?? "No Housing",
+            HousingName: s.Housing?.Name ?? "بدون سكن",
             AcceptedOrders: s.AcceptedDailyOrders,
-            WorkingHours: s.WorkingHours,
-            Section: section
+            WorkingHours: s.WorkingHours
         );
 }

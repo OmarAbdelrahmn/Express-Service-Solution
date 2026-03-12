@@ -6,8 +6,7 @@ public record ShiftReportRow(
     long IqamaNo,
     string HousingName,
     int AcceptedOrders,
-    float WorkingHours,
-    string Section           // "Top 5" or "Bottom 5"
+    float WorkingHours
 );
 
 // Per-company block

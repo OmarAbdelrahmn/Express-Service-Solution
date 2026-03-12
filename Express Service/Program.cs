@@ -34,6 +34,14 @@ var app = builder.Build();
 // Configure the HTTP request pipeline.
 //if (app.Environment.IsDevelopment())
 //{
+
+QuestPDF.Drawing.FontManager.RegisterFont(
+    File.OpenRead(
+        Path.Combine(builder.Environment.WebRootPath, "Font", "ScheherazadeNew-Medium.ttf")
+    )
+);
+
+
 app.UseSwagger();
 app.UseSwaggerUI(c =>
 {
@@ -44,7 +52,7 @@ app.UseSwaggerUI(c =>
 app.UseHangfireDashboard("/job", new DashboardOptions
 {
     // Remove this line in production or add auth filter
-    Authorization = [new Hangfire.Dashboard.LocalRequestsOnlyAuthorizationFilter()]
+    Authorization = []
 });
 
 RecurringJob.AddOrUpdate<IDailyReportJob>(

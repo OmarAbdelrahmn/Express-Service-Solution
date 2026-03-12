@@ -16,10 +16,6 @@ public static class DailyReportPdfGenerator
             {
                 page.Size(PageSizes.A4.Landscape());
                 page.Margin(1.5f, Unit.Centimetre);
-
-                // Arabic requires a font that supports RTL — Scheherazade New is free on Google Fonts
-                // drop the .ttf into wwwroot/fonts/ and register it once at app startup:
-                // FontManager.RegisterFont(File.OpenRead("wwwroot/fonts/ScheherazadeNew-Regular.ttf"));
                 page.DefaultTextStyle(x =>
                     x.FontSize(10)
                      .FontFamily("Scheherazade New")
@@ -27,13 +23,7 @@ public static class DailyReportPdfGenerator
 
                 page.Header().Element(ComposeHeader(payload));
                 page.Content().Element(ComposeContent(payload));
-                page.Footer().AlignCenter().Text(x =>
-                {
-                    x.Span("صفحة ");
-                    x.CurrentPageNumber();
-                    x.Span(" من ");
-                    x.TotalPages();
-                });
+                page.Footer().Element(ComposeFooter());
             });
         }).GeneratePdf();
     }
@@ -59,9 +49,21 @@ public static class DailyReportPdfGenerator
                     .FontColor(Colors.Grey.Darken1);
 
                 col.Item()
-                    .PaddingTop(4)
+                    .PaddingTop(6)
                     .LineHorizontal(1)
                     .LineColor(Colors.Blue.Darken3);
+            });
+
+    // ── Footer ───────────────────────────────────────────────────────────────
+    private static Action<IContainer> ComposeFooter() =>
+        footer => footer
+            .AlignCenter()
+            .Text(x =>
+            {
+                x.Span("صفحة ");
+                x.CurrentPageNumber();
+                x.Span(" من ");
+                x.TotalPages();
             });
 
     // ── Content ──────────────────────────────────────────────────────────────
@@ -75,137 +77,212 @@ public static class DailyReportPdfGenerator
                     col.Item()
                         .PaddingTop(14)
                         .Background(Colors.Blue.Lighten4)
-                        .Padding(6)
-                        .AlignRight()
-                        .Text($"🏢  الشركة: {company.CompanyName}  —  عدد الورديات: {company.TotalShifts}")
-                        .SemiBold()
-                        .FontSize(12);
+                        .Padding(8)
+                        .Row(row =>
+                        {
+                            row.RelativeItem()
+                                .AlignRight()
+                                .Text($"🏢  الشركة: {company.CompanyName}")
+                                .SemiBold()
+                                .FontSize(12);
+
+                            row.ConstantItem(200)
+                                .AlignLeft()
+                                .Text($"إجمالي الورديات: {company.TotalShifts}")
+                                .FontSize(10)
+                                .FontColor(Colors.Blue.Darken3);
+                        });
 
                     foreach (var (housingName, rows) in company.RowsByHousing)
                     {
                         // ── Housing sub-header ───────────────────────────
                         col.Item()
-                            .PaddingTop(8)
-                            .PaddingHorizontal(10)
+                            .PaddingTop(10)
+                            .PaddingHorizontal(6)
                             .Background(Colors.Grey.Lighten3)
-                            .Padding(5)
-                            .AlignRight()
-                            .Text($"🏠  السكن: {housingName}")
-                            .SemiBold()
-                            .FontSize(10)
-                            .FontColor(Colors.Grey.Darken3);
+                            .Padding(6)
+                            .Row(row =>
+                            {
+                                row.RelativeItem()
+                                    .AlignRight()
+                                    .Text($"🏠  السكن: {housingName}")
+                                    .SemiBold()
+                                    .FontSize(10)
+                                    .FontColor(Colors.Grey.Darken3);
 
-                        // ── Section tables (أعلى 5 / أدنى 5) ────────────
-                        var sections = rows.GroupBy(r => r.Section);
+                                row.ConstantItem(180)
+                                    .AlignLeft()
+                                    .Text($"عدد الرُّكَّاب: {rows.Count}")
+                                    .FontSize(9)
+                                    .FontColor(Colors.Grey.Darken2);
+                            });
 
-                        foreach (var section in sections)
-                        {
-                            var isTop = section.Key == "أعلى 5";
-                            var labelClr = isTop ? Colors.Green.Darken2 : Colors.Red.Darken2;
-                            var headerBg = isTop ? Colors.Green.Darken2 : Colors.Red.Darken2;
-
-                            col.Item()
-                                .PaddingTop(6)
-                                .PaddingHorizontal(14)
-                                .AlignRight()
-                                .Text(section.Key)
-                                .Italic()
-                                .SemiBold()
-                                .FontSize(10)
-                                .FontColor(labelClr);
-
-                            col.Item()
-                                .PaddingHorizontal(10)
-                                .PaddingBottom(6)
-                                .Table(table =>
+                        // ── Riders table ─────────────────────────────────
+                        col.Item()
+                            .PaddingHorizontal(6)
+                            .PaddingBottom(8)
+                            .Table(table =>
+                            {
+                                // Columns — RTL: rightmost column defined first
+                                table.ColumnsDefinition(cols =>
                                 {
-                                    // Column widths — RTL order in the PDF
-                                    // (rightmost = first column visually)
-                                    table.ColumnsDefinition(cols =>
-                                    {
-                                        cols.RelativeColumn(1.5f);  // ساعات العمل
-                                        cols.RelativeColumn(1.5f);  // الطلبات
-                                        cols.RelativeColumn(2);     // السكن
-                                        cols.RelativeColumn(2);     // رقم الإقامة
-                                        cols.RelativeColumn(3);     // الاسم
-                                    });
+                                    cols.ConstantColumn(40);    // # (rank)
+                                    cols.RelativeColumn(3);     // اسم المندوب
+                                    cols.RelativeColumn(2);     // رقم الإقامة
+                                    cols.RelativeColumn(2);     // السكن
+                                    cols.RelativeColumn(1.5f);  // الطلبات
+                                    cols.RelativeColumn(1.5f);  // ساعات العمل
+                                });
 
-                                    // ── Table header ────────────────────
-                                    IContainer HeaderCell(IContainer c) =>
-                                        c.Background(headerBg)
+                                // ── Table header ────────────────────────
+                                IContainer HeaderCell(IContainer c) =>
+                                    c.Background(Colors.Blue.Darken3)
+                                     .Padding(6)
+                                     .AlignCenter();
+
+                                table.Header(h =>
+                                {
+                                    h.Cell().Element(HeaderCell)
+                                        .Text("#")
+                                        .FontColor(Colors.White).SemiBold();
+                                    h.Cell().Element(HeaderCell)
+                                        .Text("اسم المندوب")
+                                        .FontColor(Colors.White).SemiBold();
+                                    h.Cell().Element(HeaderCell)
+                                        .Text("رقم الإقامة")
+                                        .FontColor(Colors.White).SemiBold();
+                                    h.Cell().Element(HeaderCell)
+                                        .Text("السكن")
+                                        .FontColor(Colors.White).SemiBold();
+                                    h.Cell().Element(HeaderCell)
+                                        .Text("الطلبات المقبولة")
+                                        .FontColor(Colors.White).SemiBold();
+                                    h.Cell().Element(HeaderCell)
+                                        .Text("ساعات العمل")
+                                        .FontColor(Colors.White).SemiBold();
+                                });
+
+                                // ── Data rows ───────────────────────────
+                                // Already ordered desc by AcceptedOrders from BuildPayload
+                                int rank = 1;
+                                foreach (var row in rows)
+                                {
+                                    var isEven = rank % 2 == 0;
+                                    var rowBg = isEven ? Colors.Grey.Lighten4 : Colors.White;
+
+                                    // Color-code orders: top third green, bottom third red
+                                    var ordersColor = GetOrdersColor(
+                                        row.AcceptedOrders,
+                                        rows.Max(r => r.AcceptedOrders),
+                                        rows.Min(r => r.AcceptedOrders));
+
+                                    IContainer DataCell(IContainer c) =>
+                                        c.Background(rowBg)
+                                         .BorderBottom(1)
+                                         .BorderColor(Colors.Grey.Lighten2)
                                          .Padding(5)
                                          .AlignCenter();
 
-                                    table.Header(h =>
-                                    {
-                                        h.Cell().Element(HeaderCell)
-                                            .Text("ساعات العمل")
-                                            .FontColor(Colors.White).SemiBold();
-                                        h.Cell().Element(HeaderCell)
-                                            .Text("الطلبات المقبولة")
-                                            .FontColor(Colors.White).SemiBold();
-                                        h.Cell().Element(HeaderCell)
-                                            .Text("السكن")
-                                            .FontColor(Colors.White).SemiBold();
-                                        h.Cell().Element(HeaderCell)
-                                            .Text("رقم الإقامة")
-                                            .FontColor(Colors.White).SemiBold();
-                                        h.Cell().Element(HeaderCell)
-                                            .Text("اسم الراكب")
-                                            .FontColor(Colors.White).SemiBold();
-                                    });
+                                    table.Cell().Element(DataCell)
+                                        .Text(rank.ToString())
+                                        .FontColor(Colors.Grey.Darken1)
+                                        .FontSize(9);
 
-                                    // ── Data rows ───────────────────────
-                                    bool even = false;
-                                    foreach (var row in section.OrderByDescending(r => r.AcceptedOrders))
-                                    {
-                                        var rowBg = even ? Colors.Grey.Lighten4 : Colors.White;
-                                        even = !even;
+                                    table.Cell().Element(DataCell)
+                                        .Text(row.RiderNameAR)
+                                        .SemiBold();
 
-                                        IContainer DataCell(IContainer c) =>
-                                            c.Background(rowBg)
-                                             .BorderBottom(1)
-                                             .BorderColor(Colors.Grey.Lighten2)
-                                             .Padding(5)
-                                             .AlignCenter();
+                                    table.Cell().Element(DataCell)
+                                        .Text(row.IqamaNo.ToString());
 
-                                        table.Cell().Element(DataCell)
-                                            .Text($"{row.WorkingHours:F1} ساعة");
+                                    table.Cell().Element(DataCell)
+                                        .Text(row.HousingName);
 
-                                        table.Cell().Element(DataCell)
-                                            .Text(row.AcceptedOrders.ToString())
-                                            .FontColor(labelClr)
-                                            .SemiBold();
+                                    table.Cell().Element(DataCell)
+                                        .Text(row.AcceptedOrders.ToString())
+                                        .FontColor(ordersColor)
+                                        .SemiBold();
 
-                                        table.Cell().Element(DataCell)
-                                            .Text(row.HousingName);
+                                    table.Cell().Element(DataCell)
+                                        .Text($"{row.WorkingHours:F1} ساعة");
 
-                                        table.Cell().Element(DataCell)
-                                            .Text(row.IqamaNo.ToString());
+                                    rank++;
+                                }
+                            });
 
-                                        table.Cell().Element(DataCell)
-                                            .Text(row.RiderNameAR)
-                                            .SemiBold();
-                                    }
-                                });
-                        }
+                        // ── Housing summary row ──────────────────────────
+                        col.Item()
+                            .PaddingHorizontal(6)
+                            .PaddingBottom(4)
+                            .Background(Colors.Grey.Lighten2)
+                            .Padding(4)
+                            .Row(row =>
+                            {
+                                row.RelativeItem()
+                                    .AlignRight()
+                                    .Text($"إجمالي طلبات {housingName}: " +
+                                          $"{rows.Sum(r => r.AcceptedOrders)} طلب")
+                                    .FontSize(9)
+                                    .FontColor(Colors.Grey.Darken3)
+                                    .Italic();
+
+                                row.ConstantItem(200)
+                                    .AlignLeft()
+                                    .Text($"إجمالي الساعات: " +
+                                          $"{rows.Sum(r => r.WorkingHours):F1} ساعة")
+                                    .FontSize(9)
+                                    .FontColor(Colors.Grey.Darken3)
+                                    .Italic();
+                            });
                     }
 
-                    // ── Company summary footer bar ───────────────────────
+                    // ── Company summary footer ───────────────────────────
                     col.Item()
-                        .PaddingTop(4)
-                        .PaddingHorizontal(10)
+                        .PaddingTop(2)
+                        .PaddingHorizontal(6)
+                        .PaddingBottom(6)
                         .Background(Colors.Blue.Lighten5)
-                        .Padding(5)
-                        .AlignRight()
-                        .Text($"إجمالي ورديات {company.CompanyName}: {company.TotalShifts} وردية")
-                        .FontSize(9)
-                        .FontColor(Colors.Blue.Darken3)
-                        .Italic();
+                        .Padding(6)
+                        .Row(row =>
+                        {
+                            row.RelativeItem()
+                                .AlignRight()
+                                .Text($"✔ إجمالي ورديات {company.CompanyName}: " +
+                                      $"{company.TotalShifts} وردية")
+                                .FontSize(9)
+                                .FontColor(Colors.Blue.Darken3)
+                                .Italic();
+
+                            var totalOrders = company.RowsByHousing
+                                .Values
+                                .SelectMany(r => r)
+                                .Sum(r => r.AcceptedOrders);
+
+                            row.ConstantItem(240)
+                                .AlignLeft()
+                                .Text($"إجمالي الطلبات المقبولة: {totalOrders} طلب")
+                                .FontSize(9)
+                                .FontColor(Colors.Blue.Darken3)
+                                .Italic();
+                        });
                 }
             });
 
-    // ── Helper: Arabic month names ────────────────────────────────────────────
+    // ── Color-code orders relative to the housing group ──────────────────────
+    private static string GetOrdersColor(int orders, int max, int min)
+    {
+        if (max == min) return Colors.Black;
+
+        var range = max - min;
+        var topThird = min + (range * 2 / 3.0);
+        var bottomThird = min + (range / 3.0);
+
+        if (orders >= topThird) return Colors.Green.Darken2;
+        if (orders <= bottomThird) return Colors.Red.Darken2;
+        return Colors.Orange.Darken2;
+    }
+
+    // ── Arabic date helper ────────────────────────────────────────────────────
     private static readonly string[] ArabicMonths =
     [
         "يناير","فبراير","مارس","أبريل","مايو","يونيو",
