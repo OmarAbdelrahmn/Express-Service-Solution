@@ -28,184 +28,136 @@ public class DailyReportEmailSender(IOptions<DailyReportSettings> options) : IDa
     private static string FormatArabicDate(DateOnly d) =>
         $"{d.Day} {ArabicMonths[d.Month - 1]} {d.Year}";
 
+    // ── CSS ───────────────────────────────────────────────────────────────────
+    // All two-column layouts use <table> — flexbox is unreliable in email clients.
+    // Every block explicitly carries direction:rtl to survive Gmail's CSS stripping.
     private const string EmailCss = """
-    <style>
-    * { box-sizing: border-box; }
-    body {
-        font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
-        font-size: 13px;
-        color: #333;
-        background: #f9f9f9;
-        direction: rtl;
-        text-align: right;
-    }
-    .wrap {
-        max-width: 860px;
-        margin: 20px auto;
-        background: #fff;
-        border-radius: 8px;
-        overflow: hidden;
-        box-shadow: 0 2px 8px rgba(0,0,0,.1);
-        direction: rtl;
-    }
-    .topbar {
-        background: #1a3c6e;
-        color: #fff;
-        padding: 18px 24px;
-        direction: rtl;
-        text-align: right;
-        display: flex;
-        flex-direction: row;
-        align-items: center;
-        gap: 16px;
-    }
-    .topbar-logo {
-        width: 52px;
-        height: 52px;
-        background: #fff;
-        border-radius: 8px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 26px;
-        flex-shrink: 0;
-        order: 2;        /* logo appears on LEFT visually in RTL */
-    }
-    .topbar-text {
-        flex: 1;
-        order: 1;
-        text-align: right;
-    }
-    .topbar-text h1 {
-        margin: 0;
-        font-size: 20px;
-    }
-    .topbar-text p {
-        margin: 4px 0 0;
-        font-size: 12px;
-        opacity: .8;
-    }
-    .body {
-        padding: 20px 24px;
-        direction: rtl;
-        text-align: right;
-    }
-    .company-block {
-        margin-bottom: 30px;
-    }
-    .company-header {
-        background: #dce8f7;
-        border-right: 5px solid #1a3c6e;
-        border-left: none;
-        padding: 10px 14px;
-        margin-bottom: 10px;
-        border-radius: 4px;
-        font-size: 15px;
-        font-weight: bold;
-        display: flex;
-        flex-direction: row;          /* right=company name, left=stats */
-        justify-content: space-between;
-        align-items: center;
-        direction: rtl;
-    }
-    .company-header span {
-        font-size: 12px;
-        font-weight: normal;
-        color: #555;
-    }
-    .section-label {
-        font-size: 13px;
-        font-weight: bold;
-        padding: 6px 10px;
-        margin: 10px 0 4px;
-        border-radius: 3px;
-        text-align: right;
-        direction: rtl;
-    }
-    .label-top {
-        background: #e8f5e9;
-        color: #2e7d32;
-        border-right: 4px solid #2e7d32;
-    }
-    .label-bottom {
-        background: #ffebee;
-        color: #c62828;
-        border-right: 4px solid #c62828;
-    }
-    table {
-        width: 100%;
-        border-collapse: collapse;
-        margin-bottom: 6px;
-        direction: rtl;
-    }
-    th {
-        padding: 8px 10px;
-        text-align: right;
-        font-size: 12px;
-    }
-    td {
-        padding: 7px 10px;
-        text-align: right;
-        border-bottom: 1px solid #eee;
-        font-size: 12px;
-    }
-    td.num {
-        text-align: center;
-    }
-    tr:nth-child(even) td {
-        background: #f5f7fa;
-    }
-    .th-top {
-        background: #2e7d32;
-        color: #fff;
-    }
-    .th-bottom {
-        background: #c62828;
-        color: #fff;
-    }
-    .val-top {
-        color: #2e7d32;
-        font-weight: bold;
-        text-align: center;
-    }
-    .val-bottom {
-        color: #c62828;
-        font-weight: bold;
-        text-align: center;
-    }
-    .company-footer {
-        font-size: 11px;
-        color: #1a3c6e;
-        font-style: italic;
-        padding: 6px 8px 4px;
-        display: flex;
-        flex-direction: row;
-        justify-content: space-between;
-        border-top: 1px dashed #b0c4de;
-        margin-top: 6px;
-        direction: rtl;
-    }
-    .pdf-note {
-        background: #fff8e1;
-        border: 1px solid #ffe082;
-        border-radius: 4px;
-        padding: 8px 12px;
-        font-size: 12px;
-        color: #795548;
-        margin-bottom: 16px;
-        text-align: right;
-        direction: rtl;
-    }
-    .footer {
-        background: #f0f0f0;
-        text-align: center;
-        padding: 12px;
-        font-size: 11px;
-        color: #888;
-        direction: rtl;
-    }
-    </style>
-    """;
+        <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
+            font-size: 13px;
+            color: #333;
+            background: #f9f9f9;
+            direction: rtl;
+            text-align: right;
+            margin: 0;
+            padding: 0;
+        }
+        .wrap {
+            max-width: 860px;
+            margin: 20px auto;
+            background: #fff;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 8px rgba(0,0,0,.1);
+            direction: rtl;
+        }
+        /* ── Top bar ── */
+        .topbar {
+            background: #1a3c6e;
+            color: #fff;
+            padding: 0;
+            direction: rtl;
+        }
+        .topbar table {
+            margin: 0;
+            border-collapse: collapse;
+            direction: rtl;
+        }
+        .topbar-logo {
+            width: 52px;
+            height: 52px;
+            border-radius: 8px;
+            display: block;
+        }
+        /* ── Body ── */
+        .body {
+            padding: 20px 24px;
+            direction: rtl;
+            text-align: right;
+        }
+        .body p {
+            direction: rtl;
+            text-align: right;
+            margin: 0 0 12px 0;
+            line-height: 1.7;
+        }
+        /* ── PDF note ── */
+        .pdf-note {
+            background: #fff8e1;
+            border: 1px solid #ffe082;
+            border-radius: 4px;
+            padding: 8px 12px;
+            font-size: 12px;
+            color: #795548;
+            margin-bottom: 16px;
+            text-align: right;
+            direction: rtl;
+        }
+        /* ── Company block ── */
+        .company-block {
+            margin-bottom: 30px;
+        }
+        /* ── Section labels ── */
+        .section-label {
+            font-size: 13px;
+            font-weight: bold;
+            padding: 6px 10px;
+            margin: 10px 0 4px;
+            border-radius: 3px;
+            text-align: right;
+            direction: rtl;
+        }
+        .label-top {
+            background: #e8f5e9;
+            color: #2e7d32;
+            border-right: 4px solid #2e7d32;
+        }
+        .label-bottom {
+            background: #ffebee;
+            color: #c62828;
+            border-right: 4px solid #c62828;
+        }
+        /* ── Data tables ── */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 6px;
+            direction: rtl;
+        }
+        th {
+            padding: 8px 10px;
+            text-align: right;
+            font-size: 12px;
+        }
+        th.th-num { text-align: center; }
+        td {
+            padding: 7px 10px;
+            text-align: right;
+            border-bottom: 1px solid #eee;
+            font-size: 12px;
+        }
+        td.num { text-align: center; }
+        tr:nth-child(even) td { background: #f5f7fa; }
+        /* ── Top table header / values ── */
+        .th-top  { background: #2e7d32; color: #fff; }
+        .th-bot  { background: #c62828; color: #fff; }
+        .val-top { color: #2e7d32; font-weight: bold; }
+        .val-bot { color: #c62828; font-weight: bold; }
+        /* ── Footer ── */
+        .footer {
+            background: #f0f0f0;
+            text-align: center;
+            padding: 12px;
+            font-size: 11px;
+            color: #888;
+            direction: rtl;
+        }
+        </style>
+        """;
+
+    // ─────────────────────────────────────────────────────────────────────────
 
     public async Task SendAsync(
         DailyReportPayload payload,
@@ -224,9 +176,7 @@ public class DailyReportEmailSender(IOptions<DailyReportSettings> options) : IDa
 
         var body = new BodyBuilder();
 
-        // ── Embed logo as CID linked resource ────────────────────────────────
-        // CID = Content-ID: the correct standard for inline images in email.
-        // Avoids broken external links and blocked remote images.
+        // ── Embed logo as CID inline resource ────────────────────────────────
         string? logoCid = null;
         if (logoBytes is not null)
         {
@@ -322,8 +272,6 @@ public class DailyReportEmailSender(IOptions<DailyReportSettings> options) : IDa
     }
 
     // ── HTML body ─────────────────────────────────────────────────────────────
-    // ALL two-column layouts use <table> not flexbox.
-    // Flexbox is ignored by Outlook and breaks RTL in most email clients.
     private static string BuildHtmlBody(DailyReportPayload payload, string? logoCid)
     {
         var sb = new System.Text.StringBuilder();
@@ -331,32 +279,42 @@ public class DailyReportEmailSender(IOptions<DailyReportSettings> options) : IDa
         sb.Append("<html lang=\"ar\" dir=\"rtl\">");
         sb.Append("<head><meta charset=\"UTF-8\"/>");
         sb.Append(EmailCss);
-        sb.Append("</head><body dir=\"rtl\" style=\"direction:rtl;text-align:right\">");
+        sb.Append("</head>");
+        sb.Append("<body dir=\"rtl\" style=\"direction:rtl;text-align:right;margin:0;padding:0\">");
         sb.Append("<div class=\"wrap\">");
 
-        // ── Top bar — table layout for RTL compatibility ──────────────────────
-        // Logo on LEFT, title+date on RIGHT (RTL: main content on right)
+        // ── Top bar ───────────────────────────────────────────────────────────
+        // Table layout: logo on LEFT cell, title on RIGHT cell (RTL = right is primary)
         sb.Append("<div class=\"topbar\">");
-        sb.Append("<table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\">");
+        sb.Append("<table width=\"100%\" cellpadding=\"18\" cellspacing=\"0\" border=\"0\" style=\"direction:rtl\">");
         sb.Append("<tr>");
 
-        // LEFT cell — logo (secondary position in RTL)
-        sb.Append("<td width=\"80\" valign=\"middle\" align=\"left\">");
-        if (logoCid is not null)
-            sb.Append($"<img src=\"cid:{logoCid}\" class=\"topbar-logo\" alt=\"شعار الشركة\"/>");
+        // RIGHT cell — main title (primary in RTL)
+        sb.Append("<td align=\"right\" valign=\"middle\" style=\"padding:18px 24px\">");
+        sb.Append("<h1 style=\"margin:0 0 5px 0;font-size:19px;color:#fff;font-weight:bold\">📊 تقرير الأداء اليومي</h1>");
+        sb.Append($"<p style=\"margin:0;font-size:12px;color:#fff;opacity:.85\">");
+        sb.Append($"التاريخ: {FormatArabicDate(payload.ReportDate)} &nbsp;|&nbsp; إجمالي الورديات: {payload.GrandTotalShifts}");
+        sb.Append("</p>");
         sb.Append("</td>");
 
-        // RIGHT cell — title and date (primary position in RTL)
-        sb.Append("<td valign=\"middle\" align=\"right\" style=\"padding-right:10px\">");
-        sb.Append("<h1 style=\"margin:0 0 4px 0;font-size:19px;color:#fff\">📊 تقرير الأداء اليومي</h1>");
-        sb.Append($"<p style=\"margin:0;font-size:12px;color:#fff;opacity:.85\">التاريخ: {FormatArabicDate(payload.ReportDate)} &nbsp;|&nbsp; إجمالي الورديات: {payload.GrandTotalShifts}</p>");
+        // LEFT cell — logo (secondary in RTL)
+        sb.Append("<td width=\"80\" align=\"center\" valign=\"middle\" style=\"padding:12px 16px\">");
+        if (logoCid is not null)
+        {
+            sb.Append($"<img src=\"cid:{logoCid}\" class=\"topbar-logo\" width=\"52\" height=\"52\" alt=\"\" style=\"display:block;border-radius:8px;background:#fff\"/>");
+        }
+        else
+        {
+            // Fallback icon box when no logo is provided
+            sb.Append("<div style=\"width:52px;height:52px;background:#fff;border-radius:8px;text-align:center;line-height:52px;font-size:26px\">📦</div>");
+        }
         sb.Append("</td>");
 
         sb.Append("</tr>");
         sb.Append("</table>");
         sb.Append("</div>"); // topbar
 
-        // ── Body ─────────────────────────────────────────────────────────────
+        // ── Body ──────────────────────────────────────────────────────────────
         sb.Append("<div class=\"body\">");
         sb.Append("<p>السادة المسؤولين،<br/>فيما يلي ملخص أعلى 5 وأدنى 5 مندوب لكل شركة.</p>");
         sb.Append("<div class=\"pdf-note\">📎 يُرفق ملف PDF يحتوي على بيانات جميع المناديب مُجمَّعةً حسب الشركة والسكن.</div>");
@@ -371,16 +329,17 @@ public class DailyReportEmailSender(IOptions<DailyReportSettings> options) : IDa
 
             sb.Append("<div class=\"company-block\">");
 
-            // ── Company header — table layout for RTL ─────────────────────────
-            sb.Append("<table width=\"100%\" cellpadding=\"10\" cellspacing=\"0\" border=\"0\" style=\"background:#dce8f7;border-right:5px solid #1a3c6e;border-radius:4px;margin-bottom:10px\">");
+            // ── Company header — table layout ─────────────────────────────────
+            sb.Append("<table width=\"100%\" cellpadding=\"10\" cellspacing=\"0\" border=\"0\"");
+            sb.Append(" style=\"background:#dce8f7;border-right:5px solid #1a3c6e;border-radius:4px;margin-bottom:10px;direction:rtl\">");
             sb.Append("<tr>");
-            // LEFT — secondary info
-            sb.Append("<td align=\"left\" style=\"font-size:12px;color:#555;font-weight:normal\">");
-            sb.Append($"ورديات: {company.TotalShifts} &nbsp;|&nbsp; إجمالي الطلبات: {totalOrders}");
-            sb.Append("</td>");
-            // RIGHT — main label
+            // RIGHT — company name (primary)
             sb.Append("<td align=\"right\" style=\"font-size:15px;font-weight:bold;color:#1a3c6e\">");
             sb.Append($"🏢 {company.CompanyName}");
+            sb.Append("</td>");
+            // LEFT — stats (secondary)
+            sb.Append("<td align=\"left\" style=\"font-size:12px;font-weight:normal;color:#555;white-space:nowrap\">");
+            sb.Append($"ورديات: {company.TotalShifts} &nbsp;|&nbsp; إجمالي الطلبات: {totalOrders}");
             sb.Append("</td>");
             sb.Append("</tr></table>");
 
@@ -392,16 +351,17 @@ public class DailyReportEmailSender(IOptions<DailyReportSettings> options) : IDa
             sb.Append("<div class=\"section-label label-bottom\">⚠️ أدنى 5 مندوب</div>");
             sb.Append(BuildSectionTable(bottom5, isTop: false));
 
-            // ── Company footer — table layout for RTL ─────────────────────────
-            sb.Append("<table width=\"100%\" cellpadding=\"6\" cellspacing=\"0\" border=\"0\" style=\"border-top:1px dashed #b0c4de;margin-top:6px\">");
+            // ── Company footer — table layout ─────────────────────────────────
+            sb.Append("<table width=\"100%\" cellpadding=\"6\" cellspacing=\"0\" border=\"0\"");
+            sb.Append(" style=\"border-top:1px dashed #b0c4de;margin-top:6px;direction:rtl\">");
             sb.Append("<tr>");
-            // LEFT — secondary
-            sb.Append("<td align=\"left\" style=\"font-size:11px;color:#1a3c6e;font-style:italic\">");
-            sb.Append($"إجمالي الطلبات: <strong>{totalOrders}</strong> &nbsp;|&nbsp; إجمالي الساعات: <strong>{totalHours:F1}</strong> ساعة");
-            sb.Append("</td>");
-            // RIGHT — main
+            // RIGHT — primary label
             sb.Append("<td align=\"right\" style=\"font-size:11px;color:#1a3c6e;font-style:italic\">");
             sb.Append($"✔ إجمالي الورديات: {company.TotalShifts} وردية");
+            sb.Append("</td>");
+            // LEFT — numbers
+            sb.Append("<td align=\"left\" style=\"font-size:11px;color:#1a3c6e;font-style:italic;white-space:nowrap\">");
+            sb.Append($"إجمالي الطلبات: <strong>{totalOrders}</strong> &nbsp;|&nbsp; إجمالي الساعات: <strong>{totalHours:F1}</strong> ساعة");
             sb.Append("</td>");
             sb.Append("</tr></table>");
 
@@ -412,7 +372,8 @@ public class DailyReportEmailSender(IOptions<DailyReportSettings> options) : IDa
 
         // ── Footer ────────────────────────────────────────────────────────────
         sb.Append("<div class=\"footer\">");
-        sb.Append($"تم إرسال هذا التقرير تلقائيًا بتاريخ {DateTime.Now:dd/MM/yyyy} الساعة {DateTime.Now:HH:mm} &nbsp;|&nbsp; لا تردَّ على هذا البريد");
+        sb.Append($"تم إرسال هذا التقرير تلقائيًا بتاريخ {DateTime.Now:dd/MM/yyyy} الساعة {DateTime.Now:HH:mm}");
+        sb.Append(" &nbsp;|&nbsp; لا تردَّ على هذا البريد");
         sb.Append("</div>");
 
         sb.Append("</div>"); // wrap
@@ -427,28 +388,35 @@ public class DailyReportEmailSender(IOptions<DailyReportSettings> options) : IDa
         if (rows.Count == 0)
             return "<p style=\"color:#999;font-size:12px;padding:4px 8px\">لا توجد بيانات كافية</p>";
 
-        var thClass = isTop ? "th-top" : "th-bottom";
-        var valClass = isTop ? "val-top" : "val-bottom";
+        var thClass = isTop ? "th-top" : "th-bot";
+        var valClass = isTop ? "val-top" : "val-bot";
 
         var sb = new System.Text.StringBuilder();
 
-        sb.Append("<table><thead><tr>");
-        sb.Append($"<th class=\"{thClass}\">#</th>");
+        // direction:rtl on the table keeps column order correct in all clients
+        sb.Append("<table style=\"direction:rtl\">");
+        sb.Append("<thead><tr>");
+        sb.Append($"<th class=\"{thClass} th-num\">#</th>");
         sb.Append($"<th class=\"{thClass}\">اسم المندوب</th>");
         sb.Append($"<th class=\"{thClass}\">السكن</th>");
-        sb.Append($"<th class=\"{thClass}\">الطلبات المقبولة</th>");
-        sb.Append($"<th class=\"{thClass}\">ساعات العمل</th>");
+        sb.Append($"<th class=\"{thClass} th-num\">الطلبات المقبولة</th>");
+        sb.Append($"<th class=\"{thClass} th-num\">ساعات العمل</th>");
         sb.Append("</tr></thead><tbody>");
 
         int rank = 1;
         foreach (var r in rows)
         {
             sb.Append("<tr>");
-            sb.Append($"<td style=\"color:#999;font-size:11px\">{rank}</td>");
-            sb.Append($"<td class=\"td-right\"><strong>{r.RiderNameAR}</strong></td>");
-            sb.Append($"<td>{r.HousingName}</td>");
-            sb.Append($"<td class=\"{valClass}\">{r.AcceptedOrders}</td>");
-            sb.Append($"<td>{r.WorkingHours:F1} ساعة</td>");
+            // rank — centered number
+            sb.Append($"<td class=\"num\" style=\"color:#999;font-size:11px\">{rank}</td>");
+            // name — right aligned
+            sb.Append($"<td style=\"text-align:right\"><strong>{r.RiderNameAR}</strong></td>");
+            // housing — right aligned
+            sb.Append($"<td style=\"text-align:right\">{r.HousingName}</td>");
+            // orders — centered, colored
+            sb.Append($"<td class=\"num {valClass}\">{r.AcceptedOrders}</td>");
+            // hours — centered
+            sb.Append($"<td class=\"num\">{r.WorkingHours:F1} ساعة</td>");
             sb.Append("</tr>");
             rank++;
         }
