@@ -74,7 +74,7 @@ public class DailyReportJob(
 
             hangfire.Schedule<IDailyReportJob>(
                 job => job.RunAsync(reportDate, false),
-                TimeSpan.FromHours(1));
+                TimeSpan.FromMinutes(5));
 
             return;
         }

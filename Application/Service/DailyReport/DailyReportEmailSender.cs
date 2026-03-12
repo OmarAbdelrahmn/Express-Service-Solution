@@ -31,7 +31,6 @@ public class DailyReportEmailSender(IOptions<DailyReportSettings> options) : IDa
             font-size: 13px;
             color: #333;
             background: #f9f9f9;
-            direction: rtl;
             text-align: right;
         }
         .wrap {
@@ -170,7 +169,7 @@ public class DailyReportEmailSender(IOptions<DailyReportSettings> options) : IDa
         foreach (var email in _settings.RecipientEmails)
             message.To.Add(MailboxAddress.Parse(email));
 
-        message.Subject = $"📊 تقرير الورديات اليومي — {FormatArabicDate(payload.ReportDate)}";
+        message.Subject = $"📊 تقرير الاداء اليومي — {FormatArabicDate(payload.ReportDate)}";
         message.Headers.Add("Content-Language", "ar");
 
         var body = new BodyBuilder
@@ -180,7 +179,7 @@ public class DailyReportEmailSender(IOptions<DailyReportSettings> options) : IDa
         };
 
         body.Attachments.Add(
-            $"تقرير_الورديات_{payload.ReportDate:yyyyMMdd}.pdf",
+            $"تقرير_الاداء_{payload.ReportDate:yyyyMMdd}.pdf",
             pdfBytes,
             new ContentType("application", "pdf"));
 
@@ -219,7 +218,7 @@ public class DailyReportEmailSender(IOptions<DailyReportSettings> options) : IDa
     {
         var sb = new System.Text.StringBuilder();
 
-        sb.AppendLine($"تقرير الورديات اليومي — {FormatArabicDate(payload.ReportDate)}");
+        sb.AppendLine($"تقرير الاداء اليومي — {FormatArabicDate(payload.ReportDate)}");
         sb.AppendLine($"إجمالي الورديات: {payload.GrandTotalShifts}");
         sb.AppendLine(new string('─', 60));
 
@@ -244,7 +243,7 @@ public class DailyReportEmailSender(IOptions<DailyReportSettings> options) : IDa
         }
 
         sb.AppendLine();
-        sb.AppendLine("* يُرجى مراجعة ملف PDF المرفق للاطلاع على تقرير جميع الرُّكَّاب.");
+        sb.AppendLine("* يُرجى مراجعة ملف PDF المرفق للاطلاع على تقرير جميع المناديب.");
         return sb.ToString();
     }
 
@@ -283,7 +282,7 @@ public class DailyReportEmailSender(IOptions<DailyReportSettings> options) : IDa
         // Body
         sb.Append("<div class=\"body\">");
         sb.Append("<p>السادة المسؤولين،<br/>فيما يلي ملخص أعلى 5 وأدنى 5 مندوب لكل شركة.</p>");
-        sb.Append("<div class=\"pdf-note\">📎 يُرفق ملف PDF يحتوي على بيانات جميع الرُّكَّاب مُجمَّعةً حسب الشركة والسكن.</div>");
+        sb.Append("<div class=\"pdf-note\">📎 يُرفق ملف PDF يحتوي على بيانات جميع المناديب مُجمَّعةً حسب الشركة والسكن.</div>");
 
         foreach (var company in payload.Companies)
         {

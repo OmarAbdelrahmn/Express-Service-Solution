@@ -14,10 +14,10 @@ public static class DailyReportPdfGenerator
         {
             container.Page(page =>
             {
-                page.Size(PageSizes.A4.Landscape());
+                page.Size(PageSizes.A4);
                 page.Margin(1.5f, Unit.Centimetre);
                 page.DefaultTextStyle(x =>
-                    x.FontSize(10)
+                    x.FontSize(13)
                      .FontFamily("Scheherazade New")
                      .DirectionFromRightToLeft());
 
@@ -36,7 +36,7 @@ public static class DailyReportPdfGenerator
             {
                 col.Item()
                     .AlignRight()
-                    .Text($"تقرير وردِيَّات الرُّكَّاب اليومي — {FormatArabicDate(payload.ReportDate)}")
+                    .Text($"تقرير وردِيَّات المناديب اليومي — {FormatArabicDate(payload.ReportDate)}")
                     .SemiBold()
                     .FontSize(16)
                     .FontColor(Colors.Blue.Darken3);
@@ -46,7 +46,7 @@ public static class DailyReportPdfGenerator
                     .Text($"تاريخ الإنشاء: {DateTime.Now:dd/MM/yyyy HH:mm}  |  " +
                           $"إجمالي الورديات: {payload.GrandTotalShifts}")
                     .FontSize(9)
-                    .FontColor(Colors.Grey.Darken1);
+                    .FontColor(Colors.Grey.Darken3);
 
                 col.Item()
                     .PaddingTop(6)
@@ -112,7 +112,7 @@ public static class DailyReportPdfGenerator
 
                                 row.ConstantItem(180)
                                     .AlignLeft()
-                                    .Text($"عدد الرُّكَّاب: {rows.Count}")
+                                    .Text($"عدد المناديب: {rows.Count}")
                                     .FontSize(9)
                                     .FontColor(Colors.Grey.Darken2);
                             });
@@ -126,7 +126,7 @@ public static class DailyReportPdfGenerator
                                 // Columns — RTL: rightmost column defined first
                                 table.ColumnsDefinition(cols =>
                                 {
-                                    cols.ConstantColumn(40);    // # (rank)
+                                    cols.ConstantColumn(30);    // # (rank)
                                     cols.RelativeColumn(3);     // اسم المندوب
                                     cols.RelativeColumn(2);     // رقم الإقامة
                                     cols.RelativeColumn(2);     // السكن
@@ -155,10 +155,10 @@ public static class DailyReportPdfGenerator
                                         .Text("السكن")
                                         .FontColor(Colors.White).SemiBold();
                                     h.Cell().Element(HeaderCell)
-                                        .Text("الطلبات المقبولة")
+                                        .Text("الطلبات")
                                         .FontColor(Colors.White).SemiBold();
                                     h.Cell().Element(HeaderCell)
-                                        .Text("ساعات العمل")
+                                        .Text("الساعات")
                                         .FontColor(Colors.White).SemiBold();
                                 });
 
@@ -204,7 +204,7 @@ public static class DailyReportPdfGenerator
                                         .SemiBold();
 
                                     table.Cell().Element(DataCell)
-                                        .Text($"{row.WorkingHours:F1} ساعة");
+                                        .Text($"ساعة{row.WorkingHours:F1}");
 
                                     rank++;
                                 }
