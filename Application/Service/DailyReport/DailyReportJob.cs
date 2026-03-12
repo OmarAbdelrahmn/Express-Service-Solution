@@ -1,6 +1,7 @@
 ﻿using Domain;
 using Domain.Entities;
 using Hangfire;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -15,8 +16,11 @@ public class DailyReportJob(
     ApplicationDbcontext db,
     IDailyReportEmailSender emailSender,
     ILogger<DailyReportJob> logger,
-    IBackgroundJobClient hangfire) : IDailyReportJob
+    IBackgroundJobClient hangfire,
+    IWebHostEnvironment env) : IDailyReportJob
 {
+    private readonly IWebHostEnvironment env = env;
+
     public async Task RunAsync(DateOnly? targetDate = null, bool forceResend = false)
     {
         var reportDate = targetDate ?? DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3).AddDays(-1));
@@ -37,6 +41,12 @@ public class DailyReportJob(
             .Include(s => s.Housing)
             .Where(s => s.ShiftDate == reportDate)
             .ToListAsync();
+
+        // ── Load company logo ────────────────────────────────────────────────────────
+        var logoPath = Path.Combine(env.WebRootPath, "images", "company-logo.png");
+        byte[]? logoBytes = File.Exists(logoPath)
+            ? await File.ReadAllBytesAsync(logoPath, cancellationToken: default)
+            : null;
 
         // ── Guard: data must exist for company 1 AND company 2 ───────────────────
         var companyIds = shifts.Select(s => s.CompanyId).ToHashSet();
@@ -79,15 +89,14 @@ public class DailyReportJob(
             return;
         }
 
-        // ── Build → PDF → Send → Log ─────────────────────────────────────────────
 
         // ── Build → PDF → Send → Log ──────────────────────────────────────────
         try
         {
             var payload = BuildPayload(reportDate, shifts);
-            var pdfBytes = DailyReportPdfGenerator.Generate(payload);
 
-            await emailSender.SendAsync(payload, pdfBytes);
+            var pdfBytes = DailyReportPdfGenerator.Generate(payload, logoBytes);
+            await emailSender.SendAsync(payload, pdfBytes, logoBytes);
 
             // Always upsert the log — never block future sends
             if (log is null)

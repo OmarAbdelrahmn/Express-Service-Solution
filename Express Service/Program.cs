@@ -27,6 +27,8 @@ builder.Services.AddCors(options =>
 
 builder.Services.AddDependencies(builder.Configuration);
 
+builder.Services.AddSingleton<IWebHostEnvironment>(builder.Environment);
+
 builder.Services.AddHealthChecks();
 
 var app = builder.Build();

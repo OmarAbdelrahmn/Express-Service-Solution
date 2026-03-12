@@ -2,12 +2,17 @@
 using MailKit.Security;
 using Microsoft.Extensions.Options;
 using MimeKit;
+using MimeKit.Utils;
 
 namespace Application.Service.DailyReport;
 
 public interface IDailyReportEmailSender
 {
-    Task SendAsync(DailyReportPayload payload, byte[] pdfBytes, CancellationToken ct = default);
+    Task SendAsync(
+        DailyReportPayload payload,
+        byte[] pdfBytes,
+        byte[]? logoBytes = null,
+        CancellationToken ct = default);
 }
 
 public class DailyReportEmailSender(IOptions<DailyReportSettings> options) : IDailyReportEmailSender
@@ -23,7 +28,7 @@ public class DailyReportEmailSender(IOptions<DailyReportSettings> options) : IDa
     private static string FormatArabicDate(DateOnly d) =>
         $"{d.Day} {ArabicMonths[d.Month - 1]} {d.Year}";
 
-    // ── CSS lives here — no interpolation, no escaping needed ────────────────
+    // ── CSS — no interpolation, no escaping ──────────────────────────────────
     private const string EmailCss = """
         <style>
         body {
@@ -31,6 +36,7 @@ public class DailyReportEmailSender(IOptions<DailyReportSettings> options) : IDa
             font-size: 13px;
             color: #333;
             background: #f9f9f9;
+            direction: rtl;
             text-align: right;
         }
         .wrap {
@@ -44,16 +50,21 @@ public class DailyReportEmailSender(IOptions<DailyReportSettings> options) : IDa
         .topbar {
             background: #1a3c6e;
             color: #fff;
-            padding: 18px 24px;
+            padding: 14px 20px;
         }
         .topbar h1 {
-            margin: 0;
-            font-size: 20px;
+            margin: 0 0 4px 0;
+            font-size: 19px;
         }
         .topbar p {
-            margin: 4px 0 0;
+            margin: 0;
             font-size: 12px;
-            opacity: .8;
+            opacity: .85;
+        }
+        .topbar-logo {
+            height: 55px;
+            width: auto;
+            display: block;
         }
         .body {
             padding: 20px 24px;
@@ -61,27 +72,10 @@ public class DailyReportEmailSender(IOptions<DailyReportSettings> options) : IDa
         .company-block {
             margin-bottom: 30px;
         }
-        .company-header {
-            background: #dce8f7;
-            border-right: 5px solid #1a3c6e;
-            padding: 10px 14px;
-            margin-bottom: 10px;
-            border-radius: 4px;
-            font-size: 15px;
-            font-weight: bold;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        .company-header span {
-            font-size: 12px;
-            font-weight: normal;
-            color: #555;
-        }
         .section-label {
             font-size: 13px;
             font-weight: bold;
-            padding: 6px 8px;
+            padding: 6px 10px;
             margin: 10px 0 4px;
             border-radius: 3px;
         }
@@ -111,35 +105,16 @@ public class DailyReportEmailSender(IOptions<DailyReportSettings> options) : IDa
             border-bottom: 1px solid #eee;
             font-size: 12px;
         }
+        .td-right {
+            text-align: right;
+        }
         tr:nth-child(even) td {
             background: #f5f7fa;
         }
-        .th-top {
-            background: #2e7d32;
-            color: #fff;
-        }
-        .th-bottom {
-            background: #c62828;
-            color: #fff;
-        }
-        .val-top {
-            color: #2e7d32;
-            font-weight: bold;
-        }
-        .val-bottom {
-            color: #c62828;
-            font-weight: bold;
-        }
-        .company-footer {
-            font-size: 11px;
-            color: #1a3c6e;
-            font-style: italic;
-            padding: 6px 8px 4px;
-            display: flex;
-            justify-content: space-between;
-            border-top: 1px dashed #b0c4de;
-            margin-top: 6px;
-        }
+        .th-top    { background: #2e7d32; color: #fff; }
+        .th-bottom { background: #c62828; color: #fff; }
+        .val-top   { color: #2e7d32; font-weight: bold; }
+        .val-bottom{ color: #c62828; font-weight: bold; }
         .pdf-note {
             background: #fff8e1;
             border: 1px solid #ffe082;
@@ -159,9 +134,11 @@ public class DailyReportEmailSender(IOptions<DailyReportSettings> options) : IDa
         </style>
         """;
 
-    // ─────────────────────────────────────────────────────────────────────────
-
-    public async Task SendAsync(DailyReportPayload payload, byte[] pdfBytes, CancellationToken ct = default)
+    public async Task SendAsync(
+        DailyReportPayload payload,
+        byte[] pdfBytes,
+        byte[]? logoBytes = null,
+        CancellationToken ct = default)
     {
         var message = new MimeMessage();
         message.From.Add(new MailboxAddress(_settings.FromName, _settings.FromEmail));
@@ -169,17 +146,30 @@ public class DailyReportEmailSender(IOptions<DailyReportSettings> options) : IDa
         foreach (var email in _settings.RecipientEmails)
             message.To.Add(MailboxAddress.Parse(email));
 
-        message.Subject = $"📊 تقرير الاداء اليومي — {FormatArabicDate(payload.ReportDate)}";
+        message.Subject = $"📊 تقرير الأداء اليومي — {FormatArabicDate(payload.ReportDate)}";
         message.Headers.Add("Content-Language", "ar");
 
-        var body = new BodyBuilder
+        var body = new BodyBuilder();
+
+        // ── Embed logo as CID linked resource ────────────────────────────────
+        // CID = Content-ID: the correct standard for inline images in email.
+        // Avoids broken external links and blocked remote images.
+        string? logoCid = null;
+        if (logoBytes is not null)
         {
-            HtmlBody = BuildHtmlBody(payload),
-            TextBody = BuildTextBody(payload)
-        };
+            var logoResource = body.LinkedResources.Add(
+                "company-logo.png",
+                logoBytes,
+                new ContentType("image", "png"));
+            logoResource.ContentId = MimeUtils.GenerateMessageId();
+            logoCid = logoResource.ContentId;
+        }
+
+        body.HtmlBody = BuildHtmlBody(payload, logoCid);
+        body.TextBody = BuildTextBody(payload);
 
         body.Attachments.Add(
-            $"تقرير_الاداء_{payload.ReportDate:yyyyMMdd}.pdf",
+            $"تقرير_الأداء_{payload.ReportDate:yyyyMMdd}.pdf",
             pdfBytes,
             new ContentType("application", "pdf"));
 
@@ -209,7 +199,6 @@ public class DailyReportEmailSender(IOptions<DailyReportSettings> options) : IDa
             .TakeLast(5)
             .OrderBy(r => r.AcceptedOrders)
             .ToList();
-
         return (top5, bottom5);
     }
 
@@ -218,7 +207,7 @@ public class DailyReportEmailSender(IOptions<DailyReportSettings> options) : IDa
     {
         var sb = new System.Text.StringBuilder();
 
-        sb.AppendLine($"تقرير الاداء اليومي — {FormatArabicDate(payload.ReportDate)}");
+        sb.AppendLine($"تقرير الأداء اليومي — {FormatArabicDate(payload.ReportDate)}");
         sb.AppendLine($"إجمالي الورديات: {payload.GrandTotalShifts}");
         sb.AppendLine(new string('─', 60));
 
@@ -233,7 +222,6 @@ public class DailyReportEmailSender(IOptions<DailyReportSettings> options) : IDa
             sb.AppendLine(new string('═', 50));
 
             var (top5, bottom5) = GetTopBottom(allRows);
-
             AppendSection(sb, "أعلى 5 مناديب", top5);
             sb.AppendLine();
             AppendSection(sb, "أدنى 5 مناديب", bottom5);
@@ -252,7 +240,6 @@ public class DailyReportEmailSender(IOptions<DailyReportSettings> options) : IDa
         sb.AppendLine($"  ── {title} ──");
         sb.AppendLine($"  {"#",-4} {"الاسم",-25} {"السكن",-20} {"الطلبات",-10} {"ساعات العمل"}");
         sb.AppendLine($"  {new string('-', 70)}");
-
         int rank = 1;
         foreach (var r in rows)
         {
@@ -262,24 +249,41 @@ public class DailyReportEmailSender(IOptions<DailyReportSettings> options) : IDa
     }
 
     // ── HTML body ─────────────────────────────────────────────────────────────
-    private static string BuildHtmlBody(DailyReportPayload payload)
+    // ALL two-column layouts use <table> not flexbox.
+    // Flexbox is ignored by Outlook and breaks RTL in most email clients.
+    private static string BuildHtmlBody(DailyReportPayload payload, string? logoCid)
     {
         var sb = new System.Text.StringBuilder();
 
-        // Open + head (CSS const — no escaping needed)
         sb.Append("<html lang=\"ar\" dir=\"rtl\">");
         sb.Append("<head><meta charset=\"UTF-8\"/>");
         sb.Append(EmailCss);
         sb.Append("</head><body>");
         sb.Append("<div class=\"wrap\">");
 
-        // Top bar
+        // ── Top bar — table layout for RTL compatibility ──────────────────────
+        // Logo on LEFT, title+date on RIGHT (RTL: main content on right)
         sb.Append("<div class=\"topbar\">");
-        sb.Append("<h1>📊 تقرير الورديات اليومي</h1>");
-        sb.Append($"<p>التاريخ: {FormatArabicDate(payload.ReportDate)} &nbsp;|&nbsp; إجمالي الورديات: {payload.GrandTotalShifts}</p>");
-        sb.Append("</div>");
+        sb.Append("<table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\">");
+        sb.Append("<tr>");
 
-        // Body
+        // LEFT cell — logo (secondary position in RTL)
+        sb.Append("<td width=\"80\" valign=\"middle\" align=\"left\">");
+        if (logoCid is not null)
+            sb.Append($"<img src=\"cid:{logoCid}\" class=\"topbar-logo\" alt=\"شعار الشركة\"/>");
+        sb.Append("</td>");
+
+        // RIGHT cell — title and date (primary position in RTL)
+        sb.Append("<td valign=\"middle\" align=\"right\" style=\"padding-right:10px\">");
+        sb.Append("<h1 style=\"margin:0 0 4px 0;font-size:19px;color:#fff\">📊 تقرير الأداء اليومي</h1>");
+        sb.Append($"<p style=\"margin:0;font-size:12px;color:#fff;opacity:.85\">التاريخ: {FormatArabicDate(payload.ReportDate)} &nbsp;|&nbsp; إجمالي الورديات: {payload.GrandTotalShifts}</p>");
+        sb.Append("</td>");
+
+        sb.Append("</tr>");
+        sb.Append("</table>");
+        sb.Append("</div>"); // topbar
+
+        // ── Body ─────────────────────────────────────────────────────────────
         sb.Append("<div class=\"body\">");
         sb.Append("<p>السادة المسؤولين،<br/>فيما يلي ملخص أعلى 5 وأدنى 5 مندوب لكل شركة.</p>");
         sb.Append("<div class=\"pdf-note\">📎 يُرفق ملف PDF يحتوي على بيانات جميع المناديب مُجمَّعةً حسب الشركة والسكن.</div>");
@@ -294,11 +298,18 @@ public class DailyReportEmailSender(IOptions<DailyReportSettings> options) : IDa
 
             sb.Append("<div class=\"company-block\">");
 
-            // Company header
-            sb.Append("<div class=\"company-header\">");
-            sb.Append($"<span>🏢 {company.CompanyName}</span>");
-            sb.Append($"<span>ورديات: {company.TotalShifts} &nbsp;|&nbsp; إجمالي الطلبات: {totalOrders}</span>");
-            sb.Append("</div>");
+            // ── Company header — table layout for RTL ─────────────────────────
+            sb.Append("<table width=\"100%\" cellpadding=\"10\" cellspacing=\"0\" border=\"0\" style=\"background:#dce8f7;border-right:5px solid #1a3c6e;border-radius:4px;margin-bottom:10px\">");
+            sb.Append("<tr>");
+            // LEFT — secondary info
+            sb.Append("<td align=\"left\" style=\"font-size:12px;color:#555;font-weight:normal\">");
+            sb.Append($"ورديات: {company.TotalShifts} &nbsp;|&nbsp; إجمالي الطلبات: {totalOrders}");
+            sb.Append("</td>");
+            // RIGHT — main label
+            sb.Append("<td align=\"right\" style=\"font-size:15px;font-weight:bold;color:#1a3c6e\">");
+            sb.Append($"🏢 {company.CompanyName}");
+            sb.Append("</td>");
+            sb.Append("</tr></table>");
 
             // Top 5
             sb.Append("<div class=\"section-label label-top\">🏆 أعلى 5 مندوب</div>");
@@ -308,18 +319,25 @@ public class DailyReportEmailSender(IOptions<DailyReportSettings> options) : IDa
             sb.Append("<div class=\"section-label label-bottom\">⚠️ أدنى 5 مندوب</div>");
             sb.Append(BuildSectionTable(bottom5, isTop: false));
 
-            // Company footer
-            sb.Append("<div class=\"company-footer\">");
-            sb.Append($"<span>✔ إجمالي الورديات: {company.TotalShifts} وردية</span>");
-            sb.Append($"<span>إجمالي الطلبات: <strong>{totalOrders}</strong> &nbsp;|&nbsp; إجمالي الساعات: <strong>{totalHours:F1}</strong> ساعة</span>");
-            sb.Append("</div>");
+            // ── Company footer — table layout for RTL ─────────────────────────
+            sb.Append("<table width=\"100%\" cellpadding=\"6\" cellspacing=\"0\" border=\"0\" style=\"border-top:1px dashed #b0c4de;margin-top:6px\">");
+            sb.Append("<tr>");
+            // LEFT — secondary
+            sb.Append("<td align=\"left\" style=\"font-size:11px;color:#1a3c6e;font-style:italic\">");
+            sb.Append($"إجمالي الطلبات: <strong>{totalOrders}</strong> &nbsp;|&nbsp; إجمالي الساعات: <strong>{totalHours:F1}</strong> ساعة");
+            sb.Append("</td>");
+            // RIGHT — main
+            sb.Append("<td align=\"right\" style=\"font-size:11px;color:#1a3c6e;font-style:italic\">");
+            sb.Append($"✔ إجمالي الورديات: {company.TotalShifts} وردية");
+            sb.Append("</td>");
+            sb.Append("</tr></table>");
 
             sb.Append("</div>"); // company-block
         }
 
         sb.Append("</div>"); // body
 
-        // Footer
+        // ── Footer ────────────────────────────────────────────────────────────
         sb.Append("<div class=\"footer\">");
         sb.Append($"تم إرسال هذا التقرير تلقائيًا بتاريخ {DateTime.Now:dd/MM/yyyy} الساعة {DateTime.Now:HH:mm} &nbsp;|&nbsp; لا تردَّ على هذا البريد");
         sb.Append("</div>");
@@ -354,7 +372,7 @@ public class DailyReportEmailSender(IOptions<DailyReportSettings> options) : IDa
         {
             sb.Append("<tr>");
             sb.Append($"<td style=\"color:#999;font-size:11px\">{rank}</td>");
-            sb.Append($"<td><strong>{r.RiderNameAR}</strong></td>");
+            sb.Append($"<td class=\"td-right\"><strong>{r.RiderNameAR}</strong></td>");
             sb.Append($"<td>{r.HousingName}</td>");
             sb.Append($"<td class=\"{valClass}\">{r.AcceptedOrders}</td>");
             sb.Append($"<td>{r.WorkingHours:F1} ساعة</td>");

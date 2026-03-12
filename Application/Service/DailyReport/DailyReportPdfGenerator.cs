@@ -6,7 +6,7 @@ namespace Application.Service.DailyReport;
 
 public static class DailyReportPdfGenerator
 {
-    public static byte[] Generate(DailyReportPayload payload)
+    public static byte[] Generate(DailyReportPayload payload, byte[]? logoBytes = null)
     {
         QuestPDF.Settings.License = LicenseType.Community;
 
@@ -15,20 +15,26 @@ public static class DailyReportPdfGenerator
             container.Page(page =>
             {
                 page.Size(PageSizes.A4);
-                page.Margin(1.5f, Unit.Centimetre);
+
+                // Vertical margins stay 1.5cm — horizontal reduced 30% (1.5 × 0.7 = 1.05)
+                page.MarginTop(1.5f, Unit.Centimetre);
+                page.MarginBottom(1.5f, Unit.Centimetre);
+                page.MarginLeft(1.05f, Unit.Centimetre);
+                page.MarginRight(1.05f, Unit.Centimetre);
+
                 page.DefaultTextStyle(x =>
                     x.FontSize(13)
                      .FontFamily("Scheherazade New")
                      .DirectionFromRightToLeft());
 
                 page.Header().Element(ComposeHeader(payload));
-                page.Content().Element(ComposeContent(payload));
+                page.Content().Element(ComposeContent(payload, logoBytes));
                 page.Footer().Element(ComposeFooter());
             });
         }).GeneratePdf();
     }
 
-    // ── Header ───────────────────────────────────────────────────────────────
+    // ── Repeating header (all pages) — title + date only, no logo ────────────
     private static Action<IContainer> ComposeHeader(DailyReportPayload payload) =>
         header => header
             .PaddingBottom(10)
@@ -54,7 +60,7 @@ public static class DailyReportPdfGenerator
                     .LineColor(Colors.Blue.Darken3);
             });
 
-    // ── Footer ───────────────────────────────────────────────────────────────
+    // ── Footer ────────────────────────────────────────────────────────────────
     private static Action<IContainer> ComposeFooter() =>
         footer => footer
             .AlignCenter()
@@ -66,36 +72,64 @@ public static class DailyReportPdfGenerator
                 x.TotalPages();
             });
 
-    // ── Content ──────────────────────────────────────────────────────────────
-    private static Action<IContainer> ComposeContent(DailyReportPayload payload) =>
+    // ── Content ───────────────────────────────────────────────────────────────
+    private static Action<IContainer> ComposeContent(DailyReportPayload payload, byte[]? logoBytes) =>
         content => content
             .Column(col =>
             {
+                // ── Logo row — first page only (content items render once) ───
+                // Logo is on the LEFT, opposite the right-aligned header title.
+                // QuestPDF has no "first page only header" API; placing logo
+                // as the first content item is the correct workaround.
+                if (logoBytes is not null)
+                {
+                    col.Item()
+                        .PaddingBottom(6)
+                        .Row(logoRow =>
+                        {
+                            // LEFT side: logo
+                            logoRow.ConstantItem(110)
+                                .AlignLeft()
+                                .AlignMiddle()
+                                .Height(55)
+                                .Image(logoBytes, ImageScaling.FitArea);
+
+                            // RIGHT side: spacer (header text is in page.Header above)
+                            logoRow.RelativeItem();
+                        });
+                }
+
                 foreach (var company in payload.Companies)
                 {
-                    // ── Company block header ─────────────────────────────
+                    // ── Company block header ─────────────────────────────────
+                    // RTL Row: secondary info added FIRST (goes LEFT), 
+                    //          main label added SECOND (goes RIGHT)
                     col.Item()
                         .PaddingTop(14)
                         .Background(Colors.Blue.Lighten4)
                         .Padding(8)
                         .Row(row =>
                         {
-                            row.RelativeItem()
-                                .AlignRight()
-                                .Text($"🏢  الشركة: {company.CompanyName}")
-                                .SemiBold()
-                                .FontSize(12);
-
-                            row.ConstantItem(200)
+                            // LEFT — secondary
+                            row.ConstantItem(180)
                                 .AlignLeft()
+                                .AlignMiddle()
                                 .Text($"إجمالي الورديات: {company.TotalShifts}")
                                 .FontSize(10)
                                 .FontColor(Colors.Blue.Darken3);
+
+                            // RIGHT — main
+                            row.RelativeItem()
+                                .AlignRight()
+                                .AlignMiddle()
+                                .Text($"🏢  الشركة: {company.CompanyName}")
+                                .SemiBold()
+                                .FontSize(12);
                         });
 
                     foreach (var (housingName, rows) in company.RowsByHousing)
                     {
-                        // ── Housing sub-header ───────────────────────────
+                        // ── Housing sub-header ───────────────────────────────
                         col.Item()
                             .PaddingTop(10)
                             .PaddingHorizontal(6)
@@ -103,78 +137,72 @@ public static class DailyReportPdfGenerator
                             .Padding(6)
                             .Row(row =>
                             {
+                                // LEFT — secondary
+                                row.ConstantItem(160)
+                                    .AlignLeft()
+                                    .AlignMiddle()
+                                    .Text($"عدد المناديب: {rows.Count}")
+                                    .FontSize(9)
+                                    .FontColor(Colors.Grey.Darken2);
+
+                                // RIGHT — main
                                 row.RelativeItem()
                                     .AlignRight()
+                                    .AlignMiddle()
                                     .Text($"🏠  السكن: {housingName}")
                                     .SemiBold()
                                     .FontSize(10)
                                     .FontColor(Colors.Grey.Darken3);
-
-                                row.ConstantItem(180)
-                                    .AlignLeft()
-                                    .Text($"عدد المناديب: {rows.Count}")
-                                    .FontSize(9)
-                                    .FontColor(Colors.Grey.Darken2);
                             });
 
-                        // ── Riders table ─────────────────────────────────
+                        // ── Riders table ─────────────────────────────────────
                         col.Item()
                             .PaddingHorizontal(6)
                             .PaddingBottom(8)
                             .Table(table =>
                             {
-                                // Columns — RTL: rightmost column defined first
+                                // RTL column order — left→right in code = right→left visually:
+                                // ساعات | طلبات | سكن | إقامة | اسم | #
                                 table.ColumnsDefinition(cols =>
                                 {
-                                    cols.ConstantColumn(30);    // # (rank)
-                                    cols.RelativeColumn(3);     // اسم المندوب
-                                    cols.RelativeColumn(2);     // رقم الإقامة
-                                    cols.RelativeColumn(2);     // السكن
+                                    cols.RelativeColumn(1.5f);  // ساعات العمل  (leftmost visual)
                                     cols.RelativeColumn(1.5f);  // الطلبات
-                                    cols.RelativeColumn(1.5f);  // ساعات العمل
+                                    cols.RelativeColumn(2);     // السكن
+                                    cols.RelativeColumn(2);     // رقم الإقامة
+                                    cols.RelativeColumn(3);     // اسم المندوب
+                                    cols.ConstantColumn(30);    // #             (rightmost visual)
                                 });
 
-                                // ── Table header ────────────────────────
                                 IContainer HeaderCell(IContainer c) =>
                                     c.Background(Colors.Blue.Darken3)
                                      .Padding(6)
                                      .AlignCenter();
 
+                                // Header cells — same RTL order as columns
                                 table.Header(h =>
                                 {
                                     h.Cell().Element(HeaderCell)
-                                        .Text("#")
-                                        .FontColor(Colors.White).SemiBold();
+                                        .Text("ساعات العمل").FontColor(Colors.White).SemiBold();
                                     h.Cell().Element(HeaderCell)
-                                        .Text("اسم المندوب")
-                                        .FontColor(Colors.White).SemiBold();
+                                        .Text("الطلبات").FontColor(Colors.White).SemiBold();
                                     h.Cell().Element(HeaderCell)
-                                        .Text("رقم الإقامة")
-                                        .FontColor(Colors.White).SemiBold();
+                                        .Text("السكن").FontColor(Colors.White).SemiBold();
                                     h.Cell().Element(HeaderCell)
-                                        .Text("السكن")
-                                        .FontColor(Colors.White).SemiBold();
+                                        .Text("رقم الإقامة").FontColor(Colors.White).SemiBold();
                                     h.Cell().Element(HeaderCell)
-                                        .Text("الطلبات")
-                                        .FontColor(Colors.White).SemiBold();
+                                        .Text("اسم المندوب").FontColor(Colors.White).SemiBold();
                                     h.Cell().Element(HeaderCell)
-                                        .Text("الساعات")
-                                        .FontColor(Colors.White).SemiBold();
+                                        .Text("#").FontColor(Colors.White).SemiBold();
                                 });
 
-                                // ── Data rows ───────────────────────────
-                                // Already ordered desc by AcceptedOrders from BuildPayload
                                 int rank = 1;
                                 foreach (var row in rows)
                                 {
                                     var isEven = rank % 2 == 0;
                                     var rowBg = isEven ? Colors.Grey.Lighten4 : Colors.White;
 
-                                    // Color-code orders: top third green, bottom third red
-                                    var ordersColor = GetOrdersColor(
-                                        row.AcceptedOrders,
-                                        rows.Max(r => r.AcceptedOrders),
-                                        rows.Min(r => r.AcceptedOrders));
+                                    var ordersColor = GetOrdersColor(row.AcceptedOrders);
+
 
                                     IContainer DataCell(IContainer c) =>
                                         c.Background(rowBg)
@@ -183,20 +211,9 @@ public static class DailyReportPdfGenerator
                                          .Padding(5)
                                          .AlignCenter();
 
+                                    // Data cells — same RTL order as columns
                                     table.Cell().Element(DataCell)
-                                        .Text(rank.ToString())
-                                        .FontColor(Colors.Grey.Darken1)
-                                        .FontSize(9);
-
-                                    table.Cell().Element(DataCell)
-                                        .Text(row.RiderNameAR)
-                                        .SemiBold();
-
-                                    table.Cell().Element(DataCell)
-                                        .Text(row.IqamaNo.ToString());
-
-                                    table.Cell().Element(DataCell)
-                                        .Text(row.HousingName);
+                                        .Text($"{row.WorkingHours:F1} ساعة");
 
                                     table.Cell().Element(DataCell)
                                         .Text(row.AcceptedOrders.ToString())
@@ -204,13 +221,25 @@ public static class DailyReportPdfGenerator
                                         .SemiBold();
 
                                     table.Cell().Element(DataCell)
-                                        .Text($"ساعة{row.WorkingHours:F1}");
+                                        .Text(row.HousingName);
+
+                                    table.Cell().Element(DataCell)
+                                        .Text(row.IqamaNo.ToString());
+
+                                    table.Cell().Element(DataCell)
+                                        .Text(row.RiderNameAR)
+                                        .SemiBold();
+
+                                    table.Cell().Element(DataCell)
+                                        .Text(rank.ToString())
+                                        .FontColor(Colors.Grey.Darken1)
+                                        .FontSize(9);
 
                                     rank++;
                                 }
                             });
 
-                        // ── Housing summary row ──────────────────────────
+                        // ── Housing summary ──────────────────────────────────
                         col.Item()
                             .PaddingHorizontal(6)
                             .PaddingBottom(4)
@@ -218,25 +247,28 @@ public static class DailyReportPdfGenerator
                             .Padding(4)
                             .Row(row =>
                             {
-                                row.RelativeItem()
-                                    .AlignRight()
-                                    .Text($"إجمالي طلبات {housingName}: " +
-                                          $"{rows.Sum(r => r.AcceptedOrders)} طلب")
+                                // LEFT — secondary
+                                row.ConstantItem(200)
+                                    .AlignLeft()
+                                    .Text($"إجمالي الساعات: {rows.Sum(r => r.WorkingHours):F1} ساعة")
                                     .FontSize(9)
                                     .FontColor(Colors.Grey.Darken3)
                                     .Italic();
 
-                                row.ConstantItem(200)
-                                    .AlignLeft()
-                                    .Text($"إجمالي الساعات: " +
-                                          $"{rows.Sum(r => r.WorkingHours):F1} ساعة")
+                                // RIGHT — main
+                                row.RelativeItem()
+                                    .AlignRight()
+                                    .Text($"إجمالي طلبات {housingName}: {rows.Sum(r => r.AcceptedOrders)} طلب")
                                     .FontSize(9)
                                     .FontColor(Colors.Grey.Darken3)
                                     .Italic();
                             });
                     }
 
-                    // ── Company summary footer ───────────────────────────
+                    // ── Company summary footer ───────────────────────────────
+                    var companyTotalOrders = company.RowsByHousing
+                        .Values.SelectMany(r => r).Sum(r => r.AcceptedOrders);
+
                     col.Item()
                         .PaddingTop(2)
                         .PaddingHorizontal(6)
@@ -245,22 +277,18 @@ public static class DailyReportPdfGenerator
                         .Padding(6)
                         .Row(row =>
                         {
-                            row.RelativeItem()
-                                .AlignRight()
-                                .Text($"✔ إجمالي ورديات {company.CompanyName}: " +
-                                      $"{company.TotalShifts} وردية")
+                            // LEFT — secondary
+                            row.ConstantItem(240)
+                                .AlignLeft()
+                                .Text($"إجمالي الطلبات المقبولة: {companyTotalOrders} طلب")
                                 .FontSize(9)
                                 .FontColor(Colors.Blue.Darken3)
                                 .Italic();
 
-                            var totalOrders = company.RowsByHousing
-                                .Values
-                                .SelectMany(r => r)
-                                .Sum(r => r.AcceptedOrders);
-
-                            row.ConstantItem(240)
-                                .AlignLeft()
-                                .Text($"إجمالي الطلبات المقبولة: {totalOrders} طلب")
+                            // RIGHT — main
+                            row.RelativeItem()
+                                .AlignRight()
+                                .Text($"✔ إجمالي ورديات {company.CompanyName}: {company.TotalShifts} وردية")
                                 .FontSize(9)
                                 .FontColor(Colors.Blue.Darken3)
                                 .Italic();
@@ -268,21 +296,14 @@ public static class DailyReportPdfGenerator
                 }
             });
 
-    // ── Color-code orders relative to the housing group ──────────────────────
-    private static string GetOrdersColor(int orders, int max, int min)
+    // ── Order color relative to housing group ─────────────────────────────────
+    private static string GetOrdersColor(int orders)
     {
-        if (max == min) return Colors.Black;
-
-        var range = max - min;
-        var topThird = min + (range * 2 / 3.0);
-        var bottomThird = min + (range / 3.0);
-
-        if (orders >= topThird) return Colors.Green.Darken2;
-        if (orders <= bottomThird) return Colors.Red.Darken2;
-        return Colors.Orange.Darken2;
+        if (orders < 12) return Colors.Red.Darken2;
+        if (orders <= 15) return Colors.Orange.Darken2;
+        return Colors.Green.Darken2;
     }
 
-    // ── Arabic date helper ────────────────────────────────────────────────────
     private static readonly string[] ArabicMonths =
     [
         "يناير","فبراير","مارس","أبريل","مايو","يونيو",
