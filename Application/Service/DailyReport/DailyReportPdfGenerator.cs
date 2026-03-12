@@ -58,7 +58,7 @@ public static class DailyReportPdfGenerator
                     textCol.Item()
                         .AlignRight()
                         .Text($"تاريخ الإنشاء: {DateTime.Now:dd/MM/yyyy HH:mm}  |  " +
-                              $"إجمالي الورديات: {payload.GrandTotalShifts}")
+                              $"إجمالي المناديب: {payload.GrandTotalShifts}")
                         .FontSize(9)
                         .FontColor(Colors.Grey.Darken3);
                 });
@@ -112,7 +112,7 @@ public static class DailyReportPdfGenerator
                             row.ConstantItem(180)
                                 .AlignLeft()
                                 .AlignMiddle()
-                                .Text($"إجمالي الورديات: {company.TotalShifts}")
+                                .Text($"إجمالي المناديب: {company.TotalShifts}")
                                 .FontSize(10)
                                 .FontColor(Colors.Blue.Darken3);
 
@@ -286,7 +286,7 @@ public static class DailyReportPdfGenerator
                             // RIGHT — main
                             row.RelativeItem()
                                 .AlignRight()
-                                .Text($"✔ إجمالي ورديات {company.CompanyName}: {company.TotalShifts} وردية")
+                                .Text($"✔ إجمالي ورديات {company.CompanyName}: {company.TotalShifts} مندوب")
                                 .FontSize(9)
                                 .FontColor(Colors.Blue.Darken3)
                                 .Italic();

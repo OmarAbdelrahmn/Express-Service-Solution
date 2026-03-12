@@ -231,7 +231,7 @@ public class DailyReportEmailSender(IOptions<DailyReportSettings> options) : IDa
         var sb = new System.Text.StringBuilder();
 
         sb.AppendLine($"تقرير الأداء اليومي — {FormatArabicDate(payload.ReportDate)}");
-        sb.AppendLine($"إجمالي الورديات: {payload.GrandTotalShifts}");
+        sb.AppendLine($"إجمالي المناديب: {payload.GrandTotalShifts}");
         sb.AppendLine(new string('─', 60));
 
         foreach (var company in payload.Companies)
@@ -293,7 +293,7 @@ public class DailyReportEmailSender(IOptions<DailyReportSettings> options) : IDa
         sb.Append("<td align=\"right\" valign=\"middle\" style=\"padding:18px 24px\">");
         sb.Append("<h1 style=\"margin:0 0 5px 0;font-size:19px;color:#fff;font-weight:bold\">📊 تقرير الأداء اليومي</h1>");
         sb.Append($"<p style=\"margin:0;font-size:12px;color:#fff;opacity:.85\">");
-        sb.Append($"التاريخ: {FormatArabicDate(payload.ReportDate)} &nbsp;|&nbsp; إجمالي الورديات: {payload.GrandTotalShifts}");
+        sb.Append($"التاريخ: {FormatArabicDate(payload.ReportDate)} &nbsp;|&nbsp; إجمالي المناديب: {payload.GrandTotalShifts}");
         sb.Append("</p>");
         sb.Append("</td>");
 
@@ -357,7 +357,7 @@ public class DailyReportEmailSender(IOptions<DailyReportSettings> options) : IDa
             sb.Append("<tr>");
             // RIGHT — primary label
             sb.Append("<td align=\"right\" style=\"font-size:11px;color:#1a3c6e;font-style:italic\">");
-            sb.Append($"✔ إجمالي الورديات: {company.TotalShifts} وردية");
+            sb.Append($"✔ إجمالي المناديب: {company.TotalShifts} مندوب");
             sb.Append("</td>");
             // LEFT — numbers
             sb.Append("<td align=\"left\" style=\"font-size:11px;color:#1a3c6e;font-style:italic;white-space:nowrap\">");
