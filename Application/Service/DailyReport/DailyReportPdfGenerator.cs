@@ -23,42 +23,62 @@ public static class DailyReportPdfGenerator
                 page.MarginRight(1.05f, Unit.Centimetre);
 
                 page.DefaultTextStyle(x =>
-                    x.FontSize(13)
+                    x.FontSize(10)
                      .FontFamily("Scheherazade New")
                      .DirectionFromRightToLeft());
 
-                page.Header().Element(ComposeHeader(payload));
-                page.Content().Element(ComposeContent(payload, logoBytes));
+                page.Header().Element(ComposeHeader(payload, logoBytes));
+                page.Content().Element(ComposeContent(payload));
                 page.Footer().Element(ComposeFooter());
             });
         }).GeneratePdf();
     }
 
     // ── Repeating header (all pages) — title + date only, no logo ────────────
-    private static Action<IContainer> ComposeHeader(DailyReportPayload payload) =>
-        header => header
-            .PaddingBottom(10)
-            .Column(col =>
+    private static Action<IContainer> ComposeHeader(DailyReportPayload payload, byte[]? logoBytes) =>
+           header => header
+    .PaddingBottom(10)
+    .Column(col =>
+    {
+        // Title row: logo on LEFT, text on RIGHT
+        col.Item().Row(row =>
+        {
+            // RIGHT — title + date
+            row.RelativeItem()
+                .AlignRight()
+                .Column(textCol =>
+                {
+                    textCol.Item()
+                        .AlignRight()
+                        .Text($"تقرير وردِيَّات المناديب اليومي — {FormatArabicDate(payload.ReportDate)}")
+                        .SemiBold()
+                        .FontSize(12)                    // ← reduced from 16
+                        .FontColor(Colors.Blue.Darken3);
+
+                    textCol.Item()
+                        .AlignRight()
+                        .Text($"تاريخ الإنشاء: {DateTime.Now:dd/MM/yyyy HH:mm}  |  " +
+                              $"إجمالي الورديات: {payload.GrandTotalShifts}")
+                        .FontSize(9)
+                        .FontColor(Colors.Grey.Darken3);
+                });
+
+            // LEFT — logo
+            if (logoBytes is not null)
             {
-                col.Item()
-                    .AlignRight()
-                    .Text($"تقرير وردِيَّات المناديب اليومي — {FormatArabicDate(payload.ReportDate)}")
-                    .SemiBold()
-                    .FontSize(16)
-                    .FontColor(Colors.Blue.Darken3);
+                row.ConstantItem(70)
+                    .AlignLeft()
+                    .AlignMiddle()
+                    .Height(45)
+                    .Image(logoBytes, ImageScaling.FitArea);
+            }
+        });
 
-                col.Item()
-                    .AlignRight()
-                    .Text($"تاريخ الإنشاء: {DateTime.Now:dd/MM/yyyy HH:mm}  |  " +
-                          $"إجمالي الورديات: {payload.GrandTotalShifts}")
-                    .FontSize(9)
-                    .FontColor(Colors.Grey.Darken3);
-
-                col.Item()
-                    .PaddingTop(6)
-                    .LineHorizontal(1)
-                    .LineColor(Colors.Blue.Darken3);
-            });
+        col.Item()
+            .PaddingTop(6)
+            .LineHorizontal(1)
+            .LineColor(Colors.Blue.Darken3);
+    });
 
     // ── Footer ────────────────────────────────────────────────────────────────
     private static Action<IContainer> ComposeFooter() =>
@@ -73,32 +93,10 @@ public static class DailyReportPdfGenerator
             });
 
     // ── Content ───────────────────────────────────────────────────────────────
-    private static Action<IContainer> ComposeContent(DailyReportPayload payload, byte[]? logoBytes) =>
+    private static Action<IContainer> ComposeContent(DailyReportPayload payload) =>
         content => content
             .Column(col =>
             {
-                // ── Logo row — first page only (content items render once) ───
-                // Logo is on the LEFT, opposite the right-aligned header title.
-                // QuestPDF has no "first page only header" API; placing logo
-                // as the first content item is the correct workaround.
-                if (logoBytes is not null)
-                {
-                    col.Item()
-                        .PaddingBottom(6)
-                        .Row(logoRow =>
-                        {
-                            // LEFT side: logo
-                            logoRow.ConstantItem(110)
-                                .AlignLeft()
-                                .AlignMiddle()
-                                .Height(55)
-                                .Image(logoBytes, ImageScaling.FitArea);
-
-                            // RIGHT side: spacer (header text is in page.Header above)
-                            logoRow.RelativeItem();
-                        });
-                }
-
                 foreach (var company in payload.Companies)
                 {
                     // ── Company block header ─────────────────────────────────
@@ -182,7 +180,7 @@ public static class DailyReportPdfGenerator
                                 table.Header(h =>
                                 {
                                     h.Cell().Element(HeaderCell)
-                                        .Text("ساعات العمل").FontColor(Colors.White).SemiBold();
+                                        .Text("الساعات").FontColor(Colors.White).SemiBold();
                                     h.Cell().Element(HeaderCell)
                                         .Text("الطلبات").FontColor(Colors.White).SemiBold();
                                     h.Cell().Element(HeaderCell)
@@ -213,7 +211,7 @@ public static class DailyReportPdfGenerator
 
                                     // Data cells — same RTL order as columns
                                     table.Cell().Element(DataCell)
-                                        .Text($"{row.WorkingHours:F1} ساعة");
+                                        .Text($"{row.WorkingHours:F1}ساعة");
 
                                     table.Cell().Element(DataCell)
                                         .Text(row.AcceptedOrders.ToString())

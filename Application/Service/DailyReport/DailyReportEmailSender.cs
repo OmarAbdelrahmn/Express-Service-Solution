@@ -28,111 +28,184 @@ public class DailyReportEmailSender(IOptions<DailyReportSettings> options) : IDa
     private static string FormatArabicDate(DateOnly d) =>
         $"{d.Day} {ArabicMonths[d.Month - 1]} {d.Year}";
 
-    // ── CSS — no interpolation, no escaping ──────────────────────────────────
     private const string EmailCss = """
-        <style>
-        body {
-            font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
-            font-size: 13px;
-            color: #333;
-            background: #f9f9f9;
-            direction: rtl;
-            text-align: right;
-        }
-        .wrap {
-            max-width: 860px;
-            margin: 20px auto;
-            background: #fff;
-            border-radius: 8px;
-            overflow: hidden;
-            box-shadow: 0 2px 8px rgba(0,0,0,.1);
-        }
-        .topbar {
-            background: #1a3c6e;
-            color: #fff;
-            padding: 14px 20px;
-        }
-        .topbar h1 {
-            margin: 0 0 4px 0;
-            font-size: 19px;
-        }
-        .topbar p {
-            margin: 0;
-            font-size: 12px;
-            opacity: .85;
-        }
-        .topbar-logo {
-            height: 55px;
-            width: auto;
-            display: block;
-        }
-        .body {
-            padding: 20px 24px;
-        }
-        .company-block {
-            margin-bottom: 30px;
-        }
-        .section-label {
-            font-size: 13px;
-            font-weight: bold;
-            padding: 6px 10px;
-            margin: 10px 0 4px;
-            border-radius: 3px;
-        }
-        .label-top {
-            background: #e8f5e9;
-            color: #2e7d32;
-            border-right: 4px solid #2e7d32;
-        }
-        .label-bottom {
-            background: #ffebee;
-            color: #c62828;
-            border-right: 4px solid #c62828;
-        }
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-bottom: 6px;
-        }
-        th {
-            padding: 8px 10px;
-            text-align: center;
-            font-size: 12px;
-        }
-        td {
-            padding: 7px 10px;
-            text-align: center;
-            border-bottom: 1px solid #eee;
-            font-size: 12px;
-        }
-        .td-right {
-            text-align: right;
-        }
-        tr:nth-child(even) td {
-            background: #f5f7fa;
-        }
-        .th-top    { background: #2e7d32; color: #fff; }
-        .th-bottom { background: #c62828; color: #fff; }
-        .val-top   { color: #2e7d32; font-weight: bold; }
-        .val-bottom{ color: #c62828; font-weight: bold; }
-        .pdf-note {
-            background: #fff8e1;
-            border: 1px solid #ffe082;
-            border-radius: 4px;
-            padding: 8px 12px;
-            font-size: 12px;
-            color: #795548;
-            margin-bottom: 16px;
-        }
-        .footer {
-            background: #f0f0f0;
-            text-align: center;
-            padding: 12px;
-            font-size: 11px;
-            color: #888;
-        }
-        </style>
-        """;
+    <style>
+    * { box-sizing: border-box; }
+    body {
+        font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
+        font-size: 13px;
+        color: #333;
+        background: #f9f9f9;
+        direction: rtl;
+        text-align: right;
+    }
+    .wrap {
+        max-width: 860px;
+        margin: 20px auto;
+        background: #fff;
+        border-radius: 8px;
+        overflow: hidden;
+        box-shadow: 0 2px 8px rgba(0,0,0,.1);
+        direction: rtl;
+    }
+    .topbar {
+        background: #1a3c6e;
+        color: #fff;
+        padding: 18px 24px;
+        direction: rtl;
+        text-align: right;
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        gap: 16px;
+    }
+    .topbar-logo {
+        width: 52px;
+        height: 52px;
+        background: #fff;
+        border-radius: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 26px;
+        flex-shrink: 0;
+        order: 2;        /* logo appears on LEFT visually in RTL */
+    }
+    .topbar-text {
+        flex: 1;
+        order: 1;
+        text-align: right;
+    }
+    .topbar-text h1 {
+        margin: 0;
+        font-size: 20px;
+    }
+    .topbar-text p {
+        margin: 4px 0 0;
+        font-size: 12px;
+        opacity: .8;
+    }
+    .body {
+        padding: 20px 24px;
+        direction: rtl;
+        text-align: right;
+    }
+    .company-block {
+        margin-bottom: 30px;
+    }
+    .company-header {
+        background: #dce8f7;
+        border-right: 5px solid #1a3c6e;
+        border-left: none;
+        padding: 10px 14px;
+        margin-bottom: 10px;
+        border-radius: 4px;
+        font-size: 15px;
+        font-weight: bold;
+        display: flex;
+        flex-direction: row;          /* right=company name, left=stats */
+        justify-content: space-between;
+        align-items: center;
+        direction: rtl;
+    }
+    .company-header span {
+        font-size: 12px;
+        font-weight: normal;
+        color: #555;
+    }
+    .section-label {
+        font-size: 13px;
+        font-weight: bold;
+        padding: 6px 10px;
+        margin: 10px 0 4px;
+        border-radius: 3px;
+        text-align: right;
+        direction: rtl;
+    }
+    .label-top {
+        background: #e8f5e9;
+        color: #2e7d32;
+        border-right: 4px solid #2e7d32;
+    }
+    .label-bottom {
+        background: #ffebee;
+        color: #c62828;
+        border-right: 4px solid #c62828;
+    }
+    table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-bottom: 6px;
+        direction: rtl;
+    }
+    th {
+        padding: 8px 10px;
+        text-align: right;
+        font-size: 12px;
+    }
+    td {
+        padding: 7px 10px;
+        text-align: right;
+        border-bottom: 1px solid #eee;
+        font-size: 12px;
+    }
+    td.num {
+        text-align: center;
+    }
+    tr:nth-child(even) td {
+        background: #f5f7fa;
+    }
+    .th-top {
+        background: #2e7d32;
+        color: #fff;
+    }
+    .th-bottom {
+        background: #c62828;
+        color: #fff;
+    }
+    .val-top {
+        color: #2e7d32;
+        font-weight: bold;
+        text-align: center;
+    }
+    .val-bottom {
+        color: #c62828;
+        font-weight: bold;
+        text-align: center;
+    }
+    .company-footer {
+        font-size: 11px;
+        color: #1a3c6e;
+        font-style: italic;
+        padding: 6px 8px 4px;
+        display: flex;
+        flex-direction: row;
+        justify-content: space-between;
+        border-top: 1px dashed #b0c4de;
+        margin-top: 6px;
+        direction: rtl;
+    }
+    .pdf-note {
+        background: #fff8e1;
+        border: 1px solid #ffe082;
+        border-radius: 4px;
+        padding: 8px 12px;
+        font-size: 12px;
+        color: #795548;
+        margin-bottom: 16px;
+        text-align: right;
+        direction: rtl;
+    }
+    .footer {
+        background: #f0f0f0;
+        text-align: center;
+        padding: 12px;
+        font-size: 11px;
+        color: #888;
+        direction: rtl;
+    }
+    </style>
+    """;
 
     public async Task SendAsync(
         DailyReportPayload payload,
@@ -258,7 +331,7 @@ public class DailyReportEmailSender(IOptions<DailyReportSettings> options) : IDa
         sb.Append("<html lang=\"ar\" dir=\"rtl\">");
         sb.Append("<head><meta charset=\"UTF-8\"/>");
         sb.Append(EmailCss);
-        sb.Append("</head><body>");
+        sb.Append("</head><body dir=\"rtl\" style=\"direction:rtl;text-align:right\">");
         sb.Append("<div class=\"wrap\">");
 
         // ── Top bar — table layout for RTL compatibility ──────────────────────
