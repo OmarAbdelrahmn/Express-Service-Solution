@@ -36,8 +36,7 @@ public class DailyReportJob(
             .AsNoTracking()
             .Include(s => s.Rider)
                 .ThenInclude(r => r.Employee)
-            .Include(s => s.Rider)
-                .ThenInclude(r => r.Company)
+            .Include(s => s.Company)           // ← company directly from shift
             .Include(s => s.Housing)
             .Where(s => s.ShiftDate == reportDate)
             .ToListAsync();
@@ -153,7 +152,7 @@ public class DailyReportJob(
         var byCompany = shifts.GroupBy(s => new
         {
             s.CompanyId,
-            CompanyName = s.Rider?.Company?.Name ?? $"شركة {s.CompanyId}"
+            CompanyName = s.Company?.Name ?? $"شركة {s.CompanyId}"
         });
 
         foreach (var companyGroup in byCompany.OrderBy(c => c.Key.CompanyName))
