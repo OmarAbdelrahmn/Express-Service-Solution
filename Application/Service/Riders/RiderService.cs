@@ -518,8 +518,6 @@ public class RiderService(ApplicationDbcontext dbcontext, IRiderWorkingIdHistory
         if (request.DateOfBirth.HasValue)
             employee.DateOfBirth = request.DateOfBirth.Value;
 
-        if (!string.IsNullOrWhiteSpace(request.Status))
-            employee.Status = request.Status;
 
         if (!string.IsNullOrWhiteSpace(request.IBAN))
             employee.IBAN = request.IBAN;
@@ -529,6 +527,14 @@ public class RiderService(ApplicationDbcontext dbcontext, IRiderWorkingIdHistory
 
         if (request.HousingId.HasValue)
             employee.HousingId = request.HousingId.Value;
+
+        if (!string.IsNullOrWhiteSpace(request.Status))
+        {
+            employee.Status = request.Status;
+
+            if (request.Status.Equals("fleeing", StringComparison.OrdinalIgnoreCase))
+                employee.HousingId = null;
+        }
     }
 
     public async Task<List<RiderResponse>> SmartSearch(string keyword)

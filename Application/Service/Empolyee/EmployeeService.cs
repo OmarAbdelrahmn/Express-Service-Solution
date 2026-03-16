@@ -4,6 +4,7 @@ using Domain;
 using Domain.Entities;
 using Mapster;
 using Microsoft.EntityFrameworkCore;
+using static Microsoft.EntityFrameworkCore.DbLoggerCategory;
 
 namespace Application.Service.Empolyee;
 
@@ -666,6 +667,9 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
 
                 // Update employee status
                 employee.Status = statusChange.Action;
+                if (employee.Status == "fleeing")
+                    employee.HousingId = null;
+                
                 dbcontext.Employees.Update(employee);
             }
 

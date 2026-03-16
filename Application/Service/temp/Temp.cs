@@ -368,9 +368,10 @@ public class Temp(ApplicationDbcontext dbcontext) : ITemp
                                 if (update.NewCountry != null) { employee.Country = update.NewCountry; changedFields++; }
                                 if (update.NewPhone != null) { employee.Phone = update.NewPhone; changedFields++; }
                                 if (update.NewDateOfBirth.HasValue) { employee.DateOfBirth = update.NewDateOfBirth.Value; changedFields++; }
-                                if (update.NewStatus != null) { employee.Status = update.NewStatus; changedFields++; }
                                 if (update.NewIBAN != null) { employee.IBAN = update.NewIBAN; changedFields++; }
                                 if (update.NewINKSA.HasValue) { employee.INKSA = update.NewINKSA.Value; changedFields++; }
+                                if (update.NewStatus != null) { employee.Status = update.NewStatus; changedFields++; if (update.NewStatus.Equals("fleeing", StringComparison.OrdinalIgnoreCase)) { employee.HousingId = null; changedFields++; } }
+
 
                                 if (changedFields > 0)
                                 {

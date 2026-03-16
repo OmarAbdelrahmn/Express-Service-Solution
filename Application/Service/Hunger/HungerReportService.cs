@@ -302,7 +302,7 @@ public class HungerReportService(ApplicationDbcontext dbcontext) : IHungerReport
         var totalHours = riderShifts.Sum(s => s.WorkingHours);
         var avgHours = validWorkingDays > 0 ? totalHours / validWorkingDays : 0f;
         var workingDaysDeficit = Math.Max(0, adjustedRequiredWorkingDays - validWorkingDays);
-        var ordersDeficit = Math.Max(0, adjustedRequiredOrders - totalOrders);
+        var ordersDeficit = totalOrders - adjustedRequiredOrders;
 
         // ── Percentages ─────────────────────────────────────────────────────
         //
