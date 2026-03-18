@@ -5,6 +5,7 @@ using Application.Service.Auth;
 using Application.Service.Backgroundimports;
 using Application.Service.DailyReport;
 using Application.Service.DE;
+using Application.Service.EmployeesFiles;
 using Application.Service.Empolyee;
 using Application.Service.Freelancer;
 using Application.Service.Hungerdisa;
@@ -72,7 +73,7 @@ public static class ApplicationDependencies
         Services.AddScoped<IFreelancerService, FreelancerService>();
         Services.AddScoped<IMonthlyValidityService, MonthlyValidityService>();
         Services.AddScoped<IHungerReportService, HungerReportService>();
-
+        Services.AddScoped<IEmployeeDocumentsService, EmployeeDocumentsService>();
 
         #region Hnagfire + Daily Report Job
         // ── Hangfire ────────────────────────────────────────────────────────────────

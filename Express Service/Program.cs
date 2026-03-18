@@ -66,6 +66,8 @@ RecurringJob.AddOrUpdate<IDailyReportJob>(
         TimeZone = TimeZoneInfo.FindSystemTimeZoneById("Arab Standard Time")
     });
 
+app.UseStaticFiles();
+
 app.UseResponseCaching();
 
 app.UseHttpsRedirection();
