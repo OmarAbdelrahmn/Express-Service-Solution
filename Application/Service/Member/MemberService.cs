@@ -2597,6 +2597,20 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
             ));
         }
 
+        // Check if there's already a pending take request for this rider + vehicle
+        var existingTakeRequest = await context.TempVehicleOperations
+            .AnyAsync(t => t.RiderIqamaNo == request.RiderIqamaNo
+                && t.VehicleNumber == vehicle.VehicleNumber
+                && t.VehicleStatusType == VehicleStatusType.Taken
+                && !t.IsResolved);
+
+        if (existingTakeRequest)
+            return Result.Failure(new Error(
+                "DuplicateRequest",
+                "A pending take request already exists for this rider and vehicle",
+                400
+            ));
+
         // Check if vehicle is currently assigned to any rider in this housing
         var vehicleInHousing = await context.RiderDetails
             .AnyAsync(r => employeeIqamas.Contains(r.EmployeeIqamaNo)
@@ -2699,6 +2713,20 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
                 400
             ));
         }
+
+        // Check if there's already a pending return request for this rider + vehicle
+        var existingReturnRequest = await context.TempVehicleOperations
+            .AnyAsync(t => t.RiderIqamaNo == request.RiderIqamaNo
+                && t.VehicleNumber == vehicle.VehicleNumber
+                && t.VehicleStatusType == VehicleStatusType.Returned
+                && !t.IsResolved);
+
+        if (existingReturnRequest)
+            return Result.Failure(new Error(
+                "DuplicateRequest",
+                "A pending return request already exists for this rider and vehicle",
+                400
+            ));
 
         // Get the username of the manager
         var manager = await userManager.FindByNameAsync(managerIqamaNo.ToString());
@@ -3046,12 +3074,13 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
         if (!isNewVehicleAvailable)
             return Result.Failure(HousingMemberErrors.NewVehicleNotAvailable);
 
-        // Check if there's already a pending switch request for this rider
+        // Replace the existing existingSwitchRequest check with this:
         var existingSwitchRequest = await context.TempVehicleOperations
             .AnyAsync(t => t.RiderIqamaNo == request.RiderIqamaNo
-                && !t.IsResolved
-                && t.VehicleNumber == currentVehicleNumber  // Current vehicle stored in VehicleNumber
-                && !string.IsNullOrEmpty(t.VehiclePlateNumber)); // New vehicle in VehiclePlateNumber
+                && t.VehicleNumber == currentVehicleNumber
+                && t.VehiclePlateNumber == request.NewVehiclePlate
+                && t.VehicleStatusType == VehicleStatusType.switched
+                && !t.IsResolved);
 
         if (existingSwitchRequest)
             return Result.Failure(HousingMemberErrors.PendingSwitchRequest);

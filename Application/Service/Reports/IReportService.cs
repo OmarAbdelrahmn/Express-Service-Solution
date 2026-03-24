@@ -1109,7 +1109,7 @@ public record RiderPerformanceDetail(
 
 public enum PerformanceTier
 {
-    Excellent = 1,  // 400+ orders (14+ per day average)
-    Good = 2,       // 301-400 orders (10-13 per day average)
-    Poor = 3        // 1-300 orders (1-9 per day average)
+    Excellent = 1,  // 450+ orders
+    Good = 2,       // 400–449 orders
+    Poor = 3        // below 400 orders
 }

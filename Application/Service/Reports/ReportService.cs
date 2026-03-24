@@ -892,15 +892,29 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
         return (firstShiftDate, true);
     }
 
+    //private PerformanceTier DeterminePerformanceTier(int totalOrders, int totalExpectedDays)
+    //{
+    //    // Dynamic thresholds based on period length
+    //    // Excellent: 14+ orders per day
+    //    // Good: 10-13 orders per day
+    //    // Poor: below 10 orders per day
+
+    //    var excellentThreshold = 14 * totalExpectedDays;
+    //    var goodThreshold = 10 * totalExpectedDays;
+
+    //    if (totalOrders >= excellentThreshold)
+    //        return PerformanceTier.Excellent;
+    //    else if (totalOrders >= goodThreshold)
+    //        return PerformanceTier.Good;
+    //    else
+    //        return PerformanceTier.Poor;
+    //}
+
     private PerformanceTier DeterminePerformanceTier(int totalOrders, int totalExpectedDays)
     {
-        // Dynamic thresholds based on period length
-        // Excellent: 14+ orders per day
-        // Good: 10-13 orders per day
-        // Poor: below 10 orders per day
-
-        var excellentThreshold = 14 * totalExpectedDays;
-        var goodThreshold = 10 * totalExpectedDays;
+        // Scale based on 30-day month targets (450 excellent, 400 good)
+        var excellentThreshold = (int)Math.Ceiling(450m / 30 * totalExpectedDays);
+        var goodThreshold = (int)Math.Ceiling(400m / 30 * totalExpectedDays);
 
         if (totalOrders >= excellentThreshold)
             return PerformanceTier.Excellent;
@@ -912,15 +926,15 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
 
     private string GetTierDescription(PerformanceTier tier, int totalOrders, int totalExpectedDays)
     {
-        var excellentThreshold = 14 * totalExpectedDays;
-        var goodThreshold = 10 * totalExpectedDays;
+        var excellentThreshold = (int)Math.Ceiling(450m / 30 * totalExpectedDays);
+        var goodThreshold = (int)Math.Ceiling(400m / 30 * totalExpectedDays);
 
         return tier switch
         {
-            PerformanceTier.Excellent => $"🌟 Excellent - {totalOrders} orders (14+ per day average, target: {excellentThreshold}+)",
-            PerformanceTier.Good => $"✅ Good - {totalOrders} orders (10-13 per day average, target: {goodThreshold}-{excellentThreshold - 1})",
-            PerformanceTier.Poor => $"⚠️ Needs Improvement - {totalOrders} orders (below 10 per day average, target: {goodThreshold}+)",
-            _ => "Unknown"
+            PerformanceTier.Excellent => $"🌟 ممتاز - {totalOrders} طلب (الهدف: {excellentThreshold} طلب فأكثر)",
+            PerformanceTier.Good => $"✅ جيد - {totalOrders} طلب (الهدف: من {goodThreshold} إلى {excellentThreshold - 1} طلب)",
+            PerformanceTier.Poor => $"⚠️ يحتاج تحسين - {totalOrders} طلب (أقل من {goodThreshold} طلب)",
+            _ => "غير معروف"
         };
     }
 
