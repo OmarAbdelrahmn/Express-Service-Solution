@@ -4253,7 +4253,9 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                 PerformanceScore: performanceScore,
                 TotalWorkingHours: companyShifts.Sum(s => s.WorkingHours)
             );
-        }).OrderByDescending(c => c.PerformanceScore).ToList();
+        })
+            .Where(c=>c.TotalShifts > 0) // Only include companies with shifts in the period
+            .OrderByDescending(c => c.PerformanceScore).ToList();
 
         var topPerformer = companyDetails.FirstOrDefault();
         var lowestPerformer = companyDetails.LastOrDefault();
