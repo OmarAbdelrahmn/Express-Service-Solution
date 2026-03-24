@@ -2820,7 +2820,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
 
             // Get all shifts for this rider
             var shifts = await _dbcontext.RiderShifts
-                .Where(s => s.RiderId == rider.Id)
+                .Where(s => s.RiderId == rider.Id && s.CompanyId == 1)
                 .OrderBy(s => s.ShiftDate)
                 .AsNoTracking()
                 .ToListAsync(cancellationToken);
