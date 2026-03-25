@@ -1798,7 +1798,7 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
             VehicleNumber = operation.VehicleNumber,
             StatusType = VehicleStatusType.Returned,
             Reason = operation.Reason ?? "Vehicle problem fixed - now available",
-            IsActive = true, // ✅ Vehicle is now available
+            IsActive = false, // ✅ Vehicle is now available
             Timestamp = DateTime.UtcNow.AddHours(3)
         });
 
@@ -2181,7 +2181,7 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
 
                 var currentStatus = v.ActiveStatuses.Any()
                     ? v.ActiveStatuses.First().StatusType.ToString()
-                    : "Available";
+                    : "Returned";
 
                 var statusSince = v.ActiveStatuses.Any()
                     ? v.ActiveStatuses.OrderBy(s => s.Timestamp).First().Timestamp

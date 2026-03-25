@@ -51,44 +51,32 @@ public class Temp(ApplicationDbcontext dbcontext) : ITemp
 
                 var existingEmployee = allEmployees.FirstOrDefault(e => e.IqamaNo == IqamaNo);
 
-                // Get new values from Excel
-                var newIqamaEndM = GetDateValue(worksheet, row, columnMapping, "IqamaEndM");
                 var newIqamaEndH = GetDateValue(worksheet, row, columnMapping, "IqamaEndH");
                 var newPassportNo = GetStringValue(worksheet, row, columnMapping, "PassportNo");
                 var newPassportEnd = GetDateValue(worksheet, row, columnMapping, "PassportEnd");
-                var newSponsor = GetStringValue(worksheet, row, columnMapping, "Sponsor");
                 var newSponsorNo = GetLongValue(worksheet, row, columnMapping, "SponsorNo");
                 var newJobTitle = GetStringValue(worksheet, row, columnMapping, "JobTitle");
-                var newNameAR = GetStringValue(worksheet, row, columnMapping, "NameAR");
-                var newNameEN = GetStringValue(worksheet, row, columnMapping, "NameEN");
-                var newCountry = GetStringValue(worksheet, row, columnMapping, "Country");
-                var newPhone = GetStringValue(worksheet, row, columnMapping, "Phone");
-                var newDateOfBirth = GetDateOnlyValue(worksheet, row, columnMapping, "DateOfBirth");
-                var newStatus = GetStringValue(worksheet, row, columnMapping, "Status");
-                var newIBAN = GetStringValue(worksheet, row, columnMapping, "IBAN");
-                var newINKSA = GetBoolValue(worksheet, row, columnMapping, "INKSA");
 
                 // Check if this is a new employee (in Excel but not in DB)
                 if (existingEmployee == null)
                 {
-                    // Store information but DON'T add to TempEmployeeUpdate
                     newEmployeesFromExcel.Add(new EmployeeRowInfo(
                         IqamaNo: IqamaNo,
-                        IqamaEndM: newIqamaEndM,
+                        IqamaEndM: null,
                         IqamaEndH: newIqamaEndH,
                         PassportNo: newPassportNo,
                         PassportEnd: newPassportEnd,
-                        Sponsor: newSponsor,
+                        Sponsor: null,
                         SponsorNo: newSponsorNo,
                         JobTitle: newJobTitle,
-                        NameAR: newNameAR,
-                        NameEN: newNameEN,
-                        Country: newCountry,
-                        Phone: newPhone,
-                        DateOfBirth: newDateOfBirth,
-                        Status: newStatus,
-                        IBAN: newIBAN,
-                        INKSA: newINKSA.HasValue ? !newINKSA.Value : null
+                        NameAR: null,
+                        NameEN: null,
+                        Country: null,
+                        Phone: null,
+                        DateOfBirth: null,
+                        Status: null,
+                        IBAN: null,
+                        INKSA: null
                     ));
                     continue;
                 }
@@ -103,17 +91,14 @@ public class Temp(ApplicationDbcontext dbcontext) : ITemp
 
                 bool hasChanges = false;
 
-                if (HasChanged(existingEmployee.IqamaEndM, newIqamaEndM))
-                {
-                    tempUpdateExisting.OldIqamaEndM = existingEmployee.IqamaEndM;
-                    tempUpdateExisting.NewIqamaEndM = newIqamaEndM;
-                    hasChanges = true;
-                }
-
                 if (HasChanged(existingEmployee.IqamaEndH, newIqamaEndH))
                 {
                     tempUpdateExisting.OldIqamaEndH = existingEmployee.IqamaEndH;
                     tempUpdateExisting.NewIqamaEndH = newIqamaEndH;
+                    tempUpdateExisting.OldIqamaEndM = existingEmployee.IqamaEndM;
+                    tempUpdateExisting.NewIqamaEndM = newIqamaEndH.HasValue
+                        ? HijriToGregorian(newIqamaEndH.Value)
+                        : null;
                     hasChanges = true;
                 }
 
@@ -131,13 +116,6 @@ public class Temp(ApplicationDbcontext dbcontext) : ITemp
                     hasChanges = true;
                 }
 
-                if (HasChanged(existingEmployee.Sponsor, newSponsor))
-                {
-                    tempUpdateExisting.OldSponsor = existingEmployee.Sponsor;
-                    tempUpdateExisting.NewSponsor = newSponsor;
-                    hasChanges = true;
-                }
-
                 if (HasChanged(existingEmployee.sponsorNo, newSponsorNo))
                 {
                     tempUpdateExisting.OldSponsorNo = existingEmployee.sponsorNo;
@@ -150,66 +128,6 @@ public class Temp(ApplicationDbcontext dbcontext) : ITemp
                     tempUpdateExisting.OldJobTitle = existingEmployee.JobTitle;
                     tempUpdateExisting.NewJobTitle = newJobTitle;
                     hasChanges = true;
-                }
-
-                if (HasChanged(existingEmployee.NameAR, newNameAR))
-                {
-                    tempUpdateExisting.OldNameAR = existingEmployee.NameAR;
-                    tempUpdateExisting.NewNameAR = newNameAR;
-                    hasChanges = true;
-                }
-
-                if (HasChanged(existingEmployee.NameEN, newNameEN))
-                {
-                    tempUpdateExisting.OldNameEN = existingEmployee.NameEN;
-                    tempUpdateExisting.NewNameEN = newNameEN;
-                    hasChanges = true;
-                }
-
-                if (HasChanged(existingEmployee.Country, newCountry))
-                {
-                    tempUpdateExisting.OldCountry = existingEmployee.Country;
-                    tempUpdateExisting.NewCountry = newCountry;
-                    hasChanges = true;
-                }
-
-                if (HasChanged(existingEmployee.Phone, newPhone))
-                {
-                    tempUpdateExisting.OldPhone = existingEmployee.Phone;
-                    tempUpdateExisting.NewPhone = newPhone;
-                    hasChanges = true;
-                }
-
-                if (HasChanged(existingEmployee.DateOfBirth, newDateOfBirth))
-                {
-                    tempUpdateExisting.OldDateOfBirth = existingEmployee.DateOfBirth;
-                    tempUpdateExisting.NewDateOfBirth = newDateOfBirth;
-                    hasChanges = true;
-                }
-
-                if (HasChanged(existingEmployee.Status, newStatus))
-                {
-                    tempUpdateExisting.OldStatus = existingEmployee.Status;
-                    tempUpdateExisting.NewStatus = newStatus;
-                    hasChanges = true;
-                }
-
-                if (HasChanged(existingEmployee.IBAN, newIBAN))
-                {
-                    tempUpdateExisting.OldIBAN = existingEmployee.IBAN;
-                    tempUpdateExisting.NewIBAN = newIBAN;
-                    hasChanges = true;
-                }
-
-                if (newINKSA.HasValue)
-                {
-                    var reversedINKSA = !newINKSA.Value;
-                    if (HasChanged(existingEmployee.INKSA, reversedINKSA))
-                    {
-                        tempUpdateExisting.OldINKSA = existingEmployee.INKSA;
-                        tempUpdateExisting.NewINKSA = reversedINKSA;
-                        hasChanges = true;
-                    }
                 }
 
                 if (hasChanges)
@@ -355,23 +273,12 @@ public class Temp(ApplicationDbcontext dbcontext) : ITemp
                             if (employee != null)
                             {
                                 int changedFields = 0;
-
-                                if (update.NewIqamaEndM.HasValue) { employee.IqamaEndM = update.NewIqamaEndM.Value; changedFields++; }
                                 if (update.NewIqamaEndH.HasValue) { employee.IqamaEndH = update.NewIqamaEndH.Value; changedFields++; }
+                                if (update.NewIqamaEndM.HasValue) { employee.IqamaEndM = update.NewIqamaEndM.Value; changedFields++; }
                                 if (update.NewPassportNo != null) { employee.PassportNo = update.NewPassportNo; changedFields++; }
                                 if (update.NewPassportEnd.HasValue) { employee.PassportEnd = update.NewPassportEnd; changedFields++; }
-                                if (update.NewSponsor != null) { employee.Sponsor = update.NewSponsor; changedFields++; }
                                 if (update.NewSponsorNo.HasValue) { employee.sponsorNo = update.NewSponsorNo.Value; changedFields++; }
                                 if (update.NewJobTitle != null) { employee.JobTitle = update.NewJobTitle; changedFields++; }
-                                if (update.NewNameAR != null) { employee.NameAR = update.NewNameAR; changedFields++; }
-                                if (update.NewNameEN != null) { employee.NameEN = update.NewNameEN; changedFields++; }
-                                if (update.NewCountry != null) { employee.Country = update.NewCountry; changedFields++; }
-                                if (update.NewPhone != null) { employee.Phone = update.NewPhone; changedFields++; }
-                                if (update.NewDateOfBirth.HasValue) { employee.DateOfBirth = update.NewDateOfBirth.Value; changedFields++; }
-                                if (update.NewIBAN != null) { employee.IBAN = update.NewIBAN; changedFields++; }
-                                if (update.NewINKSA.HasValue) { employee.INKSA = update.NewINKSA.Value; changedFields++; }
-                                if (update.NewStatus != null) { employee.Status = update.NewStatus; changedFields++; if (update.NewStatus.Equals("fleeing", StringComparison.OrdinalIgnoreCase)) { employee.HousingId = null; changedFields++; } }
-
 
                                 if (changedFields > 0)
                                 {
@@ -420,6 +327,13 @@ public class Temp(ApplicationDbcontext dbcontext) : ITemp
         }
     }
 
+    private static DateOnly HijriToGregorian(DateOnly hijriDate)
+    {
+        var hijriCalendar = new System.Globalization.UmAlQuraCalendar();
+        var gregorianDateTime = hijriCalendar.ToDateTime(
+            hijriDate.Year, hijriDate.Month, hijriDate.Day, 0, 0, 0, 0);
+        return DateOnly.FromDateTime(gregorianDateTime);
+    }
 
 
     private bool HasChanged<T>(T? oldValue, T? newValue)
@@ -433,22 +347,12 @@ public class Temp(ApplicationDbcontext dbcontext) : ITemp
 
         var columnNames = new Dictionary<string, string[]>
         {
-            { "IqamaNo", new[] { "رقم الاقامة", "Iqama", "ID", "EmployeeID" } },
-            { "IqamaEndM", new[] { "تاريخ انتهاء الاقامة", "IqamaExpiryM", "IqamaEndMiladi" } },
-            { "IqamaEndH", new[] { "تاريخ انتهاء الاقامة بالهجري", "IqamaExpiryH", "IqamaEndHijri" } },
-            { "PassportNo", new[] { "رقم الجواز", "Passport", "PassportNumber" } },
-            { "PassportEnd", new[] { "تاريخ انتهاء الجواز", "PassportExpiry", "PassportExpiryDate" } },
-            { "Sponsor", new[] { "Sponsor", "Kafeel" } },
-            { "SponsorNo", new[] { "رقم صاحب العمل", "Sponsor Number", "KafeelNo" } },
-            { "JobTitle", new[] { "المهنة", "Job", "Position" } },
-            { "NameAR", new[] { "NameAR", "ArabicName", "Name_AR" } },
-            { "NameEN", new[] { "NameEN", "EnglishName", "Name_EN" } },
-            { "Country", new[] { "Country", "Nationality" } },
-            { "Phone", new[] { "Phone", "Mobile", "PhoneNumber" } },
-            { "DateOfBirth", new[] { "تاريخ الميلاد", "DOB", "BirthDate" } },
-            { "Status", new[] { "Status", "EmployeeStatus" } },
-            { "IBAN", new[] { "IBAN", "BankAccount" } },
-            { "INKSA", new[] { "خارج المملكه", "InKSA", "InsideKSA" } }
+            { "IqamaNo",    new[] { "رقم الاقامة" } },
+            { "IqamaEndH",  new[] { "تاريخ انتهاء الاقامة بالهجري" } },
+            { "PassportNo", new[] { "رقم الجواز" } },
+            { "PassportEnd",new[] { "تاريخ انتهاء الجواز" } },
+            { "SponsorNo",  new[] { "رقم صاحب العمل" } },
+            { "JobTitle",   new[] { "المهنة" } }
         };
 
         for (int col = 1; col <= lastColumn; col++)
@@ -539,61 +443,33 @@ public class Temp(ApplicationDbcontext dbcontext) : ITemp
     private TempEmployeeUpdateResponse MapToResponse(TempEmployeeUpdate update)
     {
         var changes = new List<FieldChangeInfo>();
+        if (update.NewIqamaEndH.HasValue)
+            changes.Add(new FieldChangeInfo("تاريخ انتهاء الاقامة بالهجري", update.OldIqamaEndH?.ToString(), update.NewIqamaEndH?.ToString()));
 
         if (update.NewIqamaEndM.HasValue)
-            changes.Add(new FieldChangeInfo("IqamaEndM", update.OldIqamaEndM?.ToString(), update.NewIqamaEndM?.ToString()));
-
-        if (update.NewIqamaEndH.HasValue)
-            changes.Add(new FieldChangeInfo("IqamaEndH", update.OldIqamaEndH?.ToString(), update.NewIqamaEndH?.ToString()));
+            changes.Add(new FieldChangeInfo("تاريخ انتهاء الاقامة ميلادي", update.OldIqamaEndM?.ToString(), update.NewIqamaEndM?.ToString()));
 
         if (update.NewPassportNo != null)
-            changes.Add(new FieldChangeInfo("PassportNo", update.OldPassportNo, update.NewPassportNo));
+            changes.Add(new FieldChangeInfo("رقم الجواز", update.OldPassportNo, update.NewPassportNo));
 
         if (update.NewPassportEnd.HasValue)
-            changes.Add(new FieldChangeInfo("PassportEnd", update.OldPassportEnd?.ToString(), update.NewPassportEnd?.ToString()));
-
-        if (update.NewSponsor != null)
-            changes.Add(new FieldChangeInfo("Sponsor", update.OldSponsor, update.NewSponsor));
+            changes.Add(new FieldChangeInfo("تاريخ انتهاء الجواز", update.OldPassportEnd?.ToString(), update.NewPassportEnd?.ToString()));
 
         if (update.NewSponsorNo.HasValue)
-            changes.Add(new FieldChangeInfo("SponsorNo", update.OldSponsorNo?.ToString(), update.NewSponsorNo?.ToString()));
+            changes.Add(new FieldChangeInfo("رقم صاحب العمل", update.OldSponsorNo?.ToString(), update.NewSponsorNo?.ToString()));
 
         if (update.NewJobTitle != null)
-            changes.Add(new FieldChangeInfo("JobTitle", update.OldJobTitle, update.NewJobTitle));
-
-        if (update.NewNameAR != null)
-            changes.Add(new FieldChangeInfo("NameAR", update.OldNameAR, update.NewNameAR));
-
-        if (update.NewNameEN != null)
-            changes.Add(new FieldChangeInfo("NameEN", update.OldNameEN, update.NewNameEN));
-
-        if (update.NewCountry != null)
-            changes.Add(new FieldChangeInfo("Country", update.OldCountry, update.NewCountry));
-
-        if (update.NewPhone != null)
-            changes.Add(new FieldChangeInfo("Phone", update.OldPhone, update.NewPhone));
-
-        if (update.NewDateOfBirth.HasValue)
-            changes.Add(new FieldChangeInfo("DateOfBirth", update.OldDateOfBirth?.ToString(), update.NewDateOfBirth?.ToString()));
-
-        if (update.NewStatus != null)
-            changes.Add(new FieldChangeInfo("Status", update.OldStatus, update.NewStatus));
-
-        if (update.NewIBAN != null)
-            changes.Add(new FieldChangeInfo("IBAN", update.OldIBAN, update.NewIBAN));
-
-        if (update.NewINKSA.HasValue)
-            changes.Add(new FieldChangeInfo("INKSA", update.OldINKSA?.ToString(), update.NewINKSA?.ToString()));
+            changes.Add(new FieldChangeInfo("المهنة", update.OldJobTitle, update.NewJobTitle));
 
         return new TempEmployeeUpdateResponse(
             Id: update.Id,
             IqamaNo: update.IqamaNo,
-            EmployeeNameAR: update.NewNameAR ?? update.OldNameAR ?? "N/A",
-            EmployeeNameEN: update.NewNameEN ?? update.OldNameEN ?? "N/A",
+            EmployeeNameAR: update.Employee?.NameAR ?? "N/A",
+            EmployeeNameEN: update.Employee?.NameEN ?? "N/A",
             IsNewEmployee: update.IsNewEmployee,
             Changes: changes,
             UploadedAt: update.UploadedAt,
-            UploadedBy: update.UploadedBy,
+            UploadedBy: update.UploadedBy ?? string.Empty,
             IsResolved: update.IsResolved
         );
     }
