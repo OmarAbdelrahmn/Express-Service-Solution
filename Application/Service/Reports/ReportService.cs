@@ -380,115 +380,243 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
         }
     }
 
+    //public async Task<Result<List<RiderWorkHistorySummary>>> GetAllRidersWorkHistoryAsync(
+    //  DateOnly? startDate = null,
+    //  DateOnly? endDate = null,
+    //  int? companyId = null,          // ★ NEW
+    //  CancellationToken cancellationToken = default)
+    //{
+    //    try
+    //    {
+    //        var today = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3));
+    //        var effectiveEndDate = endDate ?? today;
+
+    //        // ── Base shift query (apply companyId filter here, not on riders) ──
+    //        IQueryable<RiderShift> shiftsQuery = _dbcontext.RiderShifts
+    //            .Include(s => s.Rider)
+    //                .ThenInclude(r => r.Employee)
+    //                    .ThenInclude(e => e.Housing)
+    //            .Include(s => s.Company);   // ★ include Company on the shift
+
+    //        if (companyId.HasValue)
+    //            shiftsQuery = shiftsQuery.Where(s => s.CompanyId == companyId.Value);
+
+    //        if (startDate.HasValue)
+    //            shiftsQuery = shiftsQuery.Where(s => s.ShiftDate >= startDate.Value && s.ShiftDate <= effectiveEndDate);
+    //        else
+    //            shiftsQuery = shiftsQuery.Where(s => s.ShiftDate <= effectiveEndDate);
+
+    //        // Only riders who are not employees
+    //        shiftsQuery = shiftsQuery.Where(s => !s.Rider.Employee.IsEmployee);
+
+    //        var allShifts = await shiftsQuery
+    //            .AsNoTracking()
+    //            .ToListAsync(cancellationToken);
+
+    //        if (!allShifts.Any())
+    //            return Result.Success(new List<RiderWorkHistorySummary>());
+
+    //        // ── Group by rider ────────────────────────────────────────────────
+    //        var riderGroups = allShifts.GroupBy(s => s.RiderId);
+    //        var summaries = new List<RiderWorkHistorySummary>();
+
+    //        foreach (var group in riderGroups)
+    //        {
+    //            var shifts = group.OrderBy(s => s.ShiftDate).ToList();
+    //            var rider = shifts.First().Rider;
+    //            if (rider?.Employee == null) continue;
+
+    //            var firstShiftDate = shifts.First().ShiftDate;
+    //            var lastShiftDate = shifts.Last().ShiftDate;
+
+    //            var actualStartDate = startDate ?? firstShiftDate;
+    //            var actualEndDate = effectiveEndDate > lastShiftDate ? effectiveEndDate : lastShiftDate;
+
+    //            var monthlyData = GenerateMonthlyShiftSummaries(shifts, actualStartDate, actualEndDate);
+
+    //            var activeMonths = monthlyData
+    //                .Where(m => m.TotalAcceptedOrders > 0)
+    //                .ToList();
+
+    //            var totalMonthsWorked = activeMonths.Count;
+    //            var totalShiftsCount = activeMonths.Sum(m => m.TotalShifts);
+    //            var totalOrders = activeMonths.Sum(m => m.TotalAcceptedOrders);
+
+    //            var avgOrdersPerMonth = totalMonthsWorked > 0
+    //                ? (decimal)totalOrders / totalMonthsWorked
+    //                : 0;
+
+    //            // ★ Company name comes from the shift, not from rider.Company
+    //            var companyName = shifts.First().Company?.Name ?? "Unknown";
+
+    //            summaries.Add(new RiderWorkHistorySummary(
+    //                IqamaNo: rider.EmployeeIqamaNo,
+    //                RiderName: rider.Employee.NameAR,
+    //                WorkingId: rider.WorkingId ?? "0",
+    //                TotalMonthsWorked: totalMonthsWorked,
+    //                TotalShifts: totalShiftsCount,
+    //                TotalOrders: totalOrders,
+    //                HousingName: rider.Employee.Housing?.Name ?? "non",
+    //                Status: rider.Employee.Status,
+    //                AverageOrdersPerMonth: avgOrdersPerMonth,
+    //                FirstWorkDate: firstShiftDate,
+    //                LastWorkDate: lastShiftDate,
+    //                ActiveMonths: activeMonths,
+    //                CompanyName: companyName
+    //            ));
+    //        }
+
+    //        return Result.Success(
+    //            summaries.OrderByDescending(s => s.TotalOrders).ToList());
+    //    }
+    //    catch (Exception ex)
+    //    {
+    //        return Result.Failure<List<RiderWorkHistorySummary>>(
+    //            new Error($"Error generating riders work history: {ex.Message}", "server_error", 500));
+    //    }
+    //}
+
     public async Task<Result<List<RiderWorkHistorySummary>>> GetAllRidersWorkHistoryAsync(
     DateOnly? startDate = null,
     DateOnly? endDate = null,
+    int? companyId = null,
     CancellationToken cancellationToken = default)
     {
         try
         {
             var today = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3));
-
-            // Set default dates if not provided
             var effectiveEndDate = endDate ?? today;
 
-            // Get all riders who have shifts
-            var ridersWithShiftsQuery = _dbcontext.RiderDetails
-                .Include(C => C.Company)
-                .Include(r => r.Employee)
-                .ThenInclude(c => c.Housing)
-                .Where(r => r.RiderShifts.Any());
+            // ── Single DB query, project only the columns we actually need ──
+            //var query = _dbcontext.RiderShifts
+            //    .Where(s => !s.Rider.Employee.IsEmployee &&
+            //                s.ShiftDate <= effectiveEndDate);
 
-            ridersWithShiftsQuery = ridersWithShiftsQuery.Where(r => !r.Employee.IsEmployee);
+            var query = _dbcontext.RiderShifts
+                .Where(s => s.ShiftDate <= effectiveEndDate);
 
-            // Apply date filter if startDate is provided
             if (startDate.HasValue)
-            {
-                ridersWithShiftsQuery = ridersWithShiftsQuery
-                    .Where(r => r.RiderShifts.Any(s => s.ShiftDate >= startDate.Value && s.ShiftDate <= effectiveEndDate));
-            }
-            else
-            {
-                ridersWithShiftsQuery = ridersWithShiftsQuery
-                    .Where(r => r.RiderShifts.Any(s => s.ShiftDate <= effectiveEndDate));
-            }
+                query = query.Where(s => s.ShiftDate >= startDate.Value);
 
-            var ridersWithShifts = await ridersWithShiftsQuery
-                .Select(r => new
+            if (companyId.HasValue)
+                query = query.Where(s => s.CompanyId == companyId.Value);
+
+            var rawShifts = await query
+                .Select(s => new
                 {
-                    Rider = r,
-                    Shifts = r.RiderShifts
-                        .Where(s => (!startDate.HasValue || s.ShiftDate >= startDate.Value) &&
-                                    s.ShiftDate <= effectiveEndDate)
-                        .OrderBy(s => s.ShiftDate)
-                        .ToList()
+                    s.RiderId,
+                    s.ShiftDate,
+                    s.AcceptedDailyOrders,
+                    s.RejectedDailyOrders,
+                    s.RealRejectedDailyOrders,
+                    s.WorkingHours,
+                    s.ShiftStatus,
+                    CompanyName = s.Company.Name,
+                    IqamaNo = s.Rider.EmployeeIqamaNo,
+                    WorkingId = s.Rider.WorkingId,
+                    RiderNameAR = s.Rider.Employee.NameAR,
+                    HousingName = s.Rider.Employee.Housing != null
+                                         ? s.Rider.Employee.Housing.Name
+                                         : null,
+                    EmployeeStatus = s.Rider.Employee.Status
                 })
                 .AsNoTracking()
                 .ToListAsync(cancellationToken);
 
-            if (!ridersWithShifts.Any())
-            {
+            if (!rawShifts.Any())
                 return Result.Success(new List<RiderWorkHistorySummary>());
-            }
 
+            // ── Everything below is in-memory — no more DB calls ─────────────
             var summaries = new List<RiderWorkHistorySummary>();
 
-            foreach (var item in ridersWithShifts)
+            foreach (var group in rawShifts.GroupBy(s => s.RiderId))
             {
-                var rider = item.Rider;
-                var shifts = item.Shifts;
+                var orderedShifts = group.OrderBy(s => s.ShiftDate).ToList();
+                var first = orderedShifts.First();
 
-                if (!shifts.Any()) continue;
-
-                var firstShiftDate = shifts.First().ShiftDate;
-                var lastShiftDate = shifts.Last().ShiftDate;
-
-                // Determine the actual start date for monthly summaries
+                var firstShiftDate = orderedShifts.First().ShiftDate;
+                var lastShiftDate = orderedShifts.Last().ShiftDate;
                 var actualStartDate = startDate ?? firstShiftDate;
+                var actualEndDate = effectiveEndDate > lastShiftDate
+                                          ? effectiveEndDate
+                                          : lastShiftDate;
 
-                // Use the effective end date
-                var actualEndDate = effectiveEndDate > lastShiftDate ? effectiveEndDate : lastShiftDate;
+                // ── Replicate GenerateMonthlyShiftSummaries logic ─────────────
+                var monthlyData = new List<MonthlyShiftSummary>();
+                var currentMonth = new DateOnly(actualStartDate.Year, actualStartDate.Month, 1);
+                var finalMonth = new DateOnly(actualEndDate.Year, actualEndDate.Month, 1);
 
-                // Generate monthly summaries
-                var monthlyData = GenerateMonthlyShiftSummaries(shifts, actualStartDate, actualEndDate);
+                var shiftsByMonth = orderedShifts
+                    .GroupBy(s => (s.ShiftDate.Year, s.ShiftDate.Month))
+                    .ToDictionary(g => g.Key, g => g.ToList());
 
-                // Get active months (months with orders > 0)
-                var activeMonths = monthlyData
-                    .Where(m => m.TotalAcceptedOrders > 0)
-                    .ToList();
+                while (currentMonth <= finalMonth)
+                {
+                    var key = (currentMonth.Year, currentMonth.Month);
 
+                    if (shiftsByMonth.TryGetValue(key, out var monthShifts))
+                    {
+                        var totalShifts = monthShifts.Count;
+                        var completed = monthShifts.Count(s => s.ShiftStatus == "Completed");
+
+                        monthlyData.Add(new MonthlyShiftSummary(
+                            Year: currentMonth.Year,
+                            Month: currentMonth.Month,
+                            MonthName: new DateTime(currentMonth.Year, currentMonth.Month, 1)
+                                                         .ToString("MMMM"),
+                            TotalShifts: totalShifts,
+                            TotalAcceptedOrders: monthShifts.Sum(s => s.AcceptedDailyOrders),
+                            TotalRejectedOrders: monthShifts.Sum(s => s.RejectedDailyOrders),
+                            TotalRealRejectedOrders: monthShifts.Sum(s => s.RealRejectedDailyOrders),
+                            TotalWorkingHours: monthShifts.Sum(s => s.WorkingHours),
+                            CompletedShifts: completed,
+                            IncompleteShifts: monthShifts.Count(s => s.ShiftStatus == "Incomplete"),
+                            FailedShifts: monthShifts.Count(s => s.ShiftStatus == "Failed"),
+                            CompletionRate: totalShifts > 0
+                                                         ? (decimal)completed / totalShifts * 100
+                                                         : 0
+                        ));
+                    }
+                    else
+                    {
+                        monthlyData.Add(new MonthlyShiftSummary(
+                            Year: currentMonth.Year, Month: currentMonth.Month,
+                            MonthName: new DateTime(currentMonth.Year, currentMonth.Month, 1).ToString("MMMM"),
+                            TotalShifts: 0, TotalAcceptedOrders: 0, TotalRejectedOrders: 0,
+                            TotalRealRejectedOrders: 0, TotalWorkingHours: 0,
+                            CompletedShifts: 0, IncompleteShifts: 0, FailedShifts: 0,
+                            CompletionRate: 0
+                        ));
+                    }
+
+                    currentMonth = currentMonth.AddMonths(1);
+                }
+
+                var activeMonths = monthlyData.Where(m => m.TotalAcceptedOrders > 0).ToList();
                 var totalMonthsWorked = activeMonths.Count;
-                var totalShifts = activeMonths.Sum(m => m.TotalShifts);
                 var totalOrders = activeMonths.Sum(m => m.TotalAcceptedOrders);
 
-                // Calculate average orders per active month
-                var avgOrdersPerMonth = totalMonthsWorked > 0
-                    ? (decimal)totalOrders / totalMonthsWorked
-                    : 0;
-
                 summaries.Add(new RiderWorkHistorySummary(
-                    IqamaNo: rider.EmployeeIqamaNo,
-                    RiderName: rider.Employee.NameAR,
-                    WorkingId: rider.WorkingId ?? "0",
+                    IqamaNo: first.IqamaNo,
+                    RiderName: first.RiderNameAR,
+                    WorkingId: first.WorkingId ?? "0",
                     TotalMonthsWorked: totalMonthsWorked,
-                    TotalShifts: totalShifts,
+                    TotalShifts: activeMonths.Sum(m => m.TotalShifts),
                     TotalOrders: totalOrders,
-                    HousingName: rider.Employee.Housing?.Name ?? "non",
-                    Status: rider.Employee.Status,
-                    AverageOrdersPerMonth: avgOrdersPerMonth,
+                    HousingName: first.HousingName ?? "non",
+                    Status: first.EmployeeStatus,
+                    AverageOrdersPerMonth: totalMonthsWorked > 0
+                                               ? (decimal)totalOrders / totalMonthsWorked
+                                               : 0,
                     FirstWorkDate: firstShiftDate,
                     LastWorkDate: lastShiftDate,
                     ActiveMonths: activeMonths,
-                    rider.Company.Name
+                    CompanyName: first.CompanyName
                 ));
             }
 
-            // Sort by total orders descending
-            summaries = summaries
-                .OrderByDescending(s => s.TotalOrders)
-                .ToList();
-
-            return Result.Success(summaries);
+            return Result.Success(
+                summaries.OrderByDescending(s => s.TotalOrders).ToList());
         }
         catch (Exception ex)
         {
@@ -496,7 +624,6 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                 new Error($"Error generating riders work history: {ex.Message}", "server_error", 500));
         }
     }
-
     public async Task<Result<PeriodOrdersComparison>> ComparePeriodOrdersForCompanyAsync(
     int companyId,
     DateOnly period2Start,

@@ -978,7 +978,151 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
 
         return true;
     }
+
+
+    public async Task<Result<IqamaEndReportResponse>> GetIqamaEndReportAsync(
+        IqamaExpiryUrgency? urgencyFilter = null,
+        string? housingName = null,
+        string? sponsor = null)
+    {
+        var today = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3));
+
+        var query = dbcontext.Employees
+            .AsNoTracking()
+            .Where(e => !e.IsDeleted && e.Status.ToLower() != "fleeing")
+            .Include(e => e.Housing)
+            .AsQueryable();
+
+        // ── optional pre-filters ──────────────────────────────────────────────
+        if (!string.IsNullOrWhiteSpace(housingName))
+            query = query.Where(e => e.Housing != null &&
+                                     e.Housing.Name.Contains(housingName));
+
+        if (!string.IsNullOrWhiteSpace(sponsor))
+            query = query.Where(e => e.Sponsor.Contains(sponsor));
+
+        // ── fetch & project ───────────────────────────────────────────────────
+        var employees = await query
+            .OrderBy(e => e.IqamaEndM)
+            .Select(e => new
+            {
+                e.IqamaNo,
+                e.NameAR,
+                e.NameEN,
+                e.JobTitle,
+                e.Sponsor,
+                e.sponsorNo,
+                e.Country,
+                e.Phone,
+                e.IqamaEndM,
+                e.IqamaEndH,
+                e.Status,
+                e.INKSA,
+                e.CreatedAt,
+                HousingName = e.Housing != null ? e.Housing.Name : null,
+                HousingAddress = e.Housing != null ? e.Housing.Address : null
+            })
+            .ToListAsync();
+
+        if (employees.Count == 0)
+            return Result.Failure<IqamaEndReportResponse>(
+                new Error("NoData", "No active employees found.", 404));
+
+        // ── build report items with urgency ───────────────────────────────────
+        var items = employees.Select(e =>
+        {
+            int days = e.IqamaEndM.DayNumber - today.DayNumber;
+            var urgency = days switch
+            {
+                <= 0 => IqamaExpiryUrgency.Expired,
+                <= 30 => IqamaExpiryUrgency.Critical,
+                <= 90 => IqamaExpiryUrgency.Warning,
+                <= 180 => IqamaExpiryUrgency.Upcoming,
+                _ => IqamaExpiryUrgency.Safe
+            };
+
+            return new IqamaEndReportItem(
+                IqamaNo: e.IqamaNo,
+                NameAR: e.NameAR,
+                NameEN: e.NameEN,
+                JobTitle: e.JobTitle,
+                Sponsor: e.Sponsor,
+                SponsorNo: e.sponsorNo,
+                Country: e.Country,
+                Phone: e.Phone,
+                IqamaEndM: e.IqamaEndM,
+                IqamaEndH: e.IqamaEndH,
+                DaysUntilExpiryM: days,
+                Urgency: urgency,
+                HousingName: e.HousingName,
+                HousingAddress: e.HousingAddress,
+                Status: e.Status,
+                INKSA: e.INKSA,
+                CreatedAt: e.CreatedAt
+            );
+        }).ToList();
+
+        // ── apply urgency filter after projection (avoids translating enum to SQL) ─
+        if (urgencyFilter.HasValue)
+            items = items.Where(i => i.Urgency == urgencyFilter.Value).ToList();
+
+        var report = new IqamaEndReportResponse(
+            GeneratedAt: DateTime.UtcNow.AddHours(3),
+            TotalEmployees: items.Count,
+            ExpiredCount: items.Count(i => i.Urgency == IqamaExpiryUrgency.Expired),
+            CriticalCount: items.Count(i => i.Urgency == IqamaExpiryUrgency.Critical),
+            WarningCount: items.Count(i => i.Urgency == IqamaExpiryUrgency.Warning),
+            UpcomingCount: items.Count(i => i.Urgency == IqamaExpiryUrgency.Upcoming),
+            SafeCount: items.Count(i => i.Urgency == IqamaExpiryUrgency.Safe),
+            Employees: items
+        );
+
+        return Result.Success(report);
+    }
+
+
 }
+
+public enum IqamaExpiryUrgency
+{
+    Expired = 0,   // already past
+    Critical = 1,   // ≤ 30 days
+    Warning = 2,   // 31 – 90 days
+    Upcoming = 3,   // 91 – 180 days
+    Safe = 4    // > 180 days
+}
+
+public record IqamaEndReportItem(
+    long IqamaNo,
+    string NameAR,
+    string NameEN,
+    string JobTitle,
+    string Sponsor,
+    long SponsorNo,
+    string Country,
+    string Phone,
+    DateOnly IqamaEndM,          // Gregorian expiry  (used for sorting & urgency)
+    DateOnly IqamaEndH,          // Hijri expiry
+    int DaysUntilExpiryM,    // negative = already expired
+    IqamaExpiryUrgency Urgency,
+    string? HousingName,
+    string? HousingAddress,
+    string Status,
+    bool INKSA,
+    DateTime CreatedAt
+);
+
+public record IqamaEndReportResponse(
+    DateTime GeneratedAt,
+    int TotalEmployees,
+    int ExpiredCount,
+    int CriticalCount,     // ≤ 30 days
+    int WarningCount,      // 31-90 days
+    int UpcomingCount,     // 91-180 days
+    int SafeCount,         // > 180 days
+    IReadOnlyList<IqamaEndReportItem> Employees  // sorted by IqamaEndM ASC
+);
+
 
 // DTOs
 public record EmployeeStatusHistoryResponse(

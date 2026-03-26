@@ -60,7 +60,7 @@ app.UseHangfireDashboard("/job", new DashboardOptions
 RecurringJob.AddOrUpdate<IDailyReportJob>(
     "daily-rider-report",
     x => x.RunAsync(null),
-    "0 17 * * *",
+    "0 12 * * *",
     new RecurringJobOptions
     {
         TimeZone = TimeZoneInfo.FindSystemTimeZoneById("Arab Standard Time")

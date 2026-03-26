@@ -203,7 +203,7 @@ public class TransferService(ApplicationDbcontext dbcontext) : ITransferService
                 ToLocation = housing.Name,
                 HousingId = request.HousingId,
                 TransferredBy = transferredBy,
-                TransferredAt = DateTime.UtcNow.AddHours(3),
+                TransferredAt = request.TransferredAt ?? DateTime.UtcNow.AddHours(3),
                 TransferItems = transferItems
             };
 

@@ -9,7 +9,8 @@ internal class Transferss
 
 public record TransferRequest(
     int HousingId,
-    List<TransferItemRequest> Items
+    List<TransferItemRequest> Items,
+    DateTime? TransferredAt
 );
 
 public record TransferItemRequest(

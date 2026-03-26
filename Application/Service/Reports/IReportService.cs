@@ -96,6 +96,7 @@ public interface IReportService
     Task<Result<List<RiderWorkHistorySummary>>> GetAllRidersWorkHistoryAsync(
     DateOnly? startDate = null,
     DateOnly? endDate = null,
+    int? companyId = null,
     CancellationToken cancellationToken = default);
 
     /// <summary>

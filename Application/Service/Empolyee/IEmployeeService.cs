@@ -28,6 +28,10 @@ public interface IEmployeeService
     Task<Result<IEnumerable<StatusChangeHistoryDto>>> GetStatusChangesByDateRangeAsync(DateTime startDate, DateTime endDate);
     Task<Result<EmployeeStatusHistoryResponse>> GetEmployeeStatusHistoryAsync(long IqamaNo);
 
+    Task<Result<IqamaEndReportResponse>> GetIqamaEndReportAsync(
+    IqamaExpiryUrgency? urgencyFilter = null,
+    string? housingName = null,
+    string? sponsor = null);
 
 }
 public record EmployeeFilter(

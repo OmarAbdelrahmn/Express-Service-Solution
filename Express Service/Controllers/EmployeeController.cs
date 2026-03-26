@@ -11,6 +11,19 @@ public class EmployeeController(IEmployeeService service) : ControllerBase
 {
     private readonly IEmployeeService service = service;
 
+    [HttpGet("iqama-end-report")]
+    [Authorize(Roles = "Master,Admin,Member")]
+    public async Task<IActionResult> GetIqamaEndReport(
+    [FromQuery] IqamaExpiryUrgency? urgency = null,
+    [FromQuery] string? housingName = null,
+    [FromQuery] string? sponsor = null)
+    {
+        var response = await service.GetIqamaEndReportAsync(urgency, housingName, sponsor);
+
+        return response.IsSuccess
+            ? Ok(response.Value)
+            : response.ToProblem();
+    }
 
     [HttpPost("change-employee-rider")]
     public async Task<IActionResult> ld(long iqama)

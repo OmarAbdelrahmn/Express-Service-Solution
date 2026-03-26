@@ -48,9 +48,10 @@ public class ReportController(IReportService service) : ControllerBase
     public async Task<IActionResult> GetAllRidersHistory(
     [FromQuery] DateOnly? startDate = null,
     [FromQuery] DateOnly? endDate = null,
+    [FromQuery] int? CompanyId = null,
     CancellationToken cancellationToken = default)
     {
-        var result = await service.GetAllRidersWorkHistoryAsync(startDate, endDate, cancellationToken);
+        var result = await service.GetAllRidersWorkHistoryAsync(startDate, endDate, CompanyId ,cancellationToken);
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
 
