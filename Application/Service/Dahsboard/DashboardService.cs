@@ -17,7 +17,7 @@ public class DashboardService(ApplicationDbcontext dbcontext) : IDashboardServic
     {
         try
         {
-            var today = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3));
+            var today = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3).AddDays(-1));
 
             // Employees
             var employees = await dbcontext.Employees
