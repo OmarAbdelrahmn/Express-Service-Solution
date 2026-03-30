@@ -11,6 +11,111 @@ public class DashboardService(ApplicationDbcontext dbcontext) : IDashboardServic
 {
     private readonly ApplicationDbcontext dbcontext = dbcontext;
 
+    public async Task<Result<DailyCompanyReport>> GetDailyReportAsync(DailyCompanyReportRequest request)
+    {
+        try
+        {
+            if (request.StartDate > request.EndDate)
+                return Result.Failure<DailyCompanyReport>(
+                    new Error("InvalidRange", "Start date must be before or equal to end date.", 400));
+
+            int spanDays = request.EndDate.DayNumber - request.StartDate.DayNumber + 1;
+            if (spanDays > 800)
+                return Result.Failure<DailyCompanyReport>(
+                    new Error("RangeTooLarge", "Date range cannot exceed 366 days.", 400));
+
+            // ── Pull raw shifts in range ──────────────────────────────────────
+            var query = dbcontext.RiderShifts
+                .Where(s => s.ShiftDate >= request.StartDate && s.ShiftDate <= request.EndDate);
+
+            if (request.CompanyId.HasValue)
+                query = query.Where(s => s.CompanyId == request.CompanyId.Value);
+
+            var rawShifts = await query
+                .Select(s => new
+                {
+                    s.ShiftDate,
+                    s.CompanyId,
+                    CompanyName = s.Company.Name,
+                    s.RiderId,
+                    s.AcceptedDailyOrders,
+                    s.RejectedDailyOrders,
+                    s.WorkingHours
+                })
+                .ToListAsync();
+
+            // ── Build the full date spine (every day in range) ────────────────
+            var allDates = Enumerable.Range(0, spanDays)
+                .Select(i => request.StartDate.AddDays(i))
+                .ToList();
+
+            // ── Group by company ──────────────────────────────────────────────
+            var byCompany = rawShifts
+                .GroupBy(s => new { s.CompanyId, s.CompanyName })
+                .OrderBy(g => g.Key.CompanyName)
+                .ToList();
+
+            var companyReports = byCompany.Select(company =>
+            {
+                // Build one DayEntry per calendar day — even days with zero activity
+                var days = allDates.Select(date =>
+                {
+                    var dayShifts = company.Where(s => s.ShiftDate == date).ToList();
+
+                    int accepted = dayShifts.Sum(s => s.AcceptedDailyOrders);
+                    int rejected = dayShifts.Sum(s => s.RejectedDailyOrders);
+                    int riders = dayShifts.Select(s => s.RiderId).Distinct().Count();
+                    int shifts = dayShifts.Count;
+                    double hours = Math.Round(dayShifts.Sum(s => (double)s.WorkingHours), 1);
+                    double avgPerR = riders > 0 ? Math.Round((double)accepted / riders, 1) : 0;
+
+                    return new DayEntry(
+                        Date: date,
+                        DateLabel: date.ToString("ddd dd MMM"),
+                        DayOfWeek: date.DayOfWeek.ToString(),
+                        AcceptedOrders: accepted,
+                        RejectedOrders: rejected,
+                        UniqueRiders: riders,
+                        TotalShifts: shifts,
+                        AvgOrdersPerRider: avgPerR,
+                        TotalWorkingHours: hours
+                    );
+                }).ToList();
+
+                int totalOrders = days.Sum(d => d.AcceptedOrders);
+                int totalShifts = days.Sum(d => d.TotalShifts);
+                int totalRiders = company.Select(s => s.RiderId).Distinct().Count();
+                int activeDays = days.Count(d => d.AcceptedOrders > 0);
+
+                return new CompanyDailyReport(
+                    CompanyId: company.Key.CompanyId,
+                    CompanyName: company.Key.CompanyName,
+                    TotalOrders: totalOrders,
+                    TotalShifts: totalShifts,
+                    TotalUniqueRiders: totalRiders,
+                    AvgOrdersPerDay: activeDays > 0 ? Math.Round((double)totalOrders / activeDays, 1) : 0,
+                    AvgRidersPerDay: activeDays > 0 ? Math.Round((double)totalRiders / activeDays, 1) : 0,
+                    Days: days
+                );
+            }).ToList();
+
+            return Result.Success(new DailyCompanyReport(
+                StartDate: request.StartDate,
+                EndDate: request.EndDate,
+                TotalDays: spanDays,
+                TotalCompanies: companyReports.Count,
+                GrandTotalOrders: companyReports.Sum(c => (long)c.TotalOrders),
+                GrandTotalShifts: companyReports.Sum(c => (int)c.TotalShifts),
+                Companies: companyReports
+            ));
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<DailyCompanyReport>(
+                new Error("ReportError", $"Failed to generate report: {ex.Message}", 500));
+        }
+    }
+
     // ── Overview ──────────────────────────────────────────────────────────────
 
     public async Task<Result<DashboardOverview>> GetOverviewAsync()

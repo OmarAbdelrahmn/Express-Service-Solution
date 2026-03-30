@@ -18,7 +18,48 @@ public interface IDashboardService
     Task<Result<IEnumerable<CountryDistributionStats>>> GetCountryDistributionAsync();
     Task<Result<IEnumerable<SponsorStats>>> GetSponsorStatsAsync();
     Task<Result<IEnumerable<CompanyRiderCountStats>>> GetRiderCountByCompanyAsync();
+    Task<Result<DailyCompanyReport>> GetDailyReportAsync(DailyCompanyReportRequest request);
 }
+
+
+public record DailyCompanyReportRequest(
+    DateOnly StartDate,
+    DateOnly EndDate,
+    int? CompanyId = null          // null = all companies
+);
+
+public record DailyCompanyReport(
+    DateOnly StartDate,
+    DateOnly EndDate,
+    int TotalDays,
+    int TotalCompanies,
+    long GrandTotalOrders,
+    int GrandTotalShifts,
+    IReadOnlyList<CompanyDailyReport> Companies
+);
+
+public record CompanyDailyReport(
+    int CompanyId,
+    string CompanyName,
+    int TotalOrders,
+    int TotalShifts,
+    int TotalUniqueRiders,
+    double AvgOrdersPerDay,
+    double AvgRidersPerDay,
+    IReadOnlyList<DayEntry> Days
+);
+
+public record DayEntry(
+    DateOnly Date,
+    string DateLabel,          // "Mon 02 Jun"
+    string DayOfWeek,
+    int AcceptedOrders,
+    int RejectedOrders,
+    int UniqueRiders,
+    int TotalShifts,
+    double AvgOrdersPerRider,
+    double TotalWorkingHours
+);
 
 // ── Overview ─────────────────────────────────────────────────────────────────
 

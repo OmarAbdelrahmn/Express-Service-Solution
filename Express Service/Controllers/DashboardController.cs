@@ -13,6 +13,21 @@ public class DashboardController(IDashboardService dashboardService) : Controlle
 {
     private readonly IDashboardService _dashboardService = dashboardService;
 
+
+    [HttpGet("companies")]
+    public async Task<IActionResult> Get(
+    [FromQuery] DateOnly startDate,
+    [FromQuery] DateOnly endDate,
+    [FromQuery] int? companyId = null)
+    {
+        var request = new DailyCompanyReportRequest(startDate, endDate, companyId);
+        var result = await _dashboardService.GetDailyReportAsync(request);
+        return result.IsSuccess
+            ? Ok(result.Value)
+            : result.ToProblem();
+    }
+
+
     /// <summary>
     /// Overall system metrics — KPI cards for the top of the dashboard
     /// </summary>
