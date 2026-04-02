@@ -307,8 +307,8 @@ public class DashboardService(ApplicationDbcontext dbcontext) : IDashboardServic
     {
         try
         {
-            var today = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3));
-            var from = today.AddDays(-days + 1);
+            var today = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3).AddDays(-1));
+            var from = today.AddDays(-days);
 
             var query = dbcontext.RiderShifts
                 .Where(s => s.ShiftDate >= from && s.ShiftDate <= today);
