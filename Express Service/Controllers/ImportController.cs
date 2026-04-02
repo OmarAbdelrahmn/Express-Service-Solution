@@ -15,8 +15,28 @@ public class ImportController(IImportService service, IBackgroundImportService s
     private readonly IImportService service = service;
     private readonly IBackgroundImportService service1 = service1;
 
+    [HttpPost("updateserial")]
+    public async Task<IActionResult> ImportKidtaMonthlyOrdersd(IFormFile file)
+    {
+        if (file == null || file.Length == 0)
+            return BadRequest(new { error = "No file uploaded or file is empty" });
 
-    
+        if (!file.FileName.EndsWith(".xlsx") && !file.FileName.EndsWith(".xls"))
+            return BadRequest(new { error = "File must be Excel format (.xlsx or .xls)" });
+
+        var uploadedBy = "System";
+
+        var result = await service.UpdateVehicleSerialNumbersAsync(file, uploadedBy);
+
+        if (result.IsSuccess)
+        {
+            return Ok(result.Value);
+        }
+
+        return result.ToProblem();
+    }
+
+
 
     [HttpPost("kita-monthly-orders")]
     public async Task<IActionResult> ImportKitaMonthlyOrders(IFormFile file)

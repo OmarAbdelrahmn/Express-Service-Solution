@@ -15,6 +15,10 @@ public interface IImportService
 
     // ── Method signature ────────────────────────────────────────────────────
 
+    Task<Result<VehicleSerialUpdateResponse>> UpdateVehicleSerialNumbersAsync(
+        IFormFile file,
+        string uploadedBy);
+
     Task<Result<KitaValidityImportResponse>> ImportKitaMonthlyValidityAsync(
         IFormFile file,
         string uploadedBy,

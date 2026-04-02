@@ -16,6 +16,342 @@ public class ImportService(ApplicationDbcontext dbcontext, IRiderSub riderSub) :
     private readonly ApplicationDbcontext _dbcontext = dbcontext;
     private readonly IRiderSub riderSub = riderSub;
 
+    #region Vehicle Serial Number Update Import
+
+    public async Task<Result<VehicleSerialUpdateResponse>> UpdateVehicleSerialNumbersAsync(
+        IFormFile file,
+        string uploadedBy)
+    {
+        if (file == null || file.Length == 0)
+            return Result.Failure<VehicleSerialUpdateResponse>(
+                new Error("InvalidFile", "File is empty or null", 400));
+
+        if (!file.FileName.EndsWith(".xlsx") && !file.FileName.EndsWith(".xls"))
+            return Result.Failure<VehicleSerialUpdateResponse>(
+                new Error("InvalidFormat", "File must be Excel format (.xlsx or .xls)", 400));
+
+        var results = new List<VehicleSerialUpdateRowResult>();
+        var errors = new List<string>();
+        int successfulUpdates = 0;
+        int noChangeNeeded = 0;
+        int vehicleNotFound = 0;
+        int failedRecords = 0;
+
+        try
+        {
+            Console.WriteLine($"[VehicleSerialUpdate] Starting import for file: {file.FileName}");
+
+            using var stream = file.OpenReadStream();
+            using var workbook = new XLWorkbook(stream);
+            var worksheet = workbook.Worksheet(1);
+
+            if (worksheet == null)
+                return Result.Failure<VehicleSerialUpdateResponse>(
+                    new Error("InvalidWorksheet", "Could not read worksheet", 400));
+
+            Console.WriteLine($"[VehicleSerialUpdate] Worksheet loaded: {worksheet.Name}");
+
+            var headerRow = FindVehicleSerialUpdateHeaderRow(worksheet);
+            if (headerRow == null)
+                return Result.Failure<VehicleSerialUpdateResponse>(
+                    new Error("EmptyFile", "Excel file has no header row", 400));
+
+            Console.WriteLine($"[VehicleSerialUpdate] Header row found at row {headerRow.RowNumber()}");
+
+            var columnMap = BuildVehicleSerialUpdateColumnMapping(headerRow);
+            if (!columnMap.IsValid)
+                return Result.Failure<VehicleSerialUpdateResponse>(
+                    new Error("InvalidColumns", columnMap.ErrorMessage!, 400));
+
+            Console.WriteLine($"[VehicleSerialUpdate] Column mapping: VehicleNumber=Col{columnMap.VehicleNumberCol}, SerialNumber=Col{columnMap.SerialNumberCol}");
+
+            var dataRows = worksheet.RowsUsed()
+                .Where(r => r.RowNumber() > headerRow.RowNumber())
+                .ToList();
+
+            int totalRows = dataRows.Count;
+            Console.WriteLine($"[VehicleSerialUpdate] Total data rows: {totalRows}");
+
+            if (totalRows == 0)
+                return Result.Failure<VehicleSerialUpdateResponse>(
+                    new Error("EmptyFile", "No data rows found in Excel file", 400));
+
+            var rowNumber = headerRow.RowNumber();
+
+            foreach (var row in dataRows)
+            {
+                rowNumber++;
+
+                using var transaction = await _dbcontext.Database.BeginTransactionAsync();
+                try
+                {
+                    var rowData = ParseVehicleSerialUpdateRowData(row, columnMap, rowNumber);
+
+                    if (!rowData.IsValid)
+                    {
+                        failedRecords++;
+                        results.Add(new VehicleSerialUpdateRowResult(
+                            rowNumber, false,
+                            rowData.VehicleNumber ?? "N/A",
+                            null,
+                            rowData.NewSerialNumber,
+                            false,
+                            rowData.ErrorMessage
+                        ));
+                        await transaction.RollbackAsync();
+                        continue;
+                    }
+
+                    // Normalize vehicle number (strip spaces for comparison)
+                    var normalizedVehicleNumber = rowData.VehicleNumber!.Replace(" ", "").Trim();
+
+                    var vehicle = await _dbcontext.Vehicles
+                        .FirstOrDefaultAsync(v => v.VehicleNumber.Replace(" ", "") == normalizedVehicleNumber);
+
+                    if (vehicle == null)
+                    {
+                        vehicleNotFound++;
+                        failedRecords++;
+                        results.Add(new VehicleSerialUpdateRowResult(
+                            rowNumber, false,
+                            rowData.VehicleNumber!,
+                            null,
+                            rowData.NewSerialNumber,
+                            false,
+                            $"Vehicle with number '{rowData.VehicleNumber}' not found"
+                        ));
+                        await transaction.RollbackAsync();
+                        continue;
+                    }
+
+                    int oldSerial = vehicle.SerialNumber;
+
+                    // No change needed
+                    if (oldSerial == rowData.NewSerialNumber)
+                    {
+                        noChangeNeeded++;
+                        results.Add(new VehicleSerialUpdateRowResult(
+                            rowNumber, true,
+                            vehicle.VehicleNumber,
+                            oldSerial,
+                            rowData.NewSerialNumber,
+                            false,
+                            null
+                        ));
+                        await transaction.CommitAsync();
+                        Console.WriteLine($"[VehicleSerialUpdate] No change: {vehicle.VehicleNumber} serial already {oldSerial}");
+                        continue;
+                    }
+
+                    // Apply update
+                    vehicle.SerialNumber = rowData.NewSerialNumber;
+
+                    await _dbcontext.SaveChangesAsync();
+                    await transaction.CommitAsync();
+
+                    successfulUpdates++;
+                    results.Add(new VehicleSerialUpdateRowResult(
+                        rowNumber, true,
+                        vehicle.VehicleNumber,
+                        oldSerial,
+                        rowData.NewSerialNumber,
+                        true,
+                        null
+                    ));
+
+                    Console.WriteLine($"[VehicleSerialUpdate] ✓ {vehicle.VehicleNumber}: {oldSerial} → {rowData.NewSerialNumber}");
+                }
+                catch (Exception ex)
+                {
+                    await transaction.RollbackAsync();
+                    failedRecords++;
+                    errors.Add($"Row {rowNumber}: {ex.Message}");
+
+                    results.Add(new VehicleSerialUpdateRowResult(
+                        rowNumber, false,
+                        "N/A", null, 0, false,
+                        $"Exception: {ex.Message}"
+                    ));
+
+                    Console.WriteLine($"[VehicleSerialUpdate] ERROR at row {rowNumber}: {ex.Message}");
+                }
+            }
+
+            Console.WriteLine($"[VehicleSerialUpdate] Complete:");
+            Console.WriteLine($"  - Total rows:        {totalRows}");
+            Console.WriteLine($"  - Updated:           {successfulUpdates}");
+            Console.WriteLine($"  - No change needed:  {noChangeNeeded}");
+            Console.WriteLine($"  - Not found:         {vehicleNotFound}");
+            Console.WriteLine($"  - Failed:            {failedRecords}");
+
+            var response = new VehicleSerialUpdateResponse(
+                TotalRecords: totalRows,
+                SuccessfulUpdates: successfulUpdates,
+                NoChangeNeeded: noChangeNeeded,
+                VehicleNotFound: vehicleNotFound,
+                FailedRecords: failedRecords,
+                Results: results,
+                Errors: errors,
+                ProcessedAt: DateTime.UtcNow.AddHours(3)
+            );
+
+            return Result.Success(response);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[VehicleSerialUpdate] FATAL ERROR: {ex}");
+            return Result.Failure<VehicleSerialUpdateResponse>(
+                new Error("ProcessingError", $"Failed to process Excel file: {ex.Message}", 500));
+        }
+    }
+
+    // ── Private helpers ──────────────────────────────────────────────────────────
+
+    private IXLRow? FindVehicleSerialUpdateHeaderRow(IXLWorksheet worksheet)
+    {
+        // Accepts exactly the column names "a" and "b" as well as common synonyms
+        var vehicleNumberVariants = new[]
+        {
+        "a", "vehiclenumber", "vehicle number", "vehicleno", "vehicle no",
+        "رقم المركبة", "رقم الهيكل"
+    };
+
+        var serialNumberVariants = new[]
+        {
+        "b", "serialnumber", "serial number", "serialno", "serial no",
+        "الرقم التسلسلي", "تسلسلي"
+    };
+
+        for (int i = 1; i <= Math.Min(10, worksheet.RowsUsed().Count()); i++)
+        {
+            var row = worksheet.Row(i);
+            var cellValues = row.CellsUsed()
+                .Select(c => c.IsMerged()
+                    ? c.MergedRange().FirstCell().GetString().Trim().ToLower()
+                    : c.GetString().Trim().ToLower())
+                .Where(v => !string.IsNullOrWhiteSpace(v))
+                .ToList();
+
+            bool hasVehicleCol = cellValues.Any(cv => vehicleNumberVariants.Contains(cv));
+            bool hasSerialCol = cellValues.Any(cv => serialNumberVariants.Contains(cv));
+
+            if (hasVehicleCol && hasSerialCol)
+                return row;
+        }
+
+        return worksheet.Row(1);
+    }
+
+    private VehicleSerialUpdateColumnMapping BuildVehicleSerialUpdateColumnMapping(IXLRow headerRow)
+    {
+        var mapping = new VehicleSerialUpdateColumnMapping();
+        var cells = headerRow.CellsUsed().ToList();
+
+        mapping.VehicleNumberCol = FindColumn(cells,
+            "a", "VehicleNumber", "Vehicle Number", "VehicleNo", "Vehicle No",
+            "رقم المركبة", "رقم الهيكل");
+
+        mapping.SerialNumberCol = FindColumn(cells,
+            "b", "SerialNumber", "Serial Number", "SerialNo", "Serial No",
+            "الرقم التسلسلي", "تسلسلي");
+
+        var missing = new List<string>();
+        if (mapping.VehicleNumberCol == 0) missing.Add("Vehicle Number (column a)");
+        if (mapping.SerialNumberCol == 0) missing.Add("Serial Number (column b)");
+
+        mapping.IsValid = !missing.Any();
+        mapping.ErrorMessage = missing.Any()
+            ? $"Required columns not found: {string.Join(", ", missing)}"
+            : null;
+
+        return mapping;
+    }
+
+    private VehicleSerialUpdateRowData ParseVehicleSerialUpdateRowData(
+        IXLRow row,
+        VehicleSerialUpdateColumnMapping map,
+        int rowNumber)
+    {
+        var data = new VehicleSerialUpdateRowData { RowNumber = rowNumber };
+
+        try
+        {
+            data.VehicleNumber = GetCellValue(row, map.VehicleNumberCol)?.Trim();
+            if (string.IsNullOrWhiteSpace(data.VehicleNumber))
+            {
+                data.IsValid = false;
+                data.ErrorMessage = "Vehicle Number is required";
+                return data;
+            }
+
+            var serialStr = GetCellValue(row, map.SerialNumberCol);
+            if (string.IsNullOrWhiteSpace(serialStr))
+            {
+                data.IsValid = false;
+                data.ErrorMessage = "Serial Number is required";
+                return data;
+            }
+
+            if (!TryParseInt(serialStr, out int serial) || serial <= 0)
+            {
+                data.IsValid = false;
+                data.ErrorMessage = $"Invalid Serial Number: '{serialStr}'";
+                return data;
+            }
+
+            data.NewSerialNumber = serial;
+            data.IsValid = true;
+        }
+        catch (Exception ex)
+        {
+            data.IsValid = false;
+            data.ErrorMessage = $"Error parsing row: {ex.Message}";
+        }
+
+        return data;
+    }
+
+    public record VehicleSerialUpdateResponse(
+    int TotalRecords,
+    int SuccessfulUpdates,
+    int NoChangeNeeded,
+    int VehicleNotFound,
+    int FailedRecords,
+    List<VehicleSerialUpdateRowResult> Results,
+    List<string> Errors,
+    DateTime ProcessedAt
+);
+
+    public record VehicleSerialUpdateRowResult(
+        int RowNumber,
+        bool Success,
+        string VehicleNumber,
+        int? OldSerialNumber,
+        int NewSerialNumber,
+        bool WasUpdated,
+        string? ErrorMessage
+    );
+
+    // ── Internal classes ─────────────────────────────────────────────────────────
+
+    internal class VehicleSerialUpdateColumnMapping
+    {
+        public bool IsValid { get; set; }
+        public string? ErrorMessage { get; set; }
+        public int VehicleNumberCol { get; set; }
+        public int SerialNumberCol { get; set; }
+    }
+
+    internal class VehicleSerialUpdateRowData
+    {
+        public int RowNumber { get; set; }
+        public bool IsValid { get; set; }
+        public string? ErrorMessage { get; set; }
+        public string? VehicleNumber { get; set; }
+        public int NewSerialNumber { get; set; }
+    }
+
+    #endregion
 
     #region Kita Monthly Validity Import
 
