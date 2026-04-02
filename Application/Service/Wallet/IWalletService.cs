@@ -57,6 +57,7 @@ public record WalletImportResult(
     int TotalRecords,
     int CreatedCount,
     int UpdatedCount,
+    int DeletedCount,
     int ErrorCount,
     List<WalletImportError> Errors
 );

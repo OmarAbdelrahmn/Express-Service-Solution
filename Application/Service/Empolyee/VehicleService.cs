@@ -2028,6 +2028,7 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
                 // Populate rider info for Taken status
                 var rider = await dbcontext.RiderDetails
                     .Include(r => r.Employee)
+                    .Include(r=>r.Company)
                     .FirstOrDefaultAsync(r => r.EmployeeIqamaNo == v.TakenStatus.EmployeeIqamaNo);
 
                 if (rider != null)
@@ -2038,7 +2039,8 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
                         RiderName = rider.Employee.NameAR,
                         RiderNameE = rider.Employee.NameEN,
                         TakenDate = v.TakenStatus.Timestamp,
-                        TakenReason = v.TakenStatus.Reason ?? "no reason"
+                        TakenReason = v.TakenStatus.Reason ?? "no reason",
+                        CompanyName = rider.Company.Name
                     };
                 }
 
@@ -2078,6 +2080,7 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
                 {
                     var rider = await dbcontext.RiderDetails
                         .Include(r => r.Employee)
+                        .Include(c=>c.Company)
                         .FirstOrDefaultAsync(r => r.EmployeeIqamaNo == v.LatestStatus.EmployeeIqamaNo);
 
                     if (rider != null)
@@ -2088,7 +2091,9 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
                             RiderName = rider.Employee.NameAR,
                             RiderNameE = rider.Employee.NameEN,
                             TakenDate = v.LatestStatus.Timestamp,
-                            TakenReason = v.LatestStatus.Reason ?? "no reason"
+                            TakenReason = v.LatestStatus.Reason ?? "no reason",
+                            CompanyName = rider.Company.Name
+
                         };
                     }
                 }
@@ -2222,6 +2227,7 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
                 {
                     var rider = dbcontext.RiderDetails
                         .Include(r => r.Employee)
+                        .Include(c => c.Company)
                         .FirstOrDefault(r => r.EmployeeIqamaNo == takenStatus.EmployeeIqamaNo);
 
                     if (rider != null)
@@ -2232,7 +2238,9 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
                             RiderName = rider.Employee.NameAR,
                             RiderNameE = rider.Employee.NameEN,
                             TakenDate = takenStatus.Timestamp,
-                            TakenReason = takenStatus.Reason ?? "no reason"
+                            TakenReason = takenStatus.Reason ?? "no reason",
+                            CompanyName = rider.Company.Name,
+                            PhoneNumber = rider.Employee.Phone
                         };
                     }
                 }

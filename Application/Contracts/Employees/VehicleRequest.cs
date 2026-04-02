@@ -86,6 +86,8 @@ public class RiderInfoDto
     public string RiderNameE { get; set; }
     public DateTime TakenDate { get; set; }
     public string TakenReason { get; set; }
+    public string CompanyName { get; set; }
+    public string PhoneNumber { get; set; }
 }
 public class UnavailableVehiclesResponse
 {

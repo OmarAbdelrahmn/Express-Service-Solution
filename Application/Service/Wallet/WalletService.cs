@@ -22,17 +22,22 @@ public class WalletService(
         "Total", "الإجمالي", "Wallet", "المحفظة"
     };
 
-    // ── Public: Import ───────────────────────────────────────────────────────
-
     public async Task<Result<WalletImportResult>> ImportFromExcelAsync(
-        Stream excelStream,
-        DateOnly date,
-        CancellationToken cancellationToken = default)
+         Stream excelStream,
+         DateOnly date,
+         CancellationToken cancellationToken = default)
     {
         var errors = new List<WalletImportError>();
         var createdCount = 0;
         var updatedCount = 0;
+        var deletedCount = 0;
         var totalRecords = 0;
+
+        // Tracks every WorkedRiderId that was cleanly resolved from the Excel.
+        // Only successfully resolved rows are added — skipped/errored rows are
+        // intentionally excluded so a bad row never causes a valid DB record to
+        // be deleted.
+        var resolvedWorkedRiderIds = new HashSet<int>();
 
         try
         {
@@ -113,6 +118,9 @@ public class WalletService(
                     }
 
                     await dbcontext.SaveChangesAsync(cancellationToken);
+
+                    // ── Mark this rider as present in the Excel ──────────────
+                    resolvedWorkedRiderIds.Add(riderId);
                 }
                 catch (Exception ex)
                 {
@@ -121,10 +129,23 @@ public class WalletService(
                 }
             }
 
+            // ── Sync: delete DB records for this date that are absent from Excel
+            var staleWallets = await dbcontext.Wallets
+                .Where(w => w.Date == date && !resolvedWorkedRiderIds.Contains(w.WorkedRiderId))
+                .ToListAsync(cancellationToken);
+
+            if (staleWallets.Any())
+            {
+                dbcontext.Wallets.RemoveRange(staleWallets);
+                await dbcontext.SaveChangesAsync(cancellationToken);
+                deletedCount = staleWallets.Count;
+            }
+
             return Result.Success(new WalletImportResult(
                 totalRecords,
                 createdCount,
                 updatedCount,
+                deletedCount,
                 errors.Count,
                 errors));
         }
@@ -151,7 +172,7 @@ public class WalletService(
                 // Main rider (substitution slot)
                 .Include(w => w.MainRider)
                     .ThenInclude(r => r!.Employee)
-                .OrderByDescending(w => w.Date)
+                .OrderBy(w => w.Amount)
                 .ToListAsync(cancellationToken);
 
             var responses = wallets.Select(MapToResponse);
