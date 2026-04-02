@@ -25,6 +25,7 @@ using Application.Service.SupplierSer;
 using Application.Service.temp;
 using Application.Service.Transfer;
 using Application.Service.User;
+using Application.Service.Wallet;
 using Domain;
 using Domain.Entities;
 using FluentValidation;
@@ -77,6 +78,7 @@ public static class ApplicationDependencies
         Services.AddScoped<IHungerReportService, HungerReportService>();
         Services.AddScoped<IEmployeeDocumentsService, EmployeeDocumentsService>();
         Services.AddScoped<IDashboardService, DashboardService>();
+        Services.AddScoped<IWalletService, WalletService>();
 
         #region Hnagfire + Daily Report Job
         // ── Hangfire ────────────────────────────────────────────────────────────────

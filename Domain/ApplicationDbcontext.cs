@@ -44,6 +44,7 @@ public class ApplicationDbcontext(DbContextOptions<ApplicationDbcontext> options
     public required DbSet<RiderMonthlyValidity> RiderMonthlyValidities { get; set; }
     public required DbSet<Company2ValidationConfig> Company2ValidationConfigs{ get; set; }
     public DbSet<DailyReportLog> DailyReportLogs { get; set; }
+    public DbSet<Wallet> Wallets { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
