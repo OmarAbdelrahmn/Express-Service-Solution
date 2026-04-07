@@ -1313,7 +1313,8 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
                           (s.StatusType == VehicleStatusType.Taken ||
                            s.StatusType == VehicleStatusType.Problem ||
                            s.StatusType == VehicleStatusType.Stolen ||
-                           s.StatusType == VehicleStatusType.BreakUp));
+                           s.StatusType == VehicleStatusType.BreakUp ||
+                           s.StatusType == VehicleStatusType.OutOfService));
 
         if (isUnavailable)
         {
@@ -1361,7 +1362,8 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
                            (s.StatusType == VehicleStatusType.Taken ||
                             s.StatusType == VehicleStatusType.Problem ||
                             s.StatusType == VehicleStatusType.Stolen ||
-                            s.StatusType == VehicleStatusType.BreakUp))
+                            s.StatusType == VehicleStatusType.BreakUp ||
+                            s.StatusType == VehicleStatusType.OutOfService))
                 .Select(s => s.VehicleNumber)
                 .Distinct()
                 .ToListAsync();
@@ -1475,7 +1477,8 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
                        s.IsActive &&
                        (s.StatusType == VehicleStatusType.Taken ||
                         s.StatusType == VehicleStatusType.Problem ||
-                        s.StatusType == VehicleStatusType.Stolen))
+                        s.StatusType == VehicleStatusType.Stolen ||
+                        s.StatusType == VehicleStatusType.OutOfService))
             .ToListAsync();
 
         foreach (var status in activeStatuses)
@@ -1527,6 +1530,15 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
 
         if (breakup)
             return Result.Failure(new Error("Vehiclebreakup", "Vehicle has active breakup problems and cannot be taken", 400));
+
+        bool outOfService = await dbcontext.RiderVehicleStatus
+            .AnyAsync(s => s.Vehicle.PlateNumberA == plateNumber &&
+                          s.IsActive &&
+                          s.StatusType == VehicleStatusType.OutOfService);
+
+            if (outOfService)
+                return Result.Failure(new Error("VehicleOutOfService",
+                    "Vehicle is out of service and cannot be taken", 400));
 
         return Result.Success();
     }
@@ -2817,7 +2829,118 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
     }
 
 
+    public async Task<Result> MarkVehicleAsOutOfServiceAsync(string vehicleNumber, string reason)
+    {
+        using var transaction = await dbcontext.Database.BeginTransactionAsync();
+        try
+        {
+            var vehicle = await dbcontext.Vehicles
+                .FirstOrDefaultAsync(v => v.VehicleNumber == vehicleNumber);
 
+            if (vehicle == null)
+                return Result.Failure(new Error("NoVehicle", "Vehicle not found", 404));
+
+            var alreadyOutOfService = await dbcontext.RiderVehicleStatus
+                .AnyAsync(s => s.VehicleNumber == vehicleNumber &&
+                              s.IsActive &&
+                              s.StatusType == VehicleStatusType.OutOfService);
+
+            if (alreadyOutOfService)
+                return Result.Failure(new Error("AlreadyOutOfService",
+                    "Vehicle is already marked as out of service", 400));
+
+            await EndAllActivePermissionsForVehicle(vehicleNumber);
+
+            dbcontext.RiderVehicleStatus.Add(new RiderVehicleStatus
+            {
+                EmployeeIqamaNo = null,
+                VehicleNumber = vehicleNumber,
+                StatusType = VehicleStatusType.OutOfService,
+                Reason = reason,
+                IsActive = true,
+                PermissionEndDate = DateTime.UtcNow.AddHours(3)
+            });
+
+            await dbcontext.SaveChangesAsync();
+            await transaction.CommitAsync();
+            return Result.Success();
+        }
+        catch (Exception ex)
+        {
+            await transaction.RollbackAsync();
+            return Result.Failure(new Error("MarkOutOfServiceError",
+                $"Failed to mark vehicle as out of service: {ex.Message}", 500));
+        }
+    }
+
+    public async Task<Result> RestoreVehicleFromOutOfServiceAsync(string vehicleNumber, string reason)
+    {
+        using var transaction = await dbcontext.Database.BeginTransactionAsync();
+        try
+        {
+            var vehicle = await dbcontext.Vehicles
+                .FirstOrDefaultAsync(v => v.VehicleNumber == vehicleNumber);
+
+            if (vehicle == null)
+                return Result.Failure(new Error("NoVehicle", "Vehicle not found", 404));
+
+            var outOfServiceStatus = await dbcontext.RiderVehicleStatus
+                .FirstOrDefaultAsync(s => s.VehicleNumber == vehicleNumber &&
+                                         s.IsActive &&
+                                         s.StatusType == VehicleStatusType.OutOfService);
+
+            if (outOfServiceStatus == null)
+                return Result.Failure(new Error("NotOutOfService",
+                    "Vehicle is not currently marked as out of service", 400));
+
+            outOfServiceStatus.IsActive = false;
+            outOfServiceStatus.PermissionEndDate = DateTime.UtcNow.AddHours(3);
+
+            dbcontext.RiderVehicleStatus.Add(new RiderVehicleStatus
+            {
+                EmployeeIqamaNo = null,
+                VehicleNumber = vehicleNumber,
+                StatusType = VehicleStatusType.Returned,
+                Reason = $"Restored from out of service: {reason}",
+                IsActive = false
+            });
+
+            await dbcontext.SaveChangesAsync();
+            await transaction.CommitAsync();
+            return Result.Success();
+        }
+        catch (Exception ex)
+        {
+            await transaction.RollbackAsync();
+            return Result.Failure(new Error("RestoreOutOfServiceError",
+                $"Failed to restore vehicle from out of service: {ex.Message}", 500));
+        }
+    }
+
+    public async Task<Result<IEnumerable<Vehicle>>> GetOutOfServiceVehiclesAsync()
+    {
+        try
+        {
+            var outOfServiceVehicleNumbers = await dbcontext.RiderVehicleStatus
+                .Where(s => s.IsActive && s.StatusType == VehicleStatusType.OutOfService)
+                .Select(s => s.VehicleNumber)
+                .Distinct()
+                .ToListAsync();
+
+            var vehicles = await dbcontext.Vehicles
+                .Where(v => outOfServiceVehicleNumbers.Contains(v.VehicleNumber))
+                .OrderBy(v => v.VehicleNumber)
+                .ToListAsync();
+
+            return Result.Success<IEnumerable<Vehicle>>(vehicles);
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<IEnumerable<Vehicle>>(
+                new Error("GetOutOfServiceError",
+                    $"Failed to retrieve out of service vehicles: {ex.Message}", 500));
+        }
+    }
 
 
 }

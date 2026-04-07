@@ -290,6 +290,38 @@ public class VehicleController(IVehicleService service) : ControllerBase
         var result = await _service.GetVehiclesGroupedByStatusAsync();
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
+
+    [HttpPost("out-of-service")]
+    [Authorize(Roles = "Master,Admin")]
+    public async Task<IActionResult> MarkOutOfService(
+    [FromQuery] string vehicleNumber,
+    [FromQuery] string reason)
+    {
+        var result = await _service.MarkVehicleAsOutOfServiceAsync(vehicleNumber, reason);
+        return result.IsSuccess
+            ? Ok(new ApiMessage("Vehicle marked as out of service successfully"))
+            : result.ToProblem();
+    }
+
+    [HttpPut("restore-out-of-service")]
+    [Authorize(Roles = "Master,Admin")]
+    public async Task<IActionResult> RestoreFromOutOfService(
+        [FromQuery] string vehicleNumber,
+        [FromQuery] string reason)
+    {
+        var result = await _service.RestoreVehicleFromOutOfServiceAsync(vehicleNumber, reason);
+        return result.IsSuccess
+            ? Ok(new ApiMessage("Vehicle restored from out of service successfully"))
+            : result.ToProblem();
+    }
+
+    [HttpGet("out-of-service")]
+    [Authorize(Roles = "Master,Admin,Member")]
+    public async Task<IActionResult> GetOutOfServiceVehicles()
+    {
+        var result = await _service.GetOutOfServiceVehiclesAsync();
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
 }
 
 public record ApiMessage(string Message);

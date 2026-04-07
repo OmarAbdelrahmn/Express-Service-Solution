@@ -70,6 +70,10 @@ public interface IVehicleService
         string? Permission, // Required when approving
         DateTime? PermissionEndDate // Required when approving
     );
+
+    Task<Result> MarkVehicleAsOutOfServiceAsync(string vehicleNumber, string reason);
+    Task<Result> RestoreVehicleFromOutOfServiceAsync(string vehicleNumber, string reason);
+    Task<Result<IEnumerable<Vehicle>>> GetOutOfServiceVehiclesAsync();
 }
 
 

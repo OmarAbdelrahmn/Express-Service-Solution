@@ -9,6 +9,7 @@ using Application.Service.Dashboard;
 using Application.Service.DE;
 using Application.Service.EmployeesFiles;
 using Application.Service.Empolyee;
+using Application.Service.EscapedEmployee;
 using Application.Service.Freelancer;
 using Application.Service.Hungerdisa;
 using Application.Service.HungerReports;
@@ -79,6 +80,7 @@ public static class ApplicationDependencies
         Services.AddScoped<IEmployeeDocumentsService, EmployeeDocumentsService>();
         Services.AddScoped<IDashboardService, DashboardService>();
         Services.AddScoped<IWalletService, WalletService>();
+        Services.AddScoped<IEscapedEmployeeService, EscapedEmployeeService>();
 
         #region Hnagfire + Daily Report Job
         // ── Hangfire ────────────────────────────────────────────────────────────────

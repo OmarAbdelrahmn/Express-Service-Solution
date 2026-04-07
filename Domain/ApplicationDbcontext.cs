@@ -45,6 +45,7 @@ public class ApplicationDbcontext(DbContextOptions<ApplicationDbcontext> options
     public required DbSet<Company2ValidationConfig> Company2ValidationConfigs{ get; set; }
     public DbSet<DailyReportLog> DailyReportLogs { get; set; }
     public DbSet<Wallet> Wallets { get; set; }
+    public DbSet<EscapedEmployeeDetails> EscapedEmployeeDetails{ get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
