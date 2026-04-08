@@ -296,7 +296,7 @@ public class RiderService(ApplicationDbcontext dbcontext, IRiderWorkingIdHistory
             return Result.Failure(new Error("ServerError", ex.Message, 500));
         }
     }
-    public async Task<Result<RiderResponse>> UpdateAsync(long IqamaNo, URiderRequest request)
+    public async Task<Result<RiderResponse>> UpdateAsync(long IqamaNo, URiderRequest request ,string userId)
     {
         using var transaction = await dbcontext.Database.BeginTransactionAsync();
 
@@ -318,6 +318,27 @@ public class RiderService(ApplicationDbcontext dbcontext, IRiderWorkingIdHistory
 
             // Update basic employee fields
             UpdateEmployeeFields(employee, request);
+
+            if (!string.IsNullOrWhiteSpace(request.Status))
+            {
+                employee.Status = request.Status;
+
+                if (request.Status.Equals("fleeing", StringComparison.OrdinalIgnoreCase))
+                {
+                    employee.HousingId = null;
+
+                    // ADD THIS: Create escaped employee record
+                    var escapedRecord = new EscapedEmployeeDetails
+                    {
+                        EmployeeIqamaNo = employee.IqamaNo,
+                        EscapedAt = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3)),
+                        ActivePath = EscapedPath.None,
+                        CreatedAt = DateTime.UtcNow.AddHours(3),
+                        CreatedBy = userId
+                    };
+                    await dbcontext.EscapedEmployeeDetails.AddAsync(escapedRecord);
+                }
+            }
 
             // Track changes for history
             bool needsHistoryRecord = false;
@@ -528,13 +549,6 @@ public class RiderService(ApplicationDbcontext dbcontext, IRiderWorkingIdHistory
         if (request.HousingId.HasValue)
             employee.HousingId = request.HousingId.Value;
 
-        if (!string.IsNullOrWhiteSpace(request.Status))
-        {
-            employee.Status = request.Status;
-
-            if (request.Status.Equals("fleeing", StringComparison.OrdinalIgnoreCase))
-                employee.HousingId = null;
-        }
     }
 
     public async Task<List<RiderResponse>> SmartSearch(string keyword)

@@ -1,4 +1,5 @@
 ﻿using Application.Contracts.rider;
+using Application.Extensions;
 using Application.Service.Empolyee;
 using Application.Service.Riders;
 using Microsoft.AspNetCore.Authorization;
@@ -98,7 +99,8 @@ public class RiderController(IRiderService service) : ControllerBase
     [Authorize(Roles = "Master,Admin")]
     public async Task<IActionResult> UpdateRider(long IqamaNo, [FromBody] URiderRequest request)
     {
-        var result = await service.UpdateAsync(IqamaNo, request);
+        var userId = User.GetUserId();
+        var result = await service.UpdateAsync(IqamaNo, request, userId);
 
         return result.IsSuccess
             ? Ok(result.Value) : result.ToProblem();

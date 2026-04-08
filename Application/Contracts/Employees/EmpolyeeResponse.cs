@@ -1,6 +1,88 @@
-﻿namespace Application.Contracts.Employees;
+﻿using Domain.Entities;
+
+namespace Application.Contracts.Employees;
 
 
+
+public record SetReportedPathRequest(
+    DateTime ReportedAt,
+    string UpdatedBy,
+    string? Notes = null
+);
+
+public record SetOutagePathRequest(
+    DateTime DateOfOutage,
+    string VisaNumber,
+    string UpdatedBy,
+    string? Notes = null
+);
+
+public record SwitchPathRequest(
+    EscapedPath NewPath,
+    DateTime? ReportedAt,       // required if NewPath == Reported
+    DateTime? DateOfOutage,     // required if NewPath == Outage
+    string? VisaNumber,         // required if NewPath == Outage
+    string UpdatedBy,
+    string? Notes = null
+);
+
+// ── Response Records ─────────────────────────────────────────────────────────
+
+public record EscapedEmployeeSummaryResponse(
+    long IqamaNo,
+    string NameAR,
+    string NameEN,
+    string JobTitle,
+    string? HousingName,
+    DateOnly EscapedAt,
+    EscapedPath ActivePath,
+    DateTime? RemovalDeadline,
+    int? RemainingDaysToRemoval,
+    bool IsOverdue,
+    bool TenDayNotificationSent
+);
+
+public record EscapedEmployeeDetailResponse(
+    long IqamaNo,
+    string NameAR,
+    string NameEN,
+    string JobTitle,
+    string Country,
+    string Phone,
+    string? HousingName,
+    string Sponsor,
+    DateOnly EscapedAt,
+    EscapedPath ActivePath,
+    // Reported path
+    bool? IsReported,
+    DateTime? ReportedAt,
+    // Outage path
+    bool? IsOutage,
+    DateTime? DateOfOutage,
+    string? OutageVisaNumber,
+    // Removal window
+    DateTime? RemovalDeadline,
+    int? RemainingDaysToRemoval,
+    bool IsOverdue,
+    bool TenDayNotificationSent,
+    DateTime? TenDayNotificationSentAt,
+    // Audit
+    DateTime CreatedAt,
+    string? CreatedBy,
+    DateTime UpdatedAt,
+    string? UpdatedBy,
+    string? Notes
+);
+
+public record EscapedEmployeeStatsResponse(
+    int TotalEscaped,
+    int NonePathCount,
+    int ReportedPathCount,
+    int OutagePathCount,
+    int OverdueCount,
+    int DueWithin10DaysCount,
+    int NotificationsSentCount
+);
 
 /// <summary>Create a new escaped-employee record (no path yet).</summary>
 public record CreateEscapedEmployeeRequest(
@@ -74,29 +156,7 @@ public record EscapedEmployeeResponse(
     string? Notes
 );
 
-public record EscapedEmployeeSummaryResponse(
-    int Id,
-    long EmployeeIqamaNo,
-    string EmployeeNameAR,
-    string EmployeeNameEN,
-    DateOnly EscapedAt,
-    string ActivePath,
-    DateTime? RemovalDeadline,
-    int? RemainingDaysToRemoval,
-    bool IsOverdue,
-    bool TenDayNotificationSent
-);
 
-public record EscapedEmployeeStatsResponse(
-    int TotalEscaped,
-    int WithReportedPath,
-    int WithOutagePath,
-    int WithNoPath,
-    int Overdue,
-    int DueWithin10Days,
-    int DueWithin30Days,
-    int NotificationPending
-);
 
 // ── Notification payload (used internally by the job) ─────────────────────────
 

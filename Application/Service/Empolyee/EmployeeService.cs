@@ -667,9 +667,23 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
 
                 // Update employee status
                 employee.Status = statusChange.Action;
+
                 if (employee.Status == "fleeing")
+                {
                     employee.HousingId = null;
-                
+
+                    // ADD THIS: Create escaped employee record
+                    var escapedRecord = new EscapedEmployeeDetails
+                    {
+                        EmployeeIqamaNo = employee.IqamaNo,
+                        EscapedAt = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3)),
+                        ActivePath = EscapedPath.None,
+                        CreatedAt = DateTime.UtcNow.AddHours(3),
+                        CreatedBy = resolvedBy
+                    };
+                    await dbcontext.EscapedEmployeeDetails.AddAsync(escapedRecord);
+                }
+
                 dbcontext.Employees.Update(employee);
             }
 

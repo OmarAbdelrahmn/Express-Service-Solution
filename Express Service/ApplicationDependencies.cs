@@ -9,6 +9,7 @@ using Application.Service.Dashboard;
 using Application.Service.DE;
 using Application.Service.EmployeesFiles;
 using Application.Service.Empolyee;
+using Application.Service.Escaped;
 using Application.Service.EscapedEmployee;
 using Application.Service.Freelancer;
 using Application.Service.Hungerdisa;

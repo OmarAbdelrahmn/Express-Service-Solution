@@ -13,7 +13,7 @@ public interface IRiderService
     Task<Result<IEnumerable<RiderResponse>>> Get(long IqamaNo);
     Task<Result<RiderResponse>> Getbyid(long Id);
     Task<Result> CreateAsync(RiderRequest Request);
-    Task<Result<RiderResponse>> UpdateAsync(long IqamaNo, URiderRequest Request);
+    Task<Result<RiderResponse>> UpdateAsync(long IqamaNo, URiderRequest Request,string userId);
     Task<Result> DeleteAsync(long IqamaNo, string Reason, CancellationToken cancellationToken = default);
     Task<List<RiderResponse>> SmartSearch(string keyword);
     Task<Result> ChangeWorkinId(string OldWorkinId, string NewWorkingId);
