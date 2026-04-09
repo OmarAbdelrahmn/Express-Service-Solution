@@ -1,16 +1,19 @@
 ﻿using Application.Abstraction;
 using Application.Contracts.Employees;
+using DocumentFormat.OpenXml.ExtendedProperties;
 using Domain;
 using Domain.Entities;
 using Mapster;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using static Microsoft.EntityFrameworkCore.DbLoggerCategory;
 
 namespace Application.Service.Empolyee;
 
-public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
+public class EmployeeService(ApplicationDbcontext dbcontext,UserManager<ApplicationUser> manager) : IEmployeeService
 {
     private readonly ApplicationDbcontext dbcontext = dbcontext;
+    private readonly UserManager<ApplicationUser> manager = manager;
 
     public async Task<Result<IEnumerable<EmpolyeeResponse>>> Get(long IqamaNo)
     {
@@ -665,8 +668,26 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
                     ));
                 }
 
+                var User = await manager.FindByIdAsync(resolvedBy);
+
+
+                var oldStatus = employee.Status;         // ← capture BEFORE changing
+
                 // Update employee status
                 employee.Status = statusChange.Action;
+
+                var statusLog = new EmployeeStatusLog
+                {
+                    EmployeeIqamaNo = employee.IqamaNo,
+                    OldStatus = oldStatus,
+                    NewStatus = employee.Status,
+                    ChangedBy = User.UserName ?? "System",
+                    ChangedAt = DateTime.UtcNow.AddHours(3),
+                    Reason = statusChange.Reason,
+                    ChangeSource = "StatusRequest"
+                };
+                await dbcontext.EmployeeStatusLogs.AddAsync(statusLog);
+
 
                 if (employee.Status == "fleeing")
                 {
@@ -682,6 +703,8 @@ public class EmployeeService(ApplicationDbcontext dbcontext) : IEmployeeService
                         CreatedBy = resolvedBy
                     };
                     await dbcontext.EscapedEmployeeDetails.AddAsync(escapedRecord);
+
+                    employee.UpdatedAt = DateTime.UtcNow.AddHours(3);
                 }
 
                 dbcontext.Employees.Update(employee);

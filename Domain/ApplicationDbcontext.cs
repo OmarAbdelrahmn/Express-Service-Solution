@@ -46,6 +46,7 @@ public class ApplicationDbcontext(DbContextOptions<ApplicationDbcontext> options
     public DbSet<DailyReportLog> DailyReportLogs { get; set; }
     public DbSet<Wallet> Wallets { get; set; }
     public DbSet<EscapedEmployeeDetails> EscapedEmployeeDetails{ get; set; }
+    public DbSet<EmployeeStatusLog> EmployeeStatusLogs { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

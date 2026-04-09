@@ -2,6 +2,7 @@
 using Application.Contracts.Employees;
 using Application.Contracts.rider;
 using Application.Service.Empolyee;
+using Domain.Entities;
 
 namespace Application.Service.Riders;
 
@@ -21,9 +22,51 @@ public interface IRiderService
     Task<Result<EmployeeStatisticsResponse>> GetEmployeeStatistics();
     Task<Result<IEnumerable<RiderResponse>>> Filter(EmployeeFilterr filter);
     Task<Result<VehicleResponse>> GetRiderVehicle(long IqamaNo);
+    Task<Result<EmployeeStatusLogsWithInfoResponse>> GetStatusLogsAsync(long iqamaNo);
 }
 public record EmployeeStatisticsResponse(
     int Total,
     int Riders,
     int Employees
+);
+
+public record EmployeeStatusLogResponse(
+    int Id,
+    long EmployeeIqamaNo,
+    string NameAR,
+    string NameEN,
+    string JobTitle,
+    string Country,
+    string Sponsor,
+    string? HousingName,
+    string? HousingAddress,
+    string OldStatus,
+    string NewStatus,
+    string ChangedBy,
+    DateTime ChangedAt,
+    string? Reason,
+    string ChangeSource
+);
+
+public record EmployeeStatusLogsWithInfoResponse(
+    // ── Employee snapshot ─────────────────────────────────────────────────
+    long IqamaNo,
+    string NameAR,
+    string NameEN,
+    string JobTitle,
+    string Country,
+    string Sponsor,
+    string CurrentStatus,
+    string? HousingName,
+    string? HousingAddress,
+
+    // ── Log summary ───────────────────────────────────────────────────────
+    int TotalChanges,
+    int DirectUpdates,
+    int StatusRequests,
+    DateTime? FirstChangeAt,
+    DateTime? LastChangeAt,
+
+    // ── Log entries ───────────────────────────────────────────────────────
+    IEnumerable<EmployeeStatusLogResponse> Logs
 );

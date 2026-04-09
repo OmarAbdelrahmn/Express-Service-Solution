@@ -4,14 +4,16 @@ using Application.Contracts.rider;
 using Application.Service.Empolyee;
 using Domain;
 using Domain.Entities;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 
 namespace Application.Service.Riders;
 
-public class RiderService(ApplicationDbcontext dbcontext, IRiderWorkingIdHistoryService workingIdHistoryService) : IRiderService
+public class RiderService(ApplicationDbcontext dbcontext, IRiderWorkingIdHistoryService workingIdHistoryService,UserManager<ApplicationUser> manager) : IRiderService
 {
     private readonly ApplicationDbcontext dbcontext = dbcontext;
     private readonly IRiderWorkingIdHistoryService _workingIdHistoryService = workingIdHistoryService;
+    private readonly UserManager<ApplicationUser> manager = manager;
 
     public async Task<Result<VehicleResponse>> GetRiderVehicle(long IqamaNo)
     {
@@ -321,11 +323,25 @@ public class RiderService(ApplicationDbcontext dbcontext, IRiderWorkingIdHistory
             // Update basic employee fields
             UpdateEmployeeFields(employee, request);
 
-            
+            var User = await manager.FindByIdAsync(userId);
 
             if (!string.IsNullOrWhiteSpace(request.Status))
             {
+                var oldStatus = employee.Status;         // ← capture BEFORE changing
+
                 employee.Status = request.Status;
+
+                var statusLog = new EmployeeStatusLog
+                {
+                    EmployeeIqamaNo = employee.IqamaNo,
+                    OldStatus = oldStatus,
+                    NewStatus = employee.Status,
+                    ChangedBy = User.UserName ?? "System",
+                    ChangedAt = DateTime.UtcNow.AddHours(3),
+                    Reason = null,              // direct update — no request reason
+                    ChangeSource = "DirectUpdate"
+                };
+                await dbcontext.EmployeeStatusLogs.AddAsync(statusLog);
 
                 if (request.Status.Equals("fleeing", StringComparison.OrdinalIgnoreCase))
                 {
@@ -338,7 +354,7 @@ public class RiderService(ApplicationDbcontext dbcontext, IRiderWorkingIdHistory
                         EscapedAt = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3)),
                         ActivePath = EscapedPath.None,
                         CreatedAt = DateTime.UtcNow.AddHours(3),
-                        CreatedBy = userId
+                        CreatedBy = User.UserName ?? "System",
                     };
                     await dbcontext.EscapedEmployeeDetails.AddAsync(escapedRecord);
                 }
@@ -507,6 +523,67 @@ public class RiderService(ApplicationDbcontext dbcontext, IRiderWorkingIdHistory
         }
     }
 
+    public async Task<Result<EmployeeStatusLogsWithInfoResponse>> GetStatusLogsAsync(long iqamaNo)
+    {
+        // ── 1. Load employee with housing ─────────────────────────────────────
+        var employee = await dbcontext.Employees
+            .AsNoTracking()
+            .Include(e => e.Housing)
+            .FirstOrDefaultAsync(e => e.IqamaNo == iqamaNo);
+
+        if (employee is null)
+            return Result.Failure<EmployeeStatusLogsWithInfoResponse>(
+                new Error("NotFound", "No employee found with this Iqama", 404));
+
+        // ── 2. Load all logs for this employee ────────────────────────────────
+        var logs = await dbcontext.EmployeeStatusLogs
+            .AsNoTracking()
+            .Where(l => l.EmployeeIqamaNo == iqamaNo)
+            .OrderByDescending(l => l.ChangedAt)
+            .ToListAsync();
+
+        // ── 3. Map logs to response ───────────────────────────────────────────
+        var logResponses = logs.Select(l => new EmployeeStatusLogResponse(
+            Id: l.Id,
+            EmployeeIqamaNo: l.EmployeeIqamaNo,
+            NameAR: employee.NameAR,
+            NameEN: employee.NameEN,
+            JobTitle: employee.JobTitle,
+            Country: employee.Country,
+            Sponsor: employee.Sponsor,
+            HousingName: employee.Housing?.Name,
+            HousingAddress: employee.Housing?.Address,
+            OldStatus: l.OldStatus,
+            NewStatus: l.NewStatus,
+            ChangedBy: l.ChangedBy,
+            ChangedAt: l.ChangedAt,
+            Reason: l.Reason,
+            ChangeSource: l.ChangeSource
+        )).ToList();
+
+        // ── 4. Build wrapper with summary stats ───────────────────────────────
+        var response = new EmployeeStatusLogsWithInfoResponse(
+            IqamaNo: employee.IqamaNo,
+            NameAR: employee.NameAR,
+            NameEN: employee.NameEN,
+            JobTitle: employee.JobTitle,
+            Country: employee.Country,
+            Sponsor: employee.Sponsor,
+            CurrentStatus: employee.Status,
+            HousingName: employee.Housing?.Name,
+            HousingAddress: employee.Housing?.Address,
+
+            TotalChanges: logs.Count,
+            DirectUpdates: logs.Count(l => l.ChangeSource == "DirectUpdate"),
+            StatusRequests: logs.Count(l => l.ChangeSource == "StatusRequest"),
+            FirstChangeAt: logs.Count > 0 ? logs.Min(l => l.ChangedAt) : null,
+            LastChangeAt: logs.Count > 0 ? logs.Max(l => l.ChangedAt) : null,
+
+            Logs: logResponses
+        );
+
+        return Result.Success(response);
+    }
     private static void UpdateEmployeeFields(Employees employee, URiderRequest request)
     {
         if (request.IqamaEndM.HasValue)

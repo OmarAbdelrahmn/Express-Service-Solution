@@ -50,6 +50,9 @@ public class AuthService(
 
             var (Token, ExpiresIn) = jwtProvider.GenerateToken(user, userRoles);
 
+            user.LastLogin = DateTime.UtcNow.AddHours(3);
+
+
             await manager.UpdateAsync(user);
 
             var response = new AuthResponse(
@@ -58,8 +61,6 @@ public class AuthService(
                 Token,
                 ExpiresIn
             );
-
-            user.LastLogin = DateTime.UtcNow.AddHours(3);
 
             return Result.Success(response);
         }
