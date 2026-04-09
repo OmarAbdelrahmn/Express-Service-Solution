@@ -18,6 +18,7 @@ public class Employees
     public string Status { get; set; } = "enable";
     public string? IBAN { get; set; } = string.Empty;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow.AddHours(3);
+    public DateTime? UpdatedAt { get; set; }
     public bool INKSA { get; set; } = true;
     public bool IsEmployee { get; set; } = false;
     public int? HousingId { get; set; }
@@ -28,6 +29,8 @@ public class Employees
     public RiderDetails? RiderDetails { get; set; }
 
     public EmployeeDocuments? EmployeeDocuments { get; set; }
+
+    public EscapedEmployeeDetails? EscapedDetails { get; set; }
 
 }
 

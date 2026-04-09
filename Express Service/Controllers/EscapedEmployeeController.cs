@@ -105,6 +105,17 @@ public class EscapedEmployeeController(IEscapedEmployeeService service) : Contro
         var result = await _service.RemoveEscapedEmployeeAsync(iqamaNo, removedBy, ct);
         return result.IsSuccess ? NoContent() : result.ToProblem();
     }
+
+    // POST api/escaped/backfill-fleeing
+    [HttpPost("backfill-fleeing")]
+    [AllowAnonymous]
+    public async Task<IActionResult> BackfillFleeingEmployees(
+        [FromQuery] string createdBy,
+        CancellationToken ct)
+    {
+        var result = await _service.BackfillFleeingEmployeesAsync(createdBy, ct);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
 }
 
 public record UpdateNotesRequest(string Notes);

@@ -4,6 +4,7 @@ using Application.Service.EscapedEmployee;
 using Domain;
 using Domain.Entities;
 using Microsoft.EntityFrameworkCore;
+using static Application.Service.EscapedEmployee.IEscapedEmployeeService;
 
 namespace Application.Service.Escaped;
 
@@ -22,6 +23,41 @@ public class EscapedEmployeeService(ApplicationDbcontext context) : IEscapedEmpl
             .ToListAsync(ct);
 
         return Result.Success(records.Select(MapToSummary));
+    }
+
+    public async Task<Result<BackfillResult>> BackfillFleeingEmployeesAsync(
+    string createdBy, CancellationToken ct = default)
+    {
+        // Get all fleeing employees that don't already have an escaped record
+        var fleeingEmployees = await _context.Employees
+            .Where(e => !e.IsDeleted &&
+                        e.Status.ToLower() == "fleeing" &&
+                        !_context.EscapedEmployeeDetails
+                            .Any(esc => esc.EmployeeIqamaNo == e.IqamaNo))
+            .ToListAsync(ct);
+
+        if (!fleeingEmployees.Any())
+            return Result.Success(new BackfillResult(0, []));
+
+        var now = DateTime.UtcNow.AddHours(3);
+        var records = fleeingEmployees.Select(e => new EscapedEmployeeDetails
+        {
+            EmployeeIqamaNo = e.IqamaNo,
+            EscapedAt = e.DeletedAt.HasValue
+                ? DateOnly.FromDateTime(e.DeletedAt.Value)
+                : DateOnly.FromDateTime(now),
+            ActivePath = EscapedPath.None,
+            CreatedAt = now,
+            UpdatedAt = now,
+            CreatedBy = createdBy,
+            Notes = "Auto-migrated from fleeing status"
+        }).ToList();
+
+        await _context.EscapedEmployeeDetails.AddRangeAsync(records, ct);
+        await _context.SaveChangesAsync(ct);
+
+        var createdIqamaNos = records.Select(r => r.EmployeeIqamaNo).ToList();
+        return Result.Success(new BackfillResult(records.Count, createdIqamaNos));
     }
 
     //public async Task<Result<EscapedEmployeeDetailResponse>> GetByIqamaAsync(

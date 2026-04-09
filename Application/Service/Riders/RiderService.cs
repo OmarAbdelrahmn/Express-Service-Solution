@@ -122,6 +122,7 @@ public class RiderService(ApplicationDbcontext dbcontext, IRiderWorkingIdHistory
         var employees = await dbcontext.Employees
                     .Where(e => !e.IsDeleted)
             .AsNoTracking()
+            .Include(e => e.EscapedDetails)
             .Include(e => e.Housing)
             .Include(e => e.RiderDetails)
                 .ThenInclude(rd => rd.Company)
@@ -139,6 +140,7 @@ public class RiderService(ApplicationDbcontext dbcontext, IRiderWorkingIdHistory
         var employees = await dbcontext.Employees
                     .Where(e => !e.IsDeleted && !e.IsEmployee)
             .AsNoTracking()
+            .Include(e => e.EscapedDetails)
             .Include(e => e.Housing)
             .Include(e => e.RiderDetails)
                 .ThenInclude(rd => rd.Company)
@@ -319,6 +321,8 @@ public class RiderService(ApplicationDbcontext dbcontext, IRiderWorkingIdHistory
             // Update basic employee fields
             UpdateEmployeeFields(employee, request);
 
+            
+
             if (!string.IsNullOrWhiteSpace(request.Status))
             {
                 employee.Status = request.Status;
@@ -338,6 +342,8 @@ public class RiderService(ApplicationDbcontext dbcontext, IRiderWorkingIdHistory
                     };
                     await dbcontext.EscapedEmployeeDetails.AddAsync(escapedRecord);
                 }
+                employee.UpdatedAt = DateTime.UtcNow.AddHours(3);
+
             }
 
             // Track changes for history
@@ -557,6 +563,7 @@ public class RiderService(ApplicationDbcontext dbcontext, IRiderWorkingIdHistory
 
         var query = await dbcontext.Employees.Where(e => !e.IsDeleted)
             .Include(e => e.Housing)
+            .Include(e => e.EscapedDetails)
             .Include(e => e.RiderDetails)
                 .ThenInclude(rd => rd.Company)
             .Where(e =>
@@ -581,6 +588,7 @@ public class RiderService(ApplicationDbcontext dbcontext, IRiderWorkingIdHistory
             .Include(e => e.RiderDetails)
                 .ThenInclude(rd => rd.Company)
             .Include(e => e.Housing)
+            .Include(e => e.EscapedDetails)
             .AsQueryable();
 
         if (filter.IqamaEndH.HasValue)
@@ -794,6 +802,7 @@ public class RiderService(ApplicationDbcontext dbcontext, IRiderWorkingIdHistory
             .Where(r => !r.IsEmployee && r.RiderDetails != null &&
                         r.RiderDetails.VehicleNumber == null && r.Status == "disable")
             .Include(e => e.Housing)
+            .Include(e => e.EscapedDetails)
             .Include(e => e.RiderDetails)
                 .ThenInclude(rd => rd.Company)
             .ToListAsync();
@@ -833,7 +842,12 @@ public class RiderService(ApplicationDbcontext dbcontext, IRiderWorkingIdHistory
             TshirtSize: employee.RiderDetails?.TshirtSize ?? "N/A",
             LicenseNumber: employee.RiderDetails?.LicenseNumber ?? "N/A",
             CompanyName: employee.RiderDetails?.Company?.Name ?? "N/A",
-            RiderId: employee.RiderDetails?.Id
+            RiderId: employee.RiderDetails?.Id,
+            IsReported: employee.EscapedDetails?.IsReported == true,
+            IsOutage: employee.EscapedDetails?.IsOutage == true,
+            ReportedAt: employee.EscapedDetails?.ReportedAt,
+            DateOfOutage: employee.EscapedDetails?.DateOfOutage,
+            UpdatedAd: employee.UpdatedAt
         );
     }
 }

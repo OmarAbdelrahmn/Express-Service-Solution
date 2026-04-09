@@ -249,6 +249,11 @@ public record RiderResponse(
     string? TshirtSize,
     string? LicenseNumber,
     string? CompanyName,
-    int? RiderId
+    int? RiderId,
+    bool IsReported,
+    bool IsOutage,
+    DateTime? ReportedAt,
+    DateTime? DateOfOutage,
+    DateTime? UpdatedAd
     );
 

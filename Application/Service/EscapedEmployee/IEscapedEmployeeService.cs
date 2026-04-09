@@ -6,6 +6,11 @@ namespace Application.Service.EscapedEmployee;
 
 public interface IEscapedEmployeeService
 {
+    Task<Result<BackfillResult>> BackfillFleeingEmployeesAsync(string createdBy, CancellationToken ct = default);
+    public record BackfillResult(
+    int TotalCreated,
+    List<long> CreatedIqamaNos
+);
     //Task<Result<EscapedEmployeeResponse>> CreateAsync(
     //    CreateEscapedEmployeeRequest request,
     //    CancellationToken ct = default);
