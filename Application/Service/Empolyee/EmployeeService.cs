@@ -668,8 +668,6 @@ public class EmployeeService(ApplicationDbcontext dbcontext,UserManager<Applicat
                     ));
                 }
 
-                var User = await manager.FindByIdAsync(resolvedBy);
-
 
                 var oldStatus = employee.Status;         // ← capture BEFORE changing
 
@@ -681,7 +679,7 @@ public class EmployeeService(ApplicationDbcontext dbcontext,UserManager<Applicat
                     EmployeeIqamaNo = employee.IqamaNo,
                     OldStatus = oldStatus,
                     NewStatus = employee.Status,
-                    ChangedBy = User.UserName ?? "System",
+                    ChangedBy = resolvedBy,
                     ChangedAt = DateTime.UtcNow.AddHours(3),
                     Reason = statusChange.Reason,
                     ChangeSource = "StatusRequest"
@@ -710,16 +708,11 @@ public class EmployeeService(ApplicationDbcontext dbcontext,UserManager<Applicat
                 dbcontext.Employees.Update(employee);
             }
 
-            var empname = await dbcontext.Employees
-                .Where(e => e.IqamaNo.ToString() == resolvedBy)
-                .Select(e => e.NameAR)
-                .FirstOrDefaultAsync();
-
 
             // Mark status change as resolved
             statusChange.IsResolved = true;
             statusChange.Resolution = resolution;
-            statusChange.ResolvedBy = empname ?? resolvedBy;
+            statusChange.ResolvedBy = resolvedBy;
             statusChange.ResolvedAt = DateTime.UtcNow.AddHours(3);
             statusChange.AdminNotes = adminNotes ?? (resolution == "Rejected" ? "Request was rejected" : null);
 
@@ -732,7 +725,7 @@ public class EmployeeService(ApplicationDbcontext dbcontext,UserManager<Applicat
         {
             await transaction.RollbackAsync();
             return Result.Failure(
-                new Error("ResolveError", $"Failed to resolve status change: {ex.Message}", 500));
+                new Error(ex.Message, $"Failed to resolve status change: {ex.Message}", 500));
         }
     }
 
