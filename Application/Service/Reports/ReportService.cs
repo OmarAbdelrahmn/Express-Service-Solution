@@ -912,7 +912,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
             var shifts = await _dbcontext.RiderShifts
                 .Include(s => s.Rider)
                     .ThenInclude(r => r.Employee)
-                        .ThenInclude(e => e.Housing)
+                .Include(e => e.Housing)
                 .Where(s => s.CompanyId == 1 &&
                            s.ShiftDate >= startDate &&
                            s.ShiftDate <= currentDate)
@@ -949,8 +949,8 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                     IqamaNo: rider.EmployeeIqamaNo,
                     RiderNameAR: rider.Employee.NameAR,
                     RiderNameEN: rider.Employee.NameEN,
-                    WorkingId: rider.WorkingId ?? "0",
-                    HousingName: rider.Employee.Housing?.Name ?? "غير محدد",
+                    WorkingId: group.OrderByDescending(s => s.ShiftDate).First().WorkingId ?? "0",
+                    HousingName: group.OrderByDescending(s => s.ShiftDate).First().Housing?.Name ?? "غير محدد",
                     TotalOrders: totalOrders,
                     TargetOrders: targetOrdersToDate,
                     OrdersDifference: ordersDifference,
@@ -2166,11 +2166,10 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
             var shifts = await _dbcontext.RiderShifts
                 .Include(s => s.Rider)
                     .ThenInclude(r => r.Employee)
-                        .ThenInclude(e => e.Housing)
+                .Include(e => e.Housing)
                 .Where(s => s.CompanyId == 1 &&
                            s.ShiftDate >= startDate &&
-                           s.ShiftDate <= endDate &&
-                           s.Rider.Employee.Housing != null)
+                           s.ShiftDate <= endDate)
                 .AsNoTracking()
                 .ToListAsync(cancellationToken);
 
@@ -2184,8 +2183,8 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
             var housingGroups = shifts
                 .GroupBy(s => new
                 {
-                    HousingId = s.Rider.Employee.Housing.Id,
-                    HousingName = s.Rider.Employee.Housing.Name
+                    HousingId = s.HousingId ?? 0,
+                    HousingName = s.Housing?.Name ?? "غير محدد"
                 });
 
             var housingDetails = new List<HousingPerformanceDetail>();
@@ -2313,7 +2312,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                         IqamaNo: rider.EmployeeIqamaNo,
                         RiderNameAR: rider.Employee.NameAR,
                         RiderNameEN: rider.Employee.NameEN,
-                        WorkingId: rider.WorkingId ?? "0",
+                        WorkingId: riderShifts.OrderByDescending(s => s.ShiftDate).First().WorkingId,
                         DailyEntries: dailyEntries,
                         PeriodSummary: periodSummary
                     ));
@@ -2504,11 +2503,10 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
         var shifts = await _dbcontext.RiderShifts
             .Include(s => s.Rider)
                 .ThenInclude(r => r.Employee)
-                    .ThenInclude(e => e.Housing)
+            .Include(e => e.Housing)
             .Where(s => s.CompanyId == 1 &&
                        s.ShiftDate >= startDate &&
-                       s.ShiftDate <= endDate &&
-                       s.Rider.Employee.Housing != null)
+                       s.ShiftDate <= endDate)
             .ToListAsync(cancellationToken);
 
         if (!shifts.Any())
@@ -2517,8 +2515,8 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
         // Group by housing from shift data
         var housingGroups = shifts.GroupBy(s => new
         {
-            HousingId = s.Rider.Employee.Housing.Id,
-            HousingName = s.Rider.Employee.Housing.Name
+            HousingId = s.HousingId ?? 0,
+            HousingName = s.Housing?.Name ?? "غير محدد"
         });
 
         var reports = new List<HousingAllRidersSummaryReport>();
@@ -2551,7 +2549,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                     IqamaNo: rider.EmployeeIqamaNo,
                     RiderNameAR: rider.Employee.NameAR,
                     RiderNameEN: rider.Employee.NameEN,
-                    WorkingId: riderShifts.First().WorkingId,
+                    WorkingId: riderShifts.OrderByDescending(s => s.ShiftDate).First().WorkingId,
                     ActualWorkingDays: actualWorkingDays,
                     MissingDays: missingDays > 0 ? -missingDays : 0,
                     TotalWorkingHours: totalWorkingHours,
