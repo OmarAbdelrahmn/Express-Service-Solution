@@ -10,6 +10,7 @@ public class Supplier
     public string? Address { get; set; }
     public string? TaxNumber { get; set; }
     public bool IsActive { get; set; } = true;
+    public string? CommercialRegister { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow.AddHours(3);
 
     public ICollection<Bill> Bills { get; set; } = [];

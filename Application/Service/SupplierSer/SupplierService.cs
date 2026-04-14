@@ -67,6 +67,7 @@ public class SupplierService(ApplicationDbcontext dbcontext) : ISupplierService
             Email = request.Email,
             Address = request.Address,
             TaxNumber = request.TaxNumber,
+            CommercialRegister = request.CommercialRegister,
             IsActive = true,
             CreatedAt = DateTime.UtcNow.AddHours(3)
         };
@@ -101,6 +102,7 @@ public class SupplierService(ApplicationDbcontext dbcontext) : ISupplierService
         supplier.Email = request.Email;
         supplier.Address = request.Address;
         supplier.TaxNumber = request.TaxNumber;
+        supplier.CommercialRegister = request.CommercialRegister;
 
         await _dbcontext.SaveChangesAsync();
 
@@ -173,7 +175,9 @@ public class SupplierService(ApplicationDbcontext dbcontext) : ISupplierService
             supplier.IsActive,
             supplier.CreatedAt,
             supplier.Bills?.Count ?? 0,
-            supplier.Bills?.Sum(b => b.TotalAmount) ?? 0
+            supplier.Bills?.Sum(b => b.TotalAmount) ?? 0,
+            supplier.CommercialRegister
+
         );
     }
 
@@ -186,7 +190,8 @@ public class SupplierService(ApplicationDbcontext dbcontext) : ISupplierService
             supplier.Email,
             supplier.IsActive,
             supplier.Bills?.Count ?? 0,
-            supplier.Bills?.Sum(b => b.TotalAmount) ?? 0
+            supplier.Bills?.Sum(b => b.TotalAmount) ?? 0,
+            supplier.CommercialRegister
         );
     }
 }

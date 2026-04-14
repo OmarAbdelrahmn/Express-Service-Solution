@@ -11,6 +11,8 @@ public class BillService(ApplicationDbcontext dbcontext) : IBillService
 {
     private readonly ApplicationDbcontext _dbcontext = dbcontext;
     private const string MAIN_LOCATION = "الشركة";
+    private const decimal VAT_RATE = 0.15m;
+
 
     public async Task<Result<BillResponse>> ReceiveBillAsync(ReceiveBillRequest request, string processedBy)
     {
@@ -108,7 +110,7 @@ public class BillService(ApplicationDbcontext dbcontext) : IBillService
         var oldPrice = sparePart.Price;
         var currentQuantity = sparePart.Quantity;
         var incomingQuantity = request.Quantity;
-        var incomingPrice = request.UnitPrice;
+        var incomingPrice = request.UnitPrice * (1 + VAT_RATE);   // price + 15% VAT
 
         bool priceChanged = false;
         decimal? newAveragePrice = null;
@@ -161,7 +163,7 @@ public class BillService(ApplicationDbcontext dbcontext) : IBillService
         var oldPrice = accessory.Price;
         var currentQuantity = accessory.Quantity;
         var incomingQuantity = request.Quantity;
-        var incomingPrice = request.UnitPrice;
+        var incomingPrice = request.UnitPrice * (1 + VAT_RATE);   // price + 15% VAT
 
         bool priceChanged = false;
         decimal? newAveragePrice = null;

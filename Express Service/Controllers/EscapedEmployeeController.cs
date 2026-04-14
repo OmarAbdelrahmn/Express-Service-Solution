@@ -1,4 +1,5 @@
 ﻿using Application.Contracts.Employees;
+using Application.Extensions;
 using Application.Service.Escaped;
 using Application.Service.EscapedEmployee;
 using Domain.Entities;
@@ -115,6 +116,29 @@ public class EscapedEmployeeController(IEscapedEmployeeService service) : Contro
     {
         var result = await _service.BackfillFleeingEmployeesAsync(createdBy, ct);
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    // PATCH api/escaped/{iqamaNo}/deactivate
+    [HttpPatch("{iqamaNo:long}/deactivate")]
+    public async Task<IActionResult> Deactivate(
+        long iqamaNo,
+        CancellationToken ct)
+    {
+        var userid = User.GetUserId();
+        var result = await _service.DeactivateEscapedEmployeeAsync(iqamaNo, userid!, ct);
+        return result.IsSuccess ? NoContent() : result.ToProblem();
+    }
+
+    // DELETE api/escaped/{iqamaNo}/force
+    [HttpDelete("{iqamaNo:long}/force")]
+    [Authorize(Roles = "Admin")]          
+    public async Task<IActionResult> ForceDelete(
+        long iqamaNo,
+        CancellationToken ct)
+    {
+        var result = await _service.ForceDeleteEscapedEmployeeAsync(
+            iqamaNo, ct);
+        return result.IsSuccess ? NoContent() : result.ToProblem();
     }
 }
 

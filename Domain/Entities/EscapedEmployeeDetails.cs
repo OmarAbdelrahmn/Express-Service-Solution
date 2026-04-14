@@ -63,6 +63,11 @@ public class EscapedEmployeeDetails
 
     // ── Notes ─────────────────────────────────────────────────────────────
     public string? Notes { get; set; }
+
+    // ── Soft Delete ───────────────────────────────────────────────────────────
+    public bool IsActive { get; set; } = true;
+    public DateTime? DeactivatedAt { get; set; }
+    public string? DeactivatedBy { get; set; }
 }
 
 public enum EscapedPath

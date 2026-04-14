@@ -539,6 +539,14 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
 
             rider.VehicleNumber = vehicle.VehicleNumber;
 
+            var housing = await dbcontext.RiderDetails
+                .Include(r => r.Employee)
+                    .ThenInclude(e => e.Housing)
+                .FirstOrDefaultAsync(r => r.EmployeeIqamaNo == IqamaNo);
+
+            if (housing?.Employee?.Housing != null)
+                vehicle.Location = housing.Employee.Housing.Name;
+
             dbcontext.RiderVehicleStatus.Add(new RiderVehicleStatus
             {
                 EmployeeIqamaNo = IqamaNo,
@@ -1726,6 +1734,17 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
 
         rider.VehicleNumber = operation.VehicleNumber;
 
+        var riderWithHousing = await dbcontext.RiderDetails
+            .Include(r => r.Employee)
+                .ThenInclude(e => e.Housing)
+            .FirstOrDefaultAsync(r => r.EmployeeIqamaNo == operation.RiderIqamaNo);
+
+        var vehicle = await dbcontext.Vehicles
+            .FirstOrDefaultAsync(v => v.VehicleNumber == operation.VehicleNumber);
+
+        if (vehicle != null && riderWithHousing?.Employee?.Housing != null)
+            vehicle.Location = riderWithHousing.Employee.Housing.Name;
+
         dbcontext.RiderVehicleStatus.Add(new RiderVehicleStatus
         {
             EmployeeIqamaNo = operation.RiderIqamaNo,
@@ -2803,6 +2822,20 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
 
             // Update rider's vehicle assignment
             rider.VehicleNumber = newVehicleNumber;
+
+
+            // ADD THIS:
+            var newVehicle = await dbcontext.Vehicles
+                .FirstOrDefaultAsync(v => v.VehicleNumber == newVehicleNumber);
+
+            var riderWithHousing = await dbcontext.RiderDetails
+                .Include(r => r.Employee)
+                    .ThenInclude(e => e.Housing)
+                .FirstOrDefaultAsync(r => r.EmployeeIqamaNo == operation.RiderIqamaNo);
+
+            if (newVehicle != null && riderWithHousing?.Employee?.Housing != null)
+                newVehicle.Location = riderWithHousing.Employee.Housing.Name;
+
 
             // Create taken status for new vehicle with NEW permission
             dbcontext.RiderVehicleStatus.Add(new RiderVehicleStatus

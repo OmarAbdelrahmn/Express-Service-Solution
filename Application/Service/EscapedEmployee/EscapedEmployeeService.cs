@@ -25,6 +25,57 @@ public class EscapedEmployeeService(ApplicationDbcontext context) : IEscapedEmpl
         return Result.Success(records.Select(MapToSummary));
     }
 
+    public async Task<Result> ForceDeleteEscapedEmployeeAsync(
+    long iqamaNo, CancellationToken ct = default)
+    {
+        using var transaction = await _context.Database.BeginTransactionAsync(ct);
+        try
+        {
+            var record = await _context.EscapedEmployeeDetails
+                .FirstOrDefaultAsync(e => e.EmployeeIqamaNo == iqamaNo, ct);
+
+            if (record == null)
+                return Result.Failure(new Error("NotFound",
+                    "No escaped employee record found", 404));
+
+            _context.EscapedEmployeeDetails.Remove(record);
+            await _context.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
+
+            return Result.Success();
+        }
+        catch (Exception ex)
+        {
+            await transaction.RollbackAsync(ct);
+            return Result.Failure(new Error("ForceDeleteError",
+                $"Failed to force delete escaped employee record: {ex.Message}", 500));
+        }
+    }
+
+    public async Task<Result> DeactivateEscapedEmployeeAsync(
+    long iqamaNo, string deactivatedBy, CancellationToken ct = default)
+    {
+        var record = await _context.EscapedEmployeeDetails
+            .FirstOrDefaultAsync(e => e.EmployeeIqamaNo == iqamaNo, ct);
+
+        if (record == null)
+            return Result.Failure(new Error("NotFound",
+                "No escaped employee record found", 404));
+
+        if (!record.IsActive)
+            return Result.Failure(new Error("AlreadyInactive",
+                "Escaped employee record is already inactive", 400));
+
+        record.IsActive = false;
+        record.DeactivatedAt = DateTime.UtcNow.AddHours(3);
+        record.DeactivatedBy = deactivatedBy;
+        record.UpdatedAt = DateTime.UtcNow.AddHours(3);
+        record.UpdatedBy = deactivatedBy;
+
+        await _context.SaveChangesAsync(ct);
+        return Result.Success();
+    }
+
     public async Task<Result<BackfillResult>> BackfillFleeingEmployeesAsync(
     string createdBy, CancellationToken ct = default)
     {

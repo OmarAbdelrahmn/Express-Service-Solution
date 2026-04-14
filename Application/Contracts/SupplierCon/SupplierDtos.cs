@@ -10,7 +10,8 @@ public record SupplierRequest(
     string? Phone,
     string? Email,
     string? Address,
-    string? TaxNumber
+    string? TaxNumber,
+    string? CommercialRegister
 );
 
 public record SupplierResponse(
@@ -24,7 +25,8 @@ public record SupplierResponse(
     bool IsActive,
     DateTime CreatedAt,
     int TotalBills,
-    decimal TotalPurchases
+    decimal TotalPurchases,
+    string? CommercialRegister
 );
 
 public record SupplierListResponse(
@@ -34,5 +36,6 @@ public record SupplierListResponse(
     string? Email,
     bool IsActive,
     int TotalBills,
-    decimal TotalPurchases
+    decimal TotalPurchases,
+    string? CommercialRegister
 );

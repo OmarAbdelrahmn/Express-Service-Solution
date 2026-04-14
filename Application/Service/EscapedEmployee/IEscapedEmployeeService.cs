@@ -11,6 +11,11 @@ public interface IEscapedEmployeeService
     int TotalCreated,
     List<long> CreatedIqamaNos
 );
+    Task<Result> ForceDeleteEscapedEmployeeAsync(long iqamaNo, CancellationToken ct = default);
+
+    Task<Result> DeactivateEscapedEmployeeAsync(long iqamaNo, string deactivatedBy, CancellationToken ct = default);
+
+
     //Task<Result<EscapedEmployeeResponse>> CreateAsync(
     //    CreateEscapedEmployeeRequest request,
     //    CancellationToken ct = default);
