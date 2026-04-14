@@ -7801,7 +7801,8 @@ public class ImportService(ApplicationDbcontext dbcontext, IRiderSub riderSub) :
             }
             data.IqamaNo = iqamaNo;
 
-            data.NewWorkingId = GetCellValue(row, map.WorkingIdCol);
+            data.NewWorkingId = GetCellValue(row, map.WorkingIdCol)?.Replace(" ", "").Trim();
+            
             if (string.IsNullOrWhiteSpace(data.NewWorkingId))
             {
                 data.IsValid = false;
