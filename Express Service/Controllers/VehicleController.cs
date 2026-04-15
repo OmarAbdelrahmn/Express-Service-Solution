@@ -38,10 +38,9 @@ public class VehicleController(IVehicleService service) : ControllerBase
     [FromQuery] long IqamaNo,
     [FromQuery] string newVehiclePlate,
     [FromQuery] string reason,
-    [FromQuery] string permission,
-    [FromQuery] DateTime permissionEndDate)
+    [FromQuery] string permission)
     {
-        var result = await _service.SwitchVehicleAsync(IqamaNo, newVehiclePlate, reason, permission, permissionEndDate);
+        var result = await _service.SwitchVehicleAsync(IqamaNo, newVehiclePlate, reason, permission);
         return result.IsSuccess
             ? Ok(new ApiMessage("Vehicle switched successfully. Old vehicle returned and new vehicle assigned."))
             : result.ToProblem();
@@ -184,10 +183,9 @@ public class VehicleController(IVehicleService service) : ControllerBase
         [FromQuery] long IqamaNo,
         [FromQuery] string vehicleNumber,
         [FromQuery] string reason,
-        [FromQuery] string permission,
-        [FromQuery] DateTime permissionenddate)
+        [FromQuery] string permission)
     {
-        var result = await _service.TakeVehicleAsync(IqamaNo, vehicleNumber, reason, permission, permissionenddate);
+        var result = await _service.TakeVehicleAsync(IqamaNo, vehicleNumber, reason, permission);
         return result.IsSuccess ? Ok(new ApiMessage("Vehicle taken successfully")) : result.ToProblem();
     }
 

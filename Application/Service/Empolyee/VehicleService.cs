@@ -143,8 +143,7 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
     long IqamaNo,
     string newVehiclePlateNumber,
     string reason,
-    string permission,
-    DateTime permissionEndDate)
+    string permission)
     {
         using var transaction = await dbcontext.Database.BeginTransactionAsync();
         try
@@ -218,6 +217,10 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
             // Update rider's vehicle assignment
             rider.VehicleNumber = newVehicle.VehicleNumber;
 
+
+            var startDate = DateTime.UtcNow.AddHours(3);
+
+
             // Create taken status for new vehicle
             dbcontext.RiderVehicleStatus.Add(new RiderVehicleStatus
             {
@@ -227,8 +230,8 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
                 Reason = $"Vehicle switch: {reason}",
                 IsActive = true,
                 Permission = permission,
-                PermissionStartDate = DateTime.UtcNow.AddHours(3),
-                PermissionEndDate = permissionEndDate
+                PermissionStartDate = startDate, // Start NOW
+                PermissionEndDate = startDate.AddYears(1).AddDays(-1) // End date from admin's resolution
             });
 
             await dbcontext.SaveChangesAsync();
@@ -508,7 +511,7 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
         }
     }
 
-    public async Task<Result> TakeVehicleAsync(long IqamaNo, string PlateNumberA, string reason, string permission, DateTime permissionEndDate)
+    public async Task<Result> TakeVehicleAsync(long IqamaNo, string PlateNumberA, string reason, string permission)
     {
         using var transaction = await dbcontext.Database.BeginTransactionAsync();
         try
@@ -547,6 +550,9 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
             if (housing?.Employee?.Housing != null)
                 vehicle.Location = housing.Employee.Housing.Name;
 
+            var startDate = DateTime.UtcNow.AddHours(3);
+
+
             dbcontext.RiderVehicleStatus.Add(new RiderVehicleStatus
             {
                 EmployeeIqamaNo = IqamaNo,
@@ -555,8 +561,8 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
                 Reason = reason,
                 IsActive = true,
                 Permission = permission,
-                PermissionStartDate = DateTime.UtcNow.AddHours(3),
-                PermissionEndDate = permissionEndDate
+                PermissionStartDate = startDate, // Start NOW
+                PermissionEndDate = startDate.AddYears(1).AddDays(-1) // End date from admin's resolution
             });
 
             await dbcontext.SaveChangesAsync();
@@ -1745,6 +1751,9 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
         if (vehicle != null && riderWithHousing?.Employee?.Housing != null)
             vehicle.Location = riderWithHousing.Employee.Housing.Name;
 
+        var startDate = DateTime.UtcNow.AddHours(3);
+
+
         dbcontext.RiderVehicleStatus.Add(new RiderVehicleStatus
         {
             EmployeeIqamaNo = operation.RiderIqamaNo,
@@ -1753,8 +1762,8 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
             Reason = operation.Reason,
             IsActive = true,
             Permission = operation.Permission, // NEW permission from admin's resolution
-            PermissionStartDate = DateTime.UtcNow.AddHours(3), // Start NOW
-            PermissionEndDate = null // End date from admin's resolution
+            PermissionStartDate = startDate, // Start NOW
+            PermissionEndDate = startDate.AddYears(1).AddDays(-1) // End date from admin's resolution
         });
 
         await dbcontext.SaveChangesAsync();

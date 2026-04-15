@@ -76,7 +76,24 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
 
             foreach (var record in newCostRecords.Where(r => !r.HasResolutionError))
             {
-                await AttributeSingleAsync(record, ct);
+                var attributedCount = await AttributeSingleAsync(record, ct);
+
+                if (attributedCount > 0)
+                    attributed++;
+                else
+                    unattributed++;
+
+                rowDetails.Add(new PetrolUploadRowDetail(
+                    PlateNumberE: record.PlateNumberE,
+                    ResolvedVehicleNumber: record.VehicleNumber,
+                    Cost: record.Cost,
+                    VehicleResolved: true,
+                    AttributedRiderCount: attributedCount,
+                    ErrorMessage: attributedCount == 0
+                        ? "No rider matched for this vehicle/date"
+                        : null
+                ));
+
 
                 var hasRider = await _db.RiderPetrolCosts
                     .AnyAsync(r => r.VehiclePetrolCostId == record.Id && r.RiderIqamaNo != null, ct);
@@ -125,7 +142,7 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
     // ATTRIBUTION
     // ═══════════════════════════════════════════════════════════════════════
 
-    public async Task<Result> AttributePendingAsync(CancellationToken ct = default)
+    public async Task<Result<(int total, int attributed, int unattributed)>> AttributePendingAsync(CancellationToken ct = default)
     {
         try
         {
@@ -133,16 +150,26 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
                 .Where(v => !v.IsAttributed && !v.HasResolutionError)
                 .ToListAsync(ct);
 
+            int attributed = 0;
+            int unattributed = 0;
+
             foreach (var record in pending)
-                await AttributeSingleAsync(record, ct);
+            {
+                var count = await AttributeSingleAsync(record, ct);
+
+                if (count > 0)
+                    attributed++;
+                else
+                    unattributed++;
+            }
 
             await _db.SaveChangesAsync(ct);
 
-            return Result.Success();
+            return Result.Success((pending.Count, attributed, unattributed));
         }
         catch (Exception ex)
         {
-            return Result.Failure(
+            return Result.Failure<(int, int, int)>(
                 new Error("AttributionError", $"Failed to attribute pending costs: {ex.Message}", 500));
         }
     }
@@ -231,19 +258,32 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
     {
         try
         {
-            var rows = await _db.RiderPetrolCosts
+            var data = await _db.RiderPetrolCosts
                 .AsNoTracking()
                 .Where(r => r.RiderIqamaNo != null && r.Date.Year == year && r.Date.Month == month)
-                .GroupBy(r => new { r.RiderIqamaNo, r.Rider!.NameEN, r.Rider.NameAR })
+                .Select(r => new
+                {
+                    RiderIqamaNo = r.RiderIqamaNo!.Value,
+                    NameEN = r.Rider != null ? r.Rider.NameEN : string.Empty,
+                    NameAR = r.Rider != null ? r.Rider.NameAR : string.Empty,
+                    r.Cost,
+                    r.VehicleNumber,
+                    r.Date
+                })
+                .ToListAsync(ct); // ✅ move to memory
+
+            var rows = data
+                .GroupBy(r => new { r.RiderIqamaNo, r.NameEN, r.NameAR })
                 .Select(g => new RiderPetrolSummaryRow(
-                    g.Key.RiderIqamaNo!.Value,
+                    g.Key.RiderIqamaNo,
                     g.Key.NameEN,
                     g.Key.NameAR,
                     g.Sum(r => r.Cost),
                     g.Select(r => r.VehicleNumber).Distinct().Count(),
-                    g.Select(r => r.Date).Distinct().Count()))
+                    g.Select(r => r.Date).Distinct().Count()
+                ))
                 .OrderByDescending(r => r.TotalCost)
-                .ToListAsync(ct);
+                .ToList();
 
             return Result.Success<IReadOnlyList<RiderPetrolSummaryRow>>(rows);
         }
@@ -347,19 +387,36 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
     {
         try
         {
-            var rows = await _db.RiderPetrolCosts
+            var data = await _db.RiderPetrolCosts
                 .AsNoTracking()
                 .Where(r => r.Date.Year == year && r.Date.Month == month)
-                .GroupBy(r => new { r.VehicleNumber, r.Vehicle!.PlateNumberE })
+                .Select(r => new
+                {
+                    r.VehicleNumber,
+                    PlateNumberE = r.Vehicle != null ? r.Vehicle.PlateNumberE : null,
+                    r.Cost,
+                    r.RiderIqamaNo,
+                    r.Date
+                })
+                .ToListAsync(ct); // ✅ move to memory
+
+            var rows = data
+                .GroupBy(r => new { r.VehicleNumber, r.PlateNumberE })
                 .Select(g => new VehiclePetrolSummaryRow(
                     g.Key.VehicleNumber,
-                    g.Key.PlateNumberE,
+                    g.Key.PlateNumberE ?? string.Empty,
                     g.Sum(r => r.Cost),
-                    g.Where(r => r.RiderIqamaNo != null).Select(r => r.RiderIqamaNo).Distinct().Count(),
-                    g.Select(r => r.Date).Distinct().Count(),
-                    g.Count(r => r.RiderIqamaNo == null)))
+                    g.Where(r => r.RiderIqamaNo != null)
+                     .Select(r => r.RiderIqamaNo)
+                     .Distinct()
+                     .Count(),
+                    g.Select(r => r.Date)
+                     .Distinct()
+                     .Count(),
+                    g.Count(r => r.RiderIqamaNo == null)
+                ))
                 .OrderByDescending(r => r.TotalCost)
-                .ToListAsync(ct);
+                .ToList();
 
             return Result.Success<IReadOnlyList<VehiclePetrolSummaryRow>>(rows);
         }
@@ -420,10 +477,10 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
     // PRIVATE — ATTRIBUTION ENGINE
     // ═══════════════════════════════════════════════════════════════════════
 
-    private async Task AttributeSingleAsync(VehiclePetrolCost record, CancellationToken ct)
+    private async Task<int> AttributeSingleAsync(VehiclePetrolCost record, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(record.VehicleNumber))
-            return;
+            return 0;
 
         var dayStart = record.Date.ToDateTime(TimeOnly.MinValue);
         var dayEnd = record.Date.ToDateTime(TimeOnly.MaxValue);
@@ -443,27 +500,115 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
                 Notes = "No active rider found for this vehicle on this date.",
                 CreatedAt = DateTime.UtcNow.AddHours(3)
             });
+
+            record.IsAttributed = true;
+
+            return 0; // ✅ no riders
         }
         else
         {
-            foreach (var resolved in riders)
+            var splits = ComputeSplit(record.Cost, riders, record.VehicleNumber, dayStart, dayEnd);
+
+            for (int i = 0; i < riders.Count; i++)
             {
+                var resolved = riders[i];
+                var (share, splitNote) = splits[i];
+
                 _db.RiderPetrolCosts.Add(new RiderPetrolCost
                 {
                     VehiclePetrolCostId = record.Id,
                     VehicleNumber = record.VehicleNumber,
                     Date = record.Date,
-                    Cost = record.Cost,
+                    Cost = share,
                     RiderIqamaNo = resolved.IqamaNo,
                     AttributionSource = resolved.Source,
                     ResolvedFromStatusId = resolved.StatusId,
-                    Notes = resolved.Notes,
+                    Notes = string.IsNullOrEmpty(resolved.Notes)
+                        ? splitNote
+                        : $"{resolved.Notes} | {splitNote}",
                     CreatedAt = DateTime.UtcNow.AddHours(3)
                 });
             }
+
+            record.IsAttributed = true;
+
+            return riders.Count; // ✅ number of riders
+        }
+    }
+    /// <summary>
+    /// Splits totalCost among resolved riders.
+    /// Uses time-based split if PermissionStartDate/EndDate are available on the status records,
+    /// otherwise falls back to equal split.
+    /// Returns a list of (share, note) in the same order as <paramref name="riders"/>.
+    /// </summary>
+    private List<(decimal Share, string Note)> ComputeSplit(
+        decimal totalCost,
+        IReadOnlyList<ResolvedRider> riders,
+        string vehicleNumber,
+        DateTime dayStart,
+        DateTime dayEnd)
+    {
+        if (riders.Count == 1)
+            return [(totalCost, "Single rider — full cost attributed.")];
+
+        // Try time-based split: look up the status records for each resolved rider
+        var statusIds = riders
+            .Where(r => r.StatusId > 0)
+            .Select(r => r.StatusId)
+            .ToList();
+
+        var statuses = _db.RiderVehicleStatus
+            .Where(s => statusIds.Contains(s.Id))
+            .ToList();
+
+        var windows = riders.Select(r =>
+        {
+            var s = statuses.FirstOrDefault(st => st.Id == r.StatusId);
+            if (s?.PermissionStartDate == null) return (Hours: (double?)null, Rider: r);
+
+            var start = s.PermissionStartDate!.Value < dayStart ? dayStart : s.PermissionStartDate.Value;
+            var end = s.PermissionEndDate.HasValue
+                ? (s.PermissionEndDate.Value > dayEnd ? dayEnd : s.PermissionEndDate.Value)
+                : dayEnd;
+
+            var hours = (end - start).TotalHours;
+            return (Hours: hours > 0 ? (double?)hours : null, Rider: r);
+        }).ToList();
+
+        bool canUseTimeBased = windows.All(w => w.Hours.HasValue);
+        double totalHours = canUseTimeBased ? windows.Sum(w => w.Hours!.Value) : 0;
+        canUseTimeBased = canUseTimeBased && totalHours > 0;
+
+        var result = new List<(decimal Share, string Note)>();
+
+        if (canUseTimeBased)
+        {
+            var shares = windows
+                .Select(w => Math.Round(totalCost * (decimal)(w.Hours!.Value / totalHours), 2))
+                .ToList();
+
+            // Fix rounding: make the last rider absorb any penny difference
+            decimal distributed = shares.Sum();
+            shares[^1] += totalCost - distributed;
+
+            for (int i = 0; i < riders.Count; i++)
+                result.Add((shares[i],
+                    $"Time-based split: {windows[i].Hours:F2}h of {totalHours:F2}h total → {shares[i]:F2} SAR"));
+        }
+        else
+        {
+            // Equal split
+            decimal equalShare = Math.Round(totalCost / riders.Count, 2);
+            decimal lastShare = totalCost - equalShare * (riders.Count - 1);
+
+            for (int i = 0; i < riders.Count; i++)
+            {
+                decimal share = i == riders.Count - 1 ? lastShare : equalShare;
+                result.Add((share, $"Equal split ({riders.Count} riders) → {share:F2} SAR"));
+            }
         }
 
-        record.IsAttributed = true;
+        return result;
     }
 
     private async Task<IReadOnlyList<ResolvedRider>> ResolveRidersAsync(
@@ -563,16 +708,32 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
 
         foreach (var row in worksheet.RowsUsed().Skip(1))
         {
-            var plate = row.Cell(1).GetString().Trim();
+            var plateRaw = row.Cell(1).GetString().Trim();
             var costRaw = row.Cell(2).GetString().Trim();
 
-            if (string.IsNullOrWhiteSpace(plate)) continue;
+            if (string.IsNullOrWhiteSpace(plateRaw)) continue;
             if (!decimal.TryParse(costRaw, out var cost)) continue;
+
+            var plate = NormalizePlate(plateRaw);
 
             result.Add(new PetrolExcelRow(plate, cost));
         }
 
         return result;
+    }
+
+    private static string NormalizePlate(string plate)
+    {
+        if (string.IsNullOrWhiteSpace(plate))
+            return plate;
+
+        plate = plate.Trim();
+
+        // split digits and letters
+        var digits = new string(plate.Where(char.IsDigit).ToArray());
+        var letters = new string(plate.Where(char.IsLetter).ToArray());
+
+        return $"{letters}{digits}";
     }
 
     // ═══════════════════════════════════════════════════════════════════════

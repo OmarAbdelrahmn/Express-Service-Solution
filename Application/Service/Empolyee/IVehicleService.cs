@@ -17,13 +17,13 @@ public interface IVehicleService
     Task<Result> DeleteAsync(string VehicleNumber, CancellationToken cancellationToken = default);
 
 
-    Task<Result> SwitchVehicleAsync(long IqamaNo, string newVehiclePlateNumber, string reason, string permission, DateTime permissionEndDate);
+    Task<Result> SwitchVehicleAsync(long IqamaNo, string newVehiclePlateNumber, string reason, string permission);
     Task<Result<VehicleLocationSyncResponse>> SyncAllVehicleLocationsAsync();
 
     Task<Result<VehicleCostSplitResponse>> CalculateVehicleCostSplitAsync(
     string plateNumberA, DateTime date, decimal totalCost);
 
-    Task<Result> TakeVehicleAsync(long IqamaNo, string vehicleId, string reason, string permission, DateTime permissionEndDate);
+    Task<Result> TakeVehicleAsync(long IqamaNo, string vehicleId, string reason, string permission);
     Task<Result> ReturnVehicleAsync(long IqamaNo, string vehicleId, string reason);
     Task<Result> ReportProblemAsync(long? IqamaNo, string vehicleId, string reason);
     Task<Result> ReportVehicleStolenAsync(string vehicleNumber, long? reportedByIqamaNo, string? reason);

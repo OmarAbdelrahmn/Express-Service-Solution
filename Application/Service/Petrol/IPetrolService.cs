@@ -13,7 +13,7 @@ public interface IPetrolService
         string uploadedBy,
         CancellationToken ct = default);
 
-    Task<Result> AttributePendingAsync(CancellationToken ct = default);
+    Task<Result<(int total, int attributed, int unattributed)>> AttributePendingAsync(CancellationToken ct = default);
 
     Task<Result> AttributeSingleByIdAsync(int vehiclePetrolCostId, CancellationToken ct = default);
 

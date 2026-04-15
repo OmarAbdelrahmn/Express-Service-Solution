@@ -10,7 +10,6 @@ public class VehiclePetrolCostConfiguration : IEntityTypeConfiguration<VehiclePe
         b.HasKey(x => x.Id);
 
         b.Property(x => x.PlateNumberE).HasMaxLength(30).IsRequired();
-        b.Property(x => x.VehicleNumber).HasMaxLength(50);
         b.Property(x => x.Cost).HasColumnType("decimal(18,2)");
         b.Property(x => x.UploadedBy).HasMaxLength(100);
         b.Property(x => x.ResolutionErrorMessage).HasMaxLength(500);
@@ -40,7 +39,7 @@ public class RiderPetrolCostConfiguration : IEntityTypeConfiguration<RiderPetrol
     {
         b.HasKey(x => x.Id);
 
-        b.Property(x => x.VehicleNumber).HasMaxLength(50).IsRequired();
+        b.Property(x => x.VehicleNumber).IsRequired();
         b.Property(x => x.Cost).HasColumnType("decimal(18,2)");
         b.Property(x => x.Notes).HasMaxLength(500);
 
