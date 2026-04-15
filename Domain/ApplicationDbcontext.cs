@@ -1,5 +1,6 @@
 ﻿using Domain.Entities;
 using Domain.Entities.Keeta;
+using Domain.Entities.Petrol;
 using Domain.Entities.Spare;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
@@ -48,6 +49,8 @@ public class ApplicationDbcontext(DbContextOptions<ApplicationDbcontext> options
     public DbSet<EscapedEmployeeDetails> EscapedEmployeeDetails{ get; set; }
     public DbSet<EmployeeStatusLog> EmployeeStatusLogs { get; set; }
 
+    public DbSet<VehiclePetrolCost>  VehiclePetrolCosts  { get; set; }
+    public DbSet<RiderPetrolCost> RiderPetrolCosts { get; set; }
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplyConfigurationsFromAssembly(Assembly.GetExecutingAssembly());
