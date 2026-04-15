@@ -306,10 +306,11 @@ public class RiderService(ApplicationDbcontext dbcontext, IRiderWorkingIdHistory
 
         try
         {
-            // Fetch employee with all related data
+            // AFTER
             var employee = await dbcontext.Employees
                 .Where(e => !e.IsDeleted)
                 .Include(e => e.Housing)
+                .Include(e => e.EscapedDetails)     // ← ADD THIS
                 .Include(e => e.RiderDetails)
                     .ThenInclude(rd => rd.Company)
                 .FirstOrDefaultAsync(e => e.IqamaNo == IqamaNo);
@@ -357,6 +358,25 @@ public class RiderService(ApplicationDbcontext dbcontext, IRiderWorkingIdHistory
                         CreatedBy = User.UserName ?? "System",
                     };
                     await dbcontext.EscapedEmployeeDetails.AddAsync(escapedRecord);
+                }
+
+                else if (oldStatus.Equals("fleeing", StringComparison.OrdinalIgnoreCase)
+                     && employee.EscapedDetails != null)
+                {
+                    if (employee.EscapedDetails.ActivePath == EscapedPath.None)
+                    {
+                        // No direction chosen → force hard delete
+                        dbcontext.EscapedEmployeeDetails.Remove(employee.EscapedDetails);
+                    }
+                    else
+                    {
+                        // Direction already chosen → soft deactivate
+                        employee.EscapedDetails.IsActive = false;
+                        employee.EscapedDetails.DeactivatedAt = DateTime.UtcNow.AddHours(3);
+                        employee.EscapedDetails.DeactivatedBy = User?.UserName ?? "System";
+                        employee.EscapedDetails.UpdatedAt = DateTime.UtcNow.AddHours(3);
+                        employee.EscapedDetails.UpdatedBy = User?.UserName ?? "System";
+                    }
                 }
                 employee.UpdatedAt = DateTime.UtcNow.AddHours(3);
 

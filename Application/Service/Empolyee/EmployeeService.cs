@@ -649,7 +649,6 @@ public class EmployeeService(ApplicationDbcontext dbcontext,UserManager<Applicat
                 return Result.Failure(
                     new Error("NoChanges", "No pending status change found for this employee", 404));
 
-            // Validate the new status
             if (!EmployeeStatus.IsValid(statusChange.Action))
                 return Result.Failure(
                     new Error("InvalidStatus", $"Invalid status in request: {statusChange.Action}", 400));
@@ -657,21 +656,17 @@ public class EmployeeService(ApplicationDbcontext dbcontext,UserManager<Applicat
             if (resolution == "Approved")
             {
                 var employee = await dbcontext.Employees
+                    .Include(e => e.EscapedDetails)
                     .FirstOrDefaultAsync(e => e.IqamaNo == statusChange.EmployeeIqamaNo);
 
                 if (employee == null)
-                {
                     return Result.Failure(new Error(
                         "NotFound",
                         $"Employee not found: {statusChange.EmployeeIqamaNo}",
-                        404
-                    ));
-                }
+                        404));
 
+                var oldStatus = employee.Status;
 
-                var oldStatus = employee.Status;         // ← capture BEFORE changing
-
-                // Update employee status
                 employee.Status = statusChange.Action;
 
                 var statusLog = new EmployeeStatusLog
@@ -686,12 +681,10 @@ public class EmployeeService(ApplicationDbcontext dbcontext,UserManager<Applicat
                 };
                 await dbcontext.EmployeeStatusLogs.AddAsync(statusLog);
 
-
                 if (employee.Status == "fleeing")
                 {
                     employee.HousingId = null;
 
-                    // ADD THIS: Create escaped employee record
                     var escapedRecord = new EscapedEmployeeDetails
                     {
                         EmployeeIqamaNo = employee.IqamaNo,
@@ -701,15 +694,28 @@ public class EmployeeService(ApplicationDbcontext dbcontext,UserManager<Applicat
                         CreatedBy = resolvedBy
                     };
                     await dbcontext.EscapedEmployeeDetails.AddAsync(escapedRecord);
-
-                    employee.UpdatedAt = DateTime.UtcNow.AddHours(3);
+                }
+                else if (oldStatus.Equals("fleeing", StringComparison.OrdinalIgnoreCase)
+                         && employee.EscapedDetails != null)
+                {
+                    if (employee.EscapedDetails.ActivePath == EscapedPath.None)
+                    {
+                        dbcontext.EscapedEmployeeDetails.Remove(employee.EscapedDetails);
+                    }
+                    else
+                    {
+                        employee.EscapedDetails.IsActive = false;
+                        employee.EscapedDetails.DeactivatedAt = DateTime.UtcNow.AddHours(3);
+                        employee.EscapedDetails.DeactivatedBy = resolvedBy;
+                        employee.EscapedDetails.UpdatedAt = DateTime.UtcNow.AddHours(3);
+                        employee.EscapedDetails.UpdatedBy = resolvedBy;
+                    }
                 }
 
+                employee.UpdatedAt = DateTime.UtcNow.AddHours(3);
                 dbcontext.Employees.Update(employee);
             }
 
-
-            // Mark status change as resolved
             statusChange.IsResolved = true;
             statusChange.Resolution = resolution;
             statusChange.ResolvedBy = resolvedBy;
@@ -728,7 +734,6 @@ public class EmployeeService(ApplicationDbcontext dbcontext,UserManager<Applicat
                 new Error(ex.Message, $"Failed to resolve status change: {ex.Message}", 500));
         }
     }
-
     private TempEmployeeStatusChangeResponse MapToResponse1(TempEmployeeStatusChange statusChange)
     {
         var isRider = statusChange.Employee?.IsEmployee == false;
