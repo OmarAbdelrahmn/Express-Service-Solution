@@ -166,7 +166,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                     g.Key.ShiftDate,
                     g.Key.CompanyId,
                     g.Sum(s => s.AcceptedDailyOrders),
-                    g.Sum(s => s.RejectedDailyOrders),
+                    g.Sum(s => s.RealRejectedDailyOrders),
                     g.Count(),
                     g.Select(s => s.RiderId).Distinct().Count()
                 ))
