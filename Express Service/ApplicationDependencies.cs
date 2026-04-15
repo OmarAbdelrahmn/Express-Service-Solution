@@ -82,6 +82,7 @@ public static class ApplicationDependencies
         Services.AddScoped<IDashboardService, DashboardService>();
         Services.AddScoped<IWalletService, WalletService>();
         Services.AddScoped<IEscapedEmployeeService, EscapedEmployeeService>();
+        Services.AddScoped<IPetrolService, PetrolService>();
 
         #region Hnagfire + Daily Report Job
         // ── Hangfire ────────────────────────────────────────────────────────────────

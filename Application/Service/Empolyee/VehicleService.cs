@@ -2950,6 +2950,130 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
         }
     }
 
+    public async Task<Result<VehicleCostSplitResponse>> CalculateVehicleCostSplitAsync(
+    string plateNumberA,
+    DateTime date,
+    decimal totalCost)
+    {
+        var vehicle = await dbcontext.Vehicles
+            .FirstOrDefaultAsync(v => v.PlateNumberA == plateNumberA);
+
+        if (vehicle == null)
+            return Result.Failure<VehicleCostSplitResponse>(
+                new Error("NoVehicle", "Vehicle not found", 404));
+
+        // Get ALL Taken statuses for this vehicle on the given date
+        // A rider "touched" this date if their Taken window overlaps with [date 00:00, date 23:59]
+        var dayStart = date.Date;
+        var dayEnd = date.Date.AddDays(1).AddSeconds(-1);
+
+        var takenStatuses = await dbcontext.RiderVehicleStatus
+            .Where(s => s.VehicleNumber == vehicle.VehicleNumber
+                     && s.StatusType == VehicleStatusType.Taken
+                     && s.PermissionStartDate.HasValue
+                     && s.PermissionStartDate.Value <= dayEnd
+                     // Either still active (no end yet) or ended after day started
+                     && (!s.PermissionEndDate.HasValue || s.PermissionEndDate.Value >= dayStart))
+            .ToListAsync();
+
+        if (!takenStatuses.Any())
+            return Result.Failure<VehicleCostSplitResponse>(
+                new Error("NoRiders", "No riders found for this vehicle on the given date", 404));
+
+        // Try time-based split first
+        // Clamp each window to the boundaries of the day
+        var riderDurations = takenStatuses.Select(s => new
+        {
+            s.EmployeeIqamaNo,
+            Start = s.PermissionStartDate!.Value < dayStart ? dayStart : s.PermissionStartDate.Value,
+            End = !s.PermissionEndDate.HasValue ? dayEnd :
+                     s.PermissionEndDate.Value > dayEnd ? dayEnd : s.PermissionEndDate.Value
+        })
+        .Where(x => x.End > x.Start)   // guard: zero-length windows are skipped
+        .ToList();
+
+        bool canUseTimeBased = riderDurations.Count == takenStatuses.Count; // every rider has valid times
+        string splitMethod = canUseTimeBased ? "TimeBased" : "Equal";
+
+        var riders = new List<VehicleCostSplitDto>();
+
+        if (canUseTimeBased)
+        {
+            double totalHours = riderDurations.Sum(r => (r.End - r.Start).TotalHours);
+
+            // Guard against divide-by-zero (e.g. all records on exact same instant)
+            if (totalHours <= 0)
+            {
+                canUseTimeBased = false;
+                splitMethod = "Equal";
+            }
+            else
+            {
+                foreach (var r in riderDurations)
+                {
+                    double hours = (r.End - r.Start).TotalHours;
+                    decimal share = Math.Round(totalCost * (decimal)(hours / totalHours), 2);
+
+                    var riderDetail = await dbcontext.RiderDetails
+                        .Include(x => x.Employee)
+                        .FirstOrDefaultAsync(x => x.EmployeeIqamaNo == r.EmployeeIqamaNo);
+
+                    riders.Add(new VehicleCostSplitDto(
+                        EmployeeIqamaNo: r.EmployeeIqamaNo ?? 0,
+                        RiderNameAR: riderDetail?.Employee?.NameAR ?? "N/A",
+                        RiderNameEN: riderDetail?.Employee?.NameEN ?? "N/A",
+                        Share: share,
+                        HoursHeld: Math.Round(hours, 2),
+                        SplitMethod: "TimeBased"
+                    ));
+                }
+
+                // Fix rounding: make sure shares sum exactly to totalCost
+                decimal distributed = riders.Sum(r => r.Share);
+                decimal diff = totalCost - distributed;
+                if (diff != 0 && riders.Any())
+                {
+                    var first = riders[0];
+                    riders[0] = first with { Share = first.Share + diff };
+                }
+            }
+        }
+
+        if (!canUseTimeBased)
+        {
+            // Equal split
+            int count = takenStatuses.Count;
+            decimal equalShare = Math.Round(totalCost / count, 2);
+            decimal lastShare = totalCost - (equalShare * (count - 1)); // absorb rounding in last rider
+
+            for (int i = 0; i < takenStatuses.Count; i++)
+            {
+                var s = takenStatuses[i];
+                var riderDetail = await dbcontext.RiderDetails
+                    .Include(x => x.Employee)
+                    .FirstOrDefaultAsync(x => x.EmployeeIqamaNo == s.EmployeeIqamaNo);
+
+                riders.Add(new VehicleCostSplitDto(
+                    EmployeeIqamaNo: s.EmployeeIqamaNo ?? 0,
+                    RiderNameAR: riderDetail?.Employee?.NameAR ?? "N/A",
+                    RiderNameEN: riderDetail?.Employee?.NameEN ?? "N/A",
+                    Share: i == takenStatuses.Count - 1 ? lastShare : equalShare,
+                    HoursHeld: null,
+                    SplitMethod: "Equal"
+                ));
+            }
+        }
+
+        return Result.Success(new VehicleCostSplitResponse(
+            PlateNumberA: plateNumberA,
+            VehicleNumber: vehicle.VehicleNumber,
+            Date: date.Date,
+            TotalCost: totalCost,
+            SplitMethod: splitMethod,
+            Riders: riders
+        ));
+    }
+
     public async Task<Result<IEnumerable<Vehicle>>> GetOutOfServiceVehiclesAsync()
     {
         try
@@ -3050,3 +3174,21 @@ public record SVehicleResolutionRequest
     public string ResolvedBy { get; init; }
     public string Plate { get; init; }
 }
+
+public record VehicleCostSplitDto(
+    long EmployeeIqamaNo,
+    string RiderNameAR,
+    string RiderNameEN,
+    decimal Share,           // SAR amount this rider pays
+    double? HoursHeld,       // null if time data was missing → used equal split
+    string SplitMethod       // "TimeBased" or "Equal"
+);
+
+public record VehicleCostSplitResponse(
+    string PlateNumberA,
+    string VehicleNumber,
+    DateTime Date,
+    decimal TotalCost,
+    string SplitMethod,      // "TimeBased" or "Equal"
+    IEnumerable<VehicleCostSplitDto> Riders
+);

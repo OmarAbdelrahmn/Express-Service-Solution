@@ -20,7 +20,8 @@ public interface IVehicleService
     Task<Result> SwitchVehicleAsync(long IqamaNo, string newVehiclePlateNumber, string reason, string permission, DateTime permissionEndDate);
     Task<Result<VehicleLocationSyncResponse>> SyncAllVehicleLocationsAsync();
 
-
+    Task<Result<VehicleCostSplitResponse>> CalculateVehicleCostSplitAsync(
+    string plateNumberA, DateTime date, decimal totalCost);
 
     Task<Result> TakeVehicleAsync(long IqamaNo, string vehicleId, string reason, string permission, DateTime permissionEndDate);
     Task<Result> ReturnVehicleAsync(long IqamaNo, string vehicleId, string reason);
