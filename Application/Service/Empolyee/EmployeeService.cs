@@ -691,7 +691,8 @@ public class EmployeeService(ApplicationDbcontext dbcontext,UserManager<Applicat
                         EscapedAt = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3)),
                         ActivePath = EscapedPath.None,
                         CreatedAt = DateTime.UtcNow.AddHours(3),
-                        CreatedBy = resolvedBy
+                        CreatedBy = resolvedBy,
+                        IsActive = true
                     };
                     await dbcontext.EscapedEmployeeDetails.AddAsync(escapedRecord);
                 }

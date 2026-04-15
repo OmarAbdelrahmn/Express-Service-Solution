@@ -356,6 +356,7 @@ public class RiderService(ApplicationDbcontext dbcontext, IRiderWorkingIdHistory
                         ActivePath = EscapedPath.None,
                         CreatedAt = DateTime.UtcNow.AddHours(3),
                         CreatedBy = User.UserName ?? "System",
+                        IsActive = true
                     };
                     await dbcontext.EscapedEmployeeDetails.AddAsync(escapedRecord);
                 }

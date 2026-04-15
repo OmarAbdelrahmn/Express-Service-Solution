@@ -62,11 +62,11 @@ public class EscapedEmployeeService(ApplicationDbcontext context) : IEscapedEmpl
             return Result.Failure(new Error("NotFound",
                 "No escaped employee record found", 404));
 
-        if (!record.IsActive)
-            return Result.Failure(new Error("AlreadyInactive",
-                "Escaped employee record is already inactive", 400));
+        //if (!record.IsActive)
+        //    return Result.Failure(new Error("AlreadyInactive",
+        //        "Escaped employee record is already inactive", 400));
 
-        record.IsActive = false;
+        record.IsActive = !record.IsActive;
         record.DeactivatedAt = DateTime.UtcNow.AddHours(3);
         record.DeactivatedBy = deactivatedBy;
         record.UpdatedAt = DateTime.UtcNow.AddHours(3);
@@ -339,7 +339,8 @@ public class EscapedEmployeeService(ApplicationDbcontext context) : IEscapedEmpl
             e.RemovalDeadline,
             e.RemainingDaysToRemoval,
             IsOverdue: e.RemovalDeadline.HasValue && e.RemovalDeadline.Value < now,
-            e.TenDayNotificationSent
+            e.TenDayNotificationSent,
+            e.IsActive
         );
     }
 

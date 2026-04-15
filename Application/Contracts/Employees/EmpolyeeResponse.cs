@@ -39,7 +39,8 @@ public record EscapedEmployeeSummaryResponse(
     DateTime? RemovalDeadline,
     int? RemainingDaysToRemoval,
     bool IsOverdue,
-    bool TenDayNotificationSent
+    bool TenDayNotificationSent,
+    bool? IsActive
 );
 
 public record EscapedEmployeeDetailResponse(
