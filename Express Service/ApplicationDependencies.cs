@@ -28,7 +28,9 @@ using Application.Service.SupplierSer;
 using Application.Service.temp;
 using Application.Service.Transfer;
 using Application.Service.User;
+using Application.Service.VehiclePermission;
 using Application.Service.Wallet;
+using DocumentFormat.OpenXml.Office2016.Drawing.ChartDrawing;
 using Domain;
 using Domain.Entities;
 using FluentValidation;
@@ -84,6 +86,7 @@ public static class ApplicationDependencies
         Services.AddScoped<IWalletService, WalletService>();
         Services.AddScoped<IEscapedEmployeeService, EscapedEmployeeService>();
         Services.AddScoped<IPetrolService, PetrolService>();
+        Services.AddScoped<IVehiclePermissionRenewalJob, VehiclePermissionRenewalJob>();
 
         #region Hnagfire + Daily Report Job
         // ── Hangfire ────────────────────────────────────────────────────────────────

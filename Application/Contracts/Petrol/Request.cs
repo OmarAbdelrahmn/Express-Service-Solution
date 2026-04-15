@@ -111,6 +111,7 @@ public record VehicleDailyPetrolEntry(
 
 /// <summary>A day where the vehicle had a cost but no rider could be found.</summary>
 public record VehicleUnattributedEntry(
+    string? PlateNumberE,
     DateOnly Date,
     decimal Cost,
     string? Notes

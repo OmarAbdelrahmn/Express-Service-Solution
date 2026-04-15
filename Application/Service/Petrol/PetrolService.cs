@@ -93,21 +93,6 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
                         ? "No rider matched for this vehicle/date"
                         : null
                 ));
-
-
-                var hasRider = await _db.RiderPetrolCosts
-                    .AnyAsync(r => r.VehiclePetrolCostId == record.Id && r.RiderIqamaNo != null, ct);
-
-                if (hasRider) attributed++; else unattributed++;
-
-                rowDetails.Add(new PetrolUploadRowDetail(
-                    PlateNumberE: record.PlateNumberE,
-                    ResolvedVehicleNumber: record.VehicleNumber,
-                    Cost: record.Cost,
-                    VehicleResolved: true,
-                    AttributedRiderCount: await _db.RiderPetrolCosts
-                        .CountAsync(r => r.VehiclePetrolCostId == record.Id && r.RiderIqamaNo != null, ct),
-                    ErrorMessage: null));
             }
 
             foreach (var record in newCostRecords.Where(r => r.HasResolutionError))
@@ -335,6 +320,7 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
                 new Error("NotFound", "Vehicle not found", 404));
 
         var costs = await _db.RiderPetrolCosts
+            .Include(v=>v.Vehicle)
             .AsNoTracking()
             .Where(r => r.VehicleNumber == vehicleNumber && r.Date.Year == year && r.Date.Month == month)
             .Include(r => r.Rider)
@@ -365,7 +351,7 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
             .ToList();
 
         var unattributedEntries = unattributed
-            .Select(c => new VehicleUnattributedEntry(c.Date, c.Cost, c.Notes))
+            .Select(c => new VehicleUnattributedEntry(c.Vehicle?.PlateNumberE,c.Date, c.Cost, c.Notes))
             .ToList();
 
         return Result.Success(new VehiclePetrolMonthlyReport(
@@ -435,11 +421,12 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
         try
         {
             var entries = await _db.RiderPetrolCosts
+                .Include(r => r.Vehicle)
                 .AsNoTracking()
                 .Where(r => r.RiderIqamaNo == null && r.Date.Year == year && r.Date.Month == month)
                 .OrderBy(r => r.VehicleNumber)
                 .ThenBy(r => r.Date)
-                .Select(r => new VehicleUnattributedEntry(r.Date, r.Cost, r.Notes))
+                .Select(r => new VehicleUnattributedEntry(r.Vehicle.PlateNumberE ?? "", r.Date, r.Cost, r.Notes))
                 .ToListAsync(ct);
 
             return Result.Success<IReadOnlyList<VehicleUnattributedEntry>>(entries);

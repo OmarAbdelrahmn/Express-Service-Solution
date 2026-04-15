@@ -1,4 +1,5 @@
 using Application.Service.DailyReport;
+using Application.Service.VehiclePermission;
 using Express_Service;
 using Hangfire;
 
@@ -61,6 +62,15 @@ RecurringJob.AddOrUpdate<IDailyReportJob>(
     "daily-rider-report",
     x => x.RunAsync(null),
     "0 12 * * *",
+    new RecurringJobOptions
+    {
+        TimeZone = TimeZoneInfo.FindSystemTimeZoneById("Arab Standard Time")
+    });
+
+RecurringJob.AddOrUpdate<IVehiclePermissionRenewalJob>(
+    "vehicle-permission-renewal",
+    x => x.RunAsync(CancellationToken.None),
+    "0 12 * * *",                          // same time: noon daily
     new RecurringJobOptions
     {
         TimeZone = TimeZoneInfo.FindSystemTimeZoneById("Arab Standard Time")
