@@ -290,7 +290,7 @@ public class SparePartService(ApplicationDbcontext dbcontext) : ISparePartServic
             // Get all housings
             var housings = await _dbcontext.Housings
                 .Include(h => h.Employees)
-                .Where(h => h.Employees.Any(e => !e.IsDeleted))
+                .Where(h => h.Employees.Any(e => !e.IsDeleted && !e.IsEmployee && e.Status =="enable"))
                 .ToListAsync();
 
             var housingCosts = new List<HousingCostSummaryItem>();
@@ -318,6 +318,7 @@ public class SparePartService(ApplicationDbcontext dbcontext) : ISparePartServic
                                           companyStockCost.SparePartsCost;
             var grandTotalAccessoriesCost = housingCosts.Sum(h => h.AccessoriesCost) +
                                            companyStockCost.AccessoriesCost;
+
             var grandTotalCost = grandTotalSparePartsCost + grandTotalAccessoriesCost;
 
             var response = new AllHousingsCostSummaryResponse(
@@ -576,7 +577,8 @@ public class SparePartService(ApplicationDbcontext dbcontext) : ISparePartServic
             return null;
 
         var riderIds = await _dbcontext.RiderDetails
-            .Where(r => employeeIqamas.Contains(r.EmployeeIqamaNo))
+            .Include(c=>c.Employee)
+            .Where(r => employeeIqamas.Contains(r.EmployeeIqamaNo) && !r.Employee.IsEmployee && r.Employee.Status == "enable")
             .Select(r => r.Id)
             .ToListAsync();
 
