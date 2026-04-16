@@ -216,4 +216,19 @@ public class PetrolController(IPetrolService service) : ControllerBase
             ? Ok(response.Value)
             : response.ToProblem();
     }
+
+    [HttpPut("{vehicleNumber}/note")]
+    [Authorize(Roles = "Master,Admin")]
+    public async Task<IActionResult> UpdateVehicleNote(
+        string vehicleNumber,
+        [FromQuery] DateOnly date,
+        [FromQuery] string note,
+        CancellationToken ct)
+    {
+        var response = await _service.AddVehicleNoteAsync(vehicleNumber, note, date, ct);
+
+        return response.IsSuccess
+            ? Ok()
+            : response.ToProblem();
+    }
 }

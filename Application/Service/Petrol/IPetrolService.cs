@@ -53,4 +53,6 @@ public interface IPetrolService
         string vehicleNumber,
         DateOnly date,
         CancellationToken ct = default);
+
+    Task<Result> AddVehicleNoteAsync(string vehicleNumber, string note, DateOnly Date, CancellationToken ct = default);
 }

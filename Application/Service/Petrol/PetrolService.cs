@@ -422,11 +422,12 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
         {
             var entries = await _db.RiderPetrolCosts
                 .Include(r => r.Vehicle)
+                .Include(c=>c.VehiclePetrolCost)
                 .AsNoTracking()
                 .Where(r => r.RiderIqamaNo == null && r.Date.Year == year && r.Date.Month == month)
                 .OrderBy(r => r.VehicleNumber)
                 .ThenBy(r => r.Date)
-                .Select(r => new VehicleUnattributedEntry(r.Vehicle.PlateNumberE ?? "", r.Date, r.Cost, r.Notes))
+                .Select(r => new VehicleUnattributedEntry(r.Vehicle.PlateNumberE ?? "", r.Date, r.Cost, r.VehiclePetrolCost.Note))
                 .ToListAsync(ct);
 
             return Result.Success<IReadOnlyList<VehicleUnattributedEntry>>(entries);
@@ -729,6 +730,31 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
 
     private static IReadOnlyList<ResolvedRider> Deduplicate(List<ResolvedRider> riders) =>
         riders.GroupBy(r => r.IqamaNo).Select(g => g.First()).ToList();
+
+    public async Task<Result> AddVehicleNoteAsync(string vehicleNumber, string note,DateOnly Date, CancellationToken ct = default)
+    {
+        var vehicle =await  _db.Vehicles.FirstOrDefaultAsync(v => v.PlateNumberE == (vehicleNumber), ct);
+        if (vehicle == null)
+            return Result.Failure(
+                new Error("NotFound", $"Vehicle with number {vehicleNumber} not found", 404));
+
+        var VehicelCosts = await _db.VehiclePetrolCosts.Where(c => c.VehicleNumber == vehicle.VehicleNumber && c.Date == Date).SingleOrDefaultAsync(ct);
+
+        if (VehicelCosts == null)
+            return Result.Failure(
+                new Error("NotFounddddd", $"No petrol cost record found for vehicle {vehicleNumber} on date {Date}", 404));
+
+
+        var existingNote = VehicelCosts.Note;
+
+        VehicelCosts.Note = string.IsNullOrEmpty(existingNote)
+            ? note
+            : note;
+
+        await _db.SaveChangesAsync(ct);
+        return Result.Success();
+    }
+
 
     private readonly record struct ResolvedRider(
         long IqamaNo,

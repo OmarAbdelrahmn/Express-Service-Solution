@@ -51,6 +51,8 @@ public class VehiclePetrolCost
     // ── Navigation ────────────────────────────────────────────────────────
     public Vehicle? Vehicle { get; set; }
 
+    public string? Note { get; set; }
+
     /// <summary>
     /// All rider-level attributions derived from this vehicle cost.
     /// A single vehicle cost may fan out to more than one rider when
