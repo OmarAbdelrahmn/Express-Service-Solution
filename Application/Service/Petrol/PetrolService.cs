@@ -50,6 +50,9 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
             foreach (var row in rows)
             {
                 var normalised = row.PlateNumberE.Trim().ToUpperInvariant();
+
+                if (normalised == "TS564") normalised = "TS488";
+
                 allVehicles.TryGetValue(normalised, out var vehicle);
 
                 newCostRecords.Add(new VehiclePetrolCost
@@ -127,6 +130,38 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
     // ATTRIBUTION
     // ═══════════════════════════════════════════════════════════════════════
 
+    //public async Task<Result<(int total, int attributed, int unattributed)>> AttributePendingAsync(CancellationToken ct = default)
+    //{
+    //    try
+    //    {
+    //        var pending = await _db.VehiclePetrolCosts
+    //            .Where(v => !v.IsAttributed && !v.HasResolutionError)
+    //            .ToListAsync(ct);
+
+    //        int attributed = 0;
+    //        int unattributed = 0;
+
+    //        foreach (var record in pending)
+    //        {
+    //            var count = await AttributeSingleAsync(record, ct);
+
+    //            if (count > 0)
+    //                attributed++;
+    //            else
+    //                unattributed++;
+    //        }
+
+    //        await _db.SaveChangesAsync(ct);
+
+    //        return Result.Success((pending.Count, attributed, unattributed));
+    //    }
+    //    catch (Exception ex)
+    //    {
+    //        return Result.Failure<(int, int, int)>(
+    //            new Error("AttributionError", $"Failed to attribute pending costs: {ex.Message}", 500));
+    //    }
+    //}
+
     public async Task<Result<(int total, int attributed, int unattributed)>> AttributePendingAsync(CancellationToken ct = default)
     {
         try
@@ -141,12 +176,47 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
             foreach (var record in pending)
             {
                 var count = await AttributeSingleAsync(record, ct);
-
-                if (count > 0)
-                    attributed++;
-                else
-                    unattributed++;
+                if (count > 0) attributed++;
+                else unattributed++;
             }
+
+            // ── NEW: second pass — find today's active Permission for yesterday's unattributed rows ──
+            var today = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3));
+            var todayDt = today.ToDateTime(TimeOnly.MinValue);
+
+            var unattributedRows = await _db.RiderPetrolCosts
+                .Where(r => r.RiderIqamaNo == null && r.Date == today.AddDays(-1))
+                .ToListAsync(ct);
+
+            foreach (var row in unattributedRows)
+            {
+                if (string.IsNullOrWhiteSpace(row.VehicleNumber))
+                    continue;
+
+                // Permission-only: active window that covers today
+                var permission = await _db.RiderVehicleStatus
+                    .Where(s => s.VehicleNumber == row.VehicleNumber
+                             && s.EmployeeIqamaNo.HasValue
+                             && s.PermissionStartDate.HasValue
+                             && s.PermissionEndDate.HasValue
+                             && s.PermissionStartDate.Value.Date <= todayDt.Date
+                             && s.PermissionEndDate.Value.Date >= todayDt.Date)
+                    .FirstOrDefaultAsync(ct);
+
+                if (permission == null)
+                    continue;
+
+                // Update the existing row — no new row created
+                row.RiderIqamaNo = permission.EmployeeIqamaNo!.Value;
+                row.AttributionSource = PetrolAttributionSource.Permission;
+                row.ResolvedFromStatusId = permission.Id;
+                row.Notes = $"[Resolved via today's permission] "
+                                          + $"Window: {permission.PermissionStartDate:yyyy-MM-dd} → {permission.PermissionEndDate:yyyy-MM-dd}";
+
+                unattributed--;
+                attributed++;
+            }
+            // ────────────────────────────────────────────────────────────────────
 
             await _db.SaveChangesAsync(ct);
 
