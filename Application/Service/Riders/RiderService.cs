@@ -102,7 +102,7 @@ public class RiderService(ApplicationDbcontext dbcontext, IRiderWorkingIdHistory
 
         var isexist = await dbcontext
            .Employees
-                   .Where(e => !e.IsDeleted)
+                   //.Where(e => !e.IsDeleted)
            .Where(r => r.IqamaNo.ToString().StartsWith(IqamaNo.ToString()))
            .Include(e => e.Housing)
            .Include(e => e.RiderDetails)
@@ -140,7 +140,7 @@ public class RiderService(ApplicationDbcontext dbcontext, IRiderWorkingIdHistory
     public async Task<Result<IEnumerable<RiderResponse>>> GetAllEmployee2()
     {
         var employees = await dbcontext.Employees
-                    .Where(e => !e.IsDeleted && !e.IsEmployee)
+                    .Where(e => !e.IsEmployee)
             .AsNoTracking()
             .Include(e => e.EscapedDetails)
             .Include(e => e.Housing)

@@ -1,6 +1,5 @@
 ﻿using Application.Contracts.Employees;
 using Application.Extensions;
-using Application.Service.Escaped;
 using Application.Service.EscapedEmployee;
 using Domain.Entities;
 using Express_Service;
@@ -21,6 +20,14 @@ public class EscapedEmployeeController(IEscapedEmployeeService service) : Contro
     public async Task<IActionResult> GetAll(CancellationToken ct)
     {
         var result = await _service.GetAllEscapedAsync(ct);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+    
+    
+    [HttpGet("{iqamaNo:long}")]
+    public async Task<IActionResult> Get1All(long iqamaNo, CancellationToken ct)
+    {
+        var result = await _service.Get1AllEscapedAsync(iqamaNo, ct);
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
 

@@ -1,12 +1,11 @@
 ﻿using Application.Abstraction;
 using Application.Contracts.Employees;
-using Application.Service.EscapedEmployee;
 using Domain;
 using Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 using static Application.Service.EscapedEmployee.IEscapedEmployeeService;
 
-namespace Application.Service.Escaped;
+namespace Application.Service.EscapedEmployee;
 
 public class EscapedEmployeeService(ApplicationDbcontext context) : IEscapedEmployeeService
 {
@@ -16,6 +15,7 @@ public class EscapedEmployeeService(ApplicationDbcontext context) : IEscapedEmpl
         CancellationToken ct = default)
     {
         var records = await _context.EscapedEmployeeDetails
+            .Where(c=> !c.Employee.IsDeleted)
             .Include(e => e.Employee)
                 .ThenInclude(emp => emp.Housing)
             .AsNoTracking()
@@ -23,6 +23,21 @@ public class EscapedEmployeeService(ApplicationDbcontext context) : IEscapedEmpl
             .ToListAsync(ct);
 
         return Result.Success(records.Select(MapToSummary));
+    }
+
+    public async Task<Result<EscapedEmployeeSummaryResponse>> Get1AllEscapedAsync(
+        long IqamaNo,
+        CancellationToken ct = default)
+    {
+        var records = await _context.EscapedEmployeeDetails
+            .Where(c=>  c.EmployeeIqamaNo == IqamaNo)
+            .Include(e => e.Employee)
+                .ThenInclude(emp => emp.Housing)
+            .AsNoTracking()
+            .OrderBy(e => e.RemovalDeadline)
+            .SingleOrDefaultAsync(ct);
+
+        return Result.Success(MapToSummary(records!));
     }
 
     public async Task<Result> ForceDeleteEscapedEmployeeAsync(

@@ -1,6 +1,7 @@
 ﻿using Application.Authentication;
 using Application.Roles;
 using Application.Service.Admin;
+using Application.Service.AI;
 using Application.Service.Auth;
 using Application.Service.Backgroundimports;
 using Application.Service.Dahsboard;
@@ -9,7 +10,6 @@ using Application.Service.Dashboard;
 using Application.Service.DE;
 using Application.Service.EmployeesFiles;
 using Application.Service.Empolyee;
-using Application.Service.Escaped;
 using Application.Service.EscapedEmployee;
 using Application.Service.Freelancer;
 using Application.Service.Hungerdisa;
@@ -87,6 +87,8 @@ public static class ApplicationDependencies
         Services.AddScoped<IEscapedEmployeeService, EscapedEmployeeService>();
         Services.AddScoped<IPetrolService, PetrolService>();
         Services.AddScoped<IVehiclePermissionRenewalJob, VehiclePermissionRenewalJob>();
+        Services.AddScoped<IGeminiService, GeminiService>();
+
 
         #region Hnagfire + Daily Report Job
         // ── Hangfire ────────────────────────────────────────────────────────────────
