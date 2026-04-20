@@ -31,6 +31,19 @@ public class PetrolController(IPetrolService service) : ControllerBase
     }
 
 
+    [HttpDelete("date/{date}")]
+    //[Authorize(Roles = "Master")]         // guard this — it's destructive
+    public async Task<IActionResult> DeleteByDate(
+    DateOnly date,
+    CancellationToken ct)
+    {
+        var result = await _service.DeleteByDateAsync(date, ct);
+
+        return result.IsSuccess
+            ? Ok(result.Value)
+            :result.ToProblem();
+    }
+
     // ═══════════════════════════════════════════════════════════════════════
     // UPLOAD & ATTRIBUTION
     // ═══════════════════════════════════════════════════════════════════════

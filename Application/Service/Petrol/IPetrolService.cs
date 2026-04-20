@@ -7,6 +7,10 @@ namespace Application.Service.Petrol;
 
 public interface IPetrolService
 {
+    Task<Result<PetrolDeleteResult>> DeleteByDateAsync(
+    DateOnly date,
+    CancellationToken ct = default);
+
     Task<Result<DailyPetrolReport>> GetDailyReportAsync(
     DateOnly date,
     CancellationToken ct = default);

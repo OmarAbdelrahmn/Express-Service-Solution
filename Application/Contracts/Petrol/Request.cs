@@ -12,6 +12,12 @@ public record PetrolExcelRow(
     decimal Cost
 );
 
+public record PetrolDeleteResult(
+    DateOnly Date,
+    int VehicleCostsDeleted,
+    int RiderCostsDeleted,
+    DateTime DeletedAt);
+
 /// <summary>Result returned to the caller after processing an Excel upload.</summary>
 public record PetrolUploadResult(
     DateOnly ReportDate,
