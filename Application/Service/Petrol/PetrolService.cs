@@ -13,15 +13,16 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
 {
     private readonly ApplicationDbcontext _db = dbcontext;
 
-
+    // ═══════════════════════════════════════════════════════════════════════
+    // DAILY REPORT
+    // ═══════════════════════════════════════════════════════════════════════
 
     public async Task<Result<DailyPetrolReport>> GetDailyReportAsync(
-    DateOnly date,
-    CancellationToken ct = default)
+        DateOnly date,
+        CancellationToken ct = default)
     {
         try
         {
-            // Load all VehiclePetrolCost rows for the date (the raw upload rows)
             var vehicleCosts = await _db.VehiclePetrolCosts
                 .AsNoTracking()
                 .Where(v => v.Date == date)
@@ -37,14 +38,12 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
                     TotalUnattributedRows: 0,
                     Vehicles: []));
 
-            // Load all RiderPetrolCost rows for the date in one query
             var riderCosts = await _db.RiderPetrolCosts
                 .AsNoTracking()
                 .Where(r => r.Date == date)
                 .Include(r => r.Rider)
                 .ToListAsync(ct);
 
-            // Group rider attributions by their parent VehiclePetrolCostId
             var attributionsByVehicleCostId = riderCosts
                 .GroupBy(r => r.VehiclePetrolCostId)
                 .ToDictionary(g => g.Key, g => g.ToList());
@@ -99,7 +98,7 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    // UPLOAD
+    // UPLOAD  —  FIXED
     // ═══════════════════════════════════════════════════════════════════════
 
     public async Task<Result<PetrolUploadResult>> ProcessUploadAsync(
@@ -108,15 +107,17 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
         string uploadedBy,
         CancellationToken ct = default)
     {
+        // ── 1. Basic file validation ──────────────────────────────────────
         if (file == null || file.Length == 0)
             return Result.Failure<PetrolUploadResult>(
                 new Error("InvalidFile", "File is empty or null", 400));
 
-        if (!file.FileName.EndsWith(".xlsx") && !file.FileName.EndsWith(".xls"))
+        if (!file.FileName.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase)
+         && !file.FileName.EndsWith(".xls", StringComparison.OrdinalIgnoreCase))
             return Result.Failure<PetrolUploadResult>(
                 new Error("InvalidFormat", "File must be Excel format (.xlsx or .xls)", 400));
 
-        // Add this check immediately after validating the file, before ParseExcel:
+        // ── 2. Duplicate-date guard ───────────────────────────────────────
         bool alreadyUploaded = await _db.VehiclePetrolCosts
             .AnyAsync(v => v.Date == reportDate, ct);
 
@@ -128,6 +129,7 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
 
         try
         {
+            // ── 3. Parse Excel ────────────────────────────────────────────
             using var stream = file.OpenReadStream();
             var rows = ParseExcel(stream);
 
@@ -135,21 +137,73 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
                 return Result.Failure<PetrolUploadResult>(
                     new Error("EmptyFile", "No data rows found in Excel file", 400));
 
+            // ── 4. Load vehicle lookup (plate → Vehicle) ──────────────────
+            //    NormalizePlate already reorders letters+digits, so we key on
+            //    the SAME normalisation used when building the Excel rows.
             var allVehicles = await _db.Vehicles
                 .AsNoTracking()
-                .ToDictionaryAsync(v => v.PlateNumberE.Trim().ToUpperInvariant(), ct);
+                .ToDictionaryAsync(
+                    v => NormalizePlate(v.PlateNumberE).ToUpperInvariant(),
+                    ct);
 
+            // ── 5. Build VehiclePetrolCost records ────────────────────────
+            //    BUG FIX: the original code never populated newCostRecords!
             var newCostRecords = new List<VehiclePetrolCost>();
-            var rowDetails = new List<PetrolUploadRowDetail>();
 
-            // REPLACE the existing error-record foreach with this:
+            foreach (var row in rows)
+            {
+                var lookupKey = NormalizePlate(row.PlateNumberE).ToUpperInvariant();
+
+                if (allVehicles.TryGetValue(lookupKey, out var vehicle))
+                {
+                    newCostRecords.Add(new VehiclePetrolCost
+                    {
+                        PlateNumberE = row.PlateNumberE,
+                        VehicleNumber = vehicle.VehicleNumber,
+                        Cost = row.Cost,
+                        Date = reportDate,
+                        UploadedAt = DateTime.UtcNow.AddHours(3),
+                        UploadedBy = uploadedBy,
+                        HasResolutionError = false,
+                        IsAttributed = false
+                    });
+                }
+                else
+                {
+                    newCostRecords.Add(new VehiclePetrolCost
+                    {
+                        PlateNumberE = row.PlateNumberE,
+                        VehicleNumber = null,
+                        Cost = row.Cost,
+                        Date = reportDate,
+                        UploadedAt = DateTime.UtcNow.AddHours(3),
+                        UploadedBy = uploadedBy,
+                        HasResolutionError = true,
+                        ResolutionErrorMessage = $"Plate '{row.PlateNumberE}' (normalised: '{lookupKey}') " +
+                                                 "not found in the vehicle database.",
+                        IsAttributed = false
+                    });
+                }
+            }
+
+            // ── 6. Persist VehiclePetrolCost rows first ───────────────────
+            //    BUG FIX: SaveChanges BEFORE creating RiderPetrolCost rows
+            //    so that record.Id is a real DB-generated value, not 0.
+            _db.VehiclePetrolCosts.AddRange(newCostRecords);
+            await _db.SaveChangesAsync(ct);
+
+            // ── 7. Create attribution rows ────────────────────────────────
+            var rowDetails = new List<PetrolUploadRowDetail>();
+            int attributed = 0;
+            int unattributed = 0;
+
+            // 7a. Unresolved vehicles → single Unattributed RiderPetrolCost
             foreach (var record in newCostRecords.Where(r => r.HasResolutionError))
             {
-                // Create an unattributed row so this vehicle is visible in all rider-cost queries
                 _db.RiderPetrolCosts.Add(new RiderPetrolCost
                 {
-                    VehiclePetrolCostId = record.Id,
-                    VehicleNumber = null,          // unknown — plate unresolved
+                    VehiclePetrolCostId = record.Id,          // ✅ real Id now
+                    VehicleNumber = null,
                     Date = record.Date,
                     Cost = record.Cost,
                     RiderIqamaNo = null,
@@ -167,12 +221,7 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
                     ErrorMessage: record.ResolutionErrorMessage));
             }
 
-            _db.VehiclePetrolCosts.AddRange(newCostRecords);
-            await _db.SaveChangesAsync(ct);
-
-            int attributed = 0;
-            int unattributed = 0;
-
+            // 7b. Resolved vehicles → run attribution engine
             foreach (var record in newCostRecords.Where(r => !r.HasResolutionError))
             {
                 var attributedCount = await AttributeSingleAsync(record, ct);
@@ -189,22 +238,11 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
                     VehicleResolved: true,
                     AttributedRiderCount: attributedCount,
                     ErrorMessage: attributedCount == 0
-                        ? "No rider matched for this vehicle/date"
-                        : null
-                ));
+                                                ? "No active rider matched for this vehicle/date"
+                                                : null));
             }
 
-            foreach (var record in newCostRecords.Where(r => r.HasResolutionError))
-            {
-                rowDetails.Add(new PetrolUploadRowDetail(
-                    PlateNumberE: record.PlateNumberE,
-                    ResolvedVehicleNumber: null,
-                    Cost: record.Cost,
-                    VehicleResolved: false,
-                    AttributedRiderCount: 0,
-                    ErrorMessage: record.ResolutionErrorMessage));
-            }
-
+            // ── 8. Persist RiderPetrolCost rows + IsAttributed flags ──────
             await _db.SaveChangesAsync(ct);
 
             return Result.Success(new PetrolUploadResult(
@@ -218,7 +256,10 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
         catch (Exception ex)
         {
             return Result.Failure<PetrolUploadResult>(
-                new Error(ex.InnerException?.Message ?? ex.Message, $"Failed to process file: {ex.Message}", 500));
+                new Error(
+                    ex.InnerException?.Message ?? ex.Message,
+                    $"Failed to process file: {ex.Message}",
+                    500));
         }
     }
 
@@ -226,39 +267,8 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
     // ATTRIBUTION
     // ═══════════════════════════════════════════════════════════════════════
 
-    //public async Task<Result<(int total, int attributed, int unattributed)>> AttributePendingAsync(CancellationToken ct = default)
-    //{
-    //    try
-    //    {
-    //        var pending = await _db.VehiclePetrolCosts
-    //            .Where(v => !v.IsAttributed && !v.HasResolutionError)
-    //            .ToListAsync(ct);
-
-    //        int attributed = 0;
-    //        int unattributed = 0;
-
-    //        foreach (var record in pending)
-    //        {
-    //            var count = await AttributeSingleAsync(record, ct);
-
-    //            if (count > 0)
-    //                attributed++;
-    //            else
-    //                unattributed++;
-    //        }
-
-    //        await _db.SaveChangesAsync(ct);
-
-    //        return Result.Success((pending.Count, attributed, unattributed));
-    //    }
-    //    catch (Exception ex)
-    //    {
-    //        return Result.Failure<(int, int, int)>(
-    //            new Error("AttributionError", $"Failed to attribute pending costs: {ex.Message}", 500));
-    //    }
-    //}
-
-    public async Task<Result<(int total, int attributed, int unattributed)>> AttributePendingAsync(CancellationToken ct = default)
+    public async Task<Result<(int total, int attributed, int unattributed)>> AttributePendingAsync(
+        CancellationToken ct = default)
     {
         try
         {
@@ -276,14 +286,14 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
                 else unattributed++;
             }
 
-            // ── NEW: second pass — find today's active Permission for yesterday's unattributed rows ──
+            // Second pass — find today's active Permission for yesterday's unattributed rows
             var today = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3));
             var todayDt = today.ToDateTime(TimeOnly.MinValue);
 
             var unattributedRows = await _db.RiderPetrolCosts
                 .Where(r => r.RiderIqamaNo == null && r.Date == today.AddDays(-1))
                 .ToListAsync(ct);
-            // ── second pass — find today's active Permission for yesterday's unattributed rows ──
+
             foreach (var row in unattributedRows)
             {
                 if (string.IsNullOrWhiteSpace(row.VehicleNumber))
@@ -298,30 +308,28 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
                              && s.PermissionEndDate.Value.Date >= todayDt.Date)
                     .FirstOrDefaultAsync(ct);
 
-                if (permission == null)
-                    continue;
+                if (permission == null) continue;
 
-                // ── NEW: verify the employee actually exists ──────────────────────
                 var employeeExists = await _db.Employees
                     .AnyAsync(e => e.IqamaNo == permission.EmployeeIqamaNo!.Value, ct);
 
                 if (!employeeExists)
                 {
-                    row.Notes = $"[Second-pass skipped] IqamaNo {permission.EmployeeIqamaNo} not found in Employees.";
+                    row.Notes = $"[Second-pass skipped] IqamaNo {permission.EmployeeIqamaNo} " +
+                                "not found in Employees.";
                     continue;
                 }
-                // ─────────────────────────────────────────────────────────────────
 
                 row.RiderIqamaNo = permission.EmployeeIqamaNo!.Value;
                 row.AttributionSource = PetrolAttributionSource.Permission;
                 row.ResolvedFromStatusId = permission.Id;
-                row.Notes = $"[Resolved via today's permission] "
-                                        + $"Window: {permission.PermissionStartDate:yyyy-MM-dd} → {permission.PermissionEndDate:yyyy-MM-dd}";
+                row.Notes = $"[Resolved via today's permission] " +
+                            $"Window: {permission.PermissionStartDate:yyyy-MM-dd} → " +
+                            $"{permission.PermissionEndDate:yyyy-MM-dd}";
 
                 unattributed--;
                 attributed++;
             }
-            // ────────────────────────────────────────────────────────────────────
 
             await _db.SaveChangesAsync(ct);
 
@@ -330,18 +338,22 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
         catch (Exception ex)
         {
             return Result.Failure<(int, int, int)>(
-                new Error("AttributionError", $"Failed to attribute pending costs: {ex.Message}", 500));
+                new Error("AttributionError",
+                    $"Failed to attribute pending costs: {ex.Message}", 500));
         }
     }
 
-    public async Task<Result> AttributeSingleByIdAsync(int vehiclePetrolCostId, CancellationToken ct = default)
+    public async Task<Result> AttributeSingleByIdAsync(
+        int vehiclePetrolCostId,
+        CancellationToken ct = default)
     {
         var record = await _db.VehiclePetrolCosts
             .FirstOrDefaultAsync(v => v.Id == vehiclePetrolCostId, ct);
 
         if (record is null)
             return Result.Failure(
-                new Error("NotFound", $"VehiclePetrolCost with Id {vehiclePetrolCostId} not found", 404));
+                new Error("NotFound",
+                    $"VehiclePetrolCost with Id {vehiclePetrolCostId} not found", 404));
 
         try
         {
@@ -352,7 +364,8 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
         catch (Exception ex)
         {
             return Result.Failure(
-                new Error("AttributionError", $"Failed to attribute record: {ex.Message}", 500));
+                new Error("AttributionError",
+                    $"Failed to attribute record: {ex.Message}", 500));
         }
     }
 
@@ -376,7 +389,9 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
 
         var costs = await _db.RiderPetrolCosts
             .AsNoTracking()
-            .Where(r => r.RiderIqamaNo == riderIqamaNo && r.Date.Year == year && r.Date.Month == month)
+            .Where(r => r.RiderIqamaNo == riderIqamaNo
+                     && r.Date.Year == year
+                     && r.Date.Month == month)
             .Include(r => r.Vehicle)
             .OrderBy(r => r.VehicleNumber)
             .ThenBy(r => r.Date)
@@ -420,7 +435,9 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
         {
             var data = await _db.RiderPetrolCosts
                 .AsNoTracking()
-                .Where(r => r.RiderIqamaNo != null && r.Date.Year == year && r.Date.Month == month)
+                .Where(r => r.RiderIqamaNo != null
+                         && r.Date.Year == year
+                         && r.Date.Month == month)
                 .Select(r => new
                 {
                     RiderIqamaNo = r.RiderIqamaNo!.Value,
@@ -430,7 +447,7 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
                     r.VehicleNumber,
                     r.Date
                 })
-                .ToListAsync(ct); // ✅ move to memory
+                .ToListAsync(ct);
 
             var rows = data
                 .GroupBy(r => new { r.RiderIqamaNo, r.NameEN, r.NameAR })
@@ -440,8 +457,7 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
                     g.Key.NameAR,
                     g.Sum(r => r.Cost),
                     g.Select(r => r.VehicleNumber).Distinct().Count(),
-                    g.Select(r => r.Date).Distinct().Count()
-                ))
+                    g.Select(r => r.Date).Distinct().Count()))
                 .OrderByDescending(r => r.TotalCost)
                 .ToList();
 
@@ -497,9 +513,11 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
                 new Error("NotFound", "Vehicle not found", 404));
 
         var costs = await _db.RiderPetrolCosts
-            .Include(v=>v.Vehicle)
+            .Include(v => v.Vehicle)
             .AsNoTracking()
-            .Where(r => r.VehicleNumber == vehicleNumber && r.Date.Year == year && r.Date.Month == month)
+            .Where(r => r.VehicleNumber == vehicleNumber
+                     && r.Date.Year == year
+                     && r.Date.Month == month)
             .Include(r => r.Rider)
             .OrderBy(r => r.RiderIqamaNo)
             .ThenBy(r => r.Date)
@@ -528,7 +546,7 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
             .ToList();
 
         var unattributedEntries = unattributed
-            .Select(c => new VehicleUnattributedEntry(c.Vehicle?.PlateNumberE,c.Date, c.Cost, c.Notes))
+            .Select(c => new VehicleUnattributedEntry(c.Vehicle?.PlateNumberE, c.Date, c.Cost, c.Notes))
             .ToList();
 
         return Result.Success(new VehiclePetrolMonthlyReport(
@@ -561,7 +579,7 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
                     r.RiderIqamaNo,
                     r.Date
                 })
-                .ToListAsync(ct); // ✅ move to memory
+                .ToListAsync(ct);
 
             var rows = data
                 .GroupBy(r => new { r.VehicleNumber, r.PlateNumberE })
@@ -573,11 +591,8 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
                      .Select(r => r.RiderIqamaNo)
                      .Distinct()
                      .Count(),
-                    g.Select(r => r.Date)
-                     .Distinct()
-                     .Count(),
-                    g.Count(r => r.RiderIqamaNo == null)
-                ))
+                    g.Select(r => r.Date).Distinct().Count(),
+                    g.Count(r => r.RiderIqamaNo == null)))
                 .OrderByDescending(r => r.TotalCost)
                 .ToList();
 
@@ -600,12 +615,10 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
     {
         try
         {
-            // Load rider costs first (child records — FK to VehiclePetrolCosts)
             var riderCosts = await _db.RiderPetrolCosts
                 .Where(r => r.Date == date)
                 .ToListAsync(ct);
 
-            // Load vehicle costs (parent records)
             var vehicleCosts = await _db.VehiclePetrolCosts
                 .Where(v => v.Date == date)
                 .ToListAsync(ct);
@@ -615,7 +628,6 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
                     new Error("NotFound",
                         $"No petrol records found for date {date:yyyy-MM-dd}.", 404));
 
-            // Delete children before parents to respect FK constraints
             _db.RiderPetrolCosts.RemoveRange(riderCosts);
             _db.VehiclePetrolCosts.RemoveRange(vehicleCosts);
 
@@ -642,7 +654,6 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
     {
         try
         {
-            // Materialise into memory first, then project — Include() is ignored inside Select()
             var raw = await _db.RiderPetrolCosts
                 .Include(r => r.Vehicle)
                 .Include(r => r.VehiclePetrolCost)
@@ -654,10 +665,9 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
                 .ThenBy(r => r.Date)
                 .ToListAsync(ct);
 
-            // FIX: project in memory so navigation properties are accessible
             var entries = raw
                 .Select(r => new VehicleUnattributedEntry(
-                    r.Vehicle?.PlateNumberE ?? r.VehicleNumber ?? "",  // null-safe
+                    r.Vehicle?.PlateNumberE ?? r.VehicleNumber ?? "",
                     r.Date,
                     r.Cost,
                     r.VehiclePetrolCost?.Note))
@@ -698,10 +708,6 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
     // PRIVATE — ATTRIBUTION ENGINE
     // ═══════════════════════════════════════════════════════════════════════
 
-    // ═══════════════════════════════════════════════════════════════════════
-    // PRIVATE — ATTRIBUTION ENGINE
-    // ═══════════════════════════════════════════════════════════════════════
-
     private async Task<int> AttributeSingleAsync(VehiclePetrolCost record, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(record.VehicleNumber))
@@ -712,7 +718,6 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
 
         var riders = await ResolveRidersAsync(record.VehicleNumber, record.Date, dayStart, dayEnd, ct);
 
-        // ── NEW: drop any resolved rider whose IqamaNo is not in Employees ──
         if (riders.Count > 0)
         {
             var iqamaSet = riders.Select(r => r.IqamaNo).ToHashSet();
@@ -722,21 +727,13 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
                 .Select(e => e.IqamaNo)
                 .ToHashSetAsync(ct);
 
-            var invalidRiders = riders
-                .Where(r => !validIqamas.Contains(r.IqamaNo))
-                .ToList();
+            var invalidRiders = riders.Where(r => !validIqamas.Contains(r.IqamaNo)).ToList();
 
             if (invalidRiders.Count > 0)
             {
-                // Log which iqamas were dropped so this is traceable
                 var dropped = string.Join(", ", invalidRiders.Select(r => r.IqamaNo));
+                riders = riders.Where(r => validIqamas.Contains(r.IqamaNo)).ToList();
 
-                // Keep only valid riders; fall through to unattributed if none remain
-                riders = riders
-                    .Where(r => validIqamas.Contains(r.IqamaNo))
-                    .ToList();
-
-                // If ALL resolved riders were invalid, add an unattributed row with a clear note
                 if (riders.Count == 0)
                 {
                     _db.RiderPetrolCosts.Add(new RiderPetrolCost
@@ -747,7 +744,8 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
                         Cost = record.Cost,
                         RiderIqamaNo = null,
                         AttributionSource = PetrolAttributionSource.Unattributed,
-                        Notes = $"Resolved rider(s) [{dropped}] not found in Employees table. Manual review required.",
+                        Notes = $"Resolved rider(s) [{dropped}] not found in Employees. " +
+                                              "Manual review required.",
                         CreatedAt = DateTime.UtcNow.AddHours(3)
                     });
 
@@ -774,41 +772,34 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
             record.IsAttributed = true;
             return 0;
         }
-        else
+
+        var splits = await ComputeSplitAsync(record.Cost, riders, record.VehicleNumber, dayStart, dayEnd, ct);
+
+        for (int i = 0; i < riders.Count; i++)
         {
-            var splits = await ComputeSplitAsync(record.Cost, riders, record.VehicleNumber, dayStart, dayEnd, ct);
+            var resolved = riders[i];
+            var (share, splitNote) = splits[i];
 
-            for (int i = 0; i < riders.Count; i++)
+            _db.RiderPetrolCosts.Add(new RiderPetrolCost
             {
-                var resolved = riders[i];
-                var (share, splitNote) = splits[i];
-
-                _db.RiderPetrolCosts.Add(new RiderPetrolCost
-                {
-                    VehiclePetrolCostId = record.Id,
-                    VehicleNumber = record.VehicleNumber,
-                    Date = record.Date,
-                    Cost = share,
-                    RiderIqamaNo = resolved.IqamaNo,
-                    AttributionSource = resolved.Source,
-                    ResolvedFromStatusId = resolved.StatusId,
-                    Notes = string.IsNullOrEmpty(resolved.Notes)
-                        ? splitNote
-                        : $"{resolved.Notes} | {splitNote}",
-                    CreatedAt = DateTime.UtcNow.AddHours(3)
-                });
-            }
-
-            record.IsAttributed = true;
-            return riders.Count;
+                VehiclePetrolCostId = record.Id,
+                VehicleNumber = record.VehicleNumber,
+                Date = record.Date,
+                Cost = share,
+                RiderIqamaNo = resolved.IqamaNo,
+                AttributionSource = resolved.Source,
+                ResolvedFromStatusId = resolved.StatusId,
+                Notes = string.IsNullOrEmpty(resolved.Notes)
+                                           ? splitNote
+                                           : $"{resolved.Notes} | {splitNote}",
+                CreatedAt = DateTime.UtcNow.AddHours(3)
+            });
         }
+
+        record.IsAttributed = true;
+        return riders.Count;
     }
-    /// <summary>
-    /// Splits totalCost among resolved riders.
-    /// Uses time-based split if PermissionStartDate/EndDate are available on the status records,
-    /// otherwise falls back to equal split.
-    /// Returns a list of (share, note) in the same order as <paramref name="riders"/>.
-    /// </summary>
+
     private async Task<List<(decimal Share, string Note)>> ComputeSplitAsync(
         decimal totalCost,
         IReadOnlyList<ResolvedRider> riders,
@@ -825,7 +816,6 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
             .Select(r => r.StatusId)
             .ToList();
 
-        // FIX: was synchronous .ToList() — now properly async
         var statuses = await _db.RiderVehicleStatus
             .Where(s => statusIds.Contains(s.Id))
             .AsNoTracking()
@@ -857,7 +847,6 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
                 .Select(w => Math.Round(totalCost * (decimal)(w.Hours!.Value / totalHours), 2))
                 .ToList();
 
-            // Fix rounding: make the last rider absorb any penny difference
             decimal distributed = shares.Sum();
             shares[^1] += totalCost - distributed;
 
@@ -867,7 +856,6 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
         }
         else
         {
-            // Equal split
             decimal equalShare = Math.Round(totalCost / riders.Count, 2);
             decimal lastShare = totalCost - equalShare * (riders.Count - 1);
 
@@ -895,7 +883,7 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
             .ToListAsync(ct);
 
         var results = new List<ResolvedRider>();
-        
+
         // Priority 1: explicit permission window
         var permissionHolders = allStatuses
             .Where(s => s.EmployeeIqamaNo.HasValue
@@ -959,7 +947,7 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
                 PetrolAttributionSource.VehicleStatusTimeline,
                 statusId,
                 activeToday.Count > 1
-                    ? $"Vehicle had {activeToday.Count} riders on this date; cost attributed to each."
+                    ? $"Vehicle had {activeToday.Count} riders on this date; cost split among all."
                     : null));
 
         return Deduplicate(results);
@@ -985,7 +973,6 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
             if (!decimal.TryParse(costRaw, out var cost)) continue;
 
             var plate = NormalizePlate(plateRaw);
-
             result.Add(new PetrolExcelRow(plate, cost));
         }
 
@@ -999,7 +986,6 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
 
         plate = plate.Trim();
 
-        // split digits and letters
         var digits = new string(plate.Where(char.IsDigit).ToArray());
         var letters = new string(plate.Where(char.IsLetter).ToArray());
 
@@ -1013,30 +999,34 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
     private static IReadOnlyList<ResolvedRider> Deduplicate(List<ResolvedRider> riders) =>
         riders.GroupBy(r => r.IqamaNo).Select(g => g.First()).ToList();
 
-    public async Task<Result> AddVehicleNoteAsync(string vehicleNumber, string note,DateOnly Date, CancellationToken ct = default)
+    public async Task<Result> AddVehicleNoteAsync(
+        string vehicleNumber,
+        string note,
+        DateOnly Date,
+        CancellationToken ct = default)
     {
-        var vehicle =await  _db.Vehicles.FirstOrDefaultAsync(v => v.PlateNumberE == (vehicleNumber), ct);
+        var vehicle = await _db.Vehicles
+            .FirstOrDefaultAsync(v => v.PlateNumberE == vehicleNumber, ct);
+
         if (vehicle == null)
             return Result.Failure(
-                new Error("NotFound", $"Vehicle with number {vehicleNumber} not found", 404));
+                new Error("NotFound",
+                    $"Vehicle with plate number {vehicleNumber} not found", 404));
 
-        var VehicelCosts = await _db.VehiclePetrolCosts.Where(c => c.VehicleNumber == vehicle.VehicleNumber && c.Date == Date).SingleOrDefaultAsync(ct);
+        var vehicleCosts = await _db.VehiclePetrolCosts
+            .Where(c => c.VehicleNumber == vehicle.VehicleNumber && c.Date == Date)
+            .SingleOrDefaultAsync(ct);
 
-        if (VehicelCosts == null)
+        if (vehicleCosts == null)
             return Result.Failure(
-                new Error("NotFounddddd", $"No petrol cost record found for vehicle {vehicleNumber} on date {Date}", 404));
+                new Error("NotFound",
+                    $"No petrol cost record found for vehicle {vehicleNumber} on date {Date}", 404));
 
-
-        var existingNote = VehicelCosts.Note;
-
-        VehicelCosts.Note = string.IsNullOrEmpty(existingNote)
-            ? note
-            : note;
+        vehicleCosts.Note = note;
 
         await _db.SaveChangesAsync(ct);
         return Result.Success();
     }
-
 
     private readonly record struct ResolvedRider(
         long IqamaNo,

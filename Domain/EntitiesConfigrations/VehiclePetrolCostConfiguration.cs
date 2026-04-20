@@ -39,7 +39,6 @@ public class RiderPetrolCostConfiguration : IEntityTypeConfiguration<RiderPetrol
     {
         b.HasKey(x => x.Id);
 
-        b.Property(x => x.VehicleNumber).IsRequired();
         b.Property(x => x.Cost).HasColumnType("decimal(18,2)");
         b.Property(x => x.Notes).HasMaxLength(500);
 

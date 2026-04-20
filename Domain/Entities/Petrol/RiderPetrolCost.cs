@@ -18,7 +18,7 @@ public class RiderPetrolCost
     public VehiclePetrolCost VehiclePetrolCost { get; set; } = default!;
 
     // ── Vehicle ───────────────────────────────────────────────────────────
-    public string VehicleNumber { get; set; } = string.Empty;
+    public string? VehicleNumber { get; set; } = string.Empty;
     public Vehicle? Vehicle { get; set; }
 
     // ── Rider (nullable when no rider could be resolved) ──────────────────
