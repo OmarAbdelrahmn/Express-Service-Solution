@@ -2,6 +2,7 @@
 using Application.Contracts.ReportCo;
 using Application.Service.Member;
 using Application.Service.Riders;
+using Microsoft.AspNetCore.Http;
 using static Application.Service.Reports.ReportService;
 
 namespace Application.Service.Reports;
@@ -10,6 +11,116 @@ namespace Application.Service.Reports;
 public interface IReportService
 {
 
+    Task<Result<RiderRecentMonthsResult>> GetRecentMonthsFromExcelAsync(
+       Stream excelInputStream,
+       CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Same but accepts a plain list of iqama numbers directly.
+    /// </summary>
+    Task<Result<RiderRecentMonthsResult>> GetRecentMonthsAsync(
+        List<long> iqamaNumbers,
+        CancellationToken cancellationToken = default);
+    public record BulkRiderHistoryRequest(List<long> IqamaNumbers);
+
+    public record BulkRiderHistoryResult(
+        List<RiderHistoryEntry> Results,
+        List<long> NotFound,
+        int TotalRequested,
+        int TotalFound
+    );
+
+    public record RiderHistoryEntry(
+        long IqamaNo,
+        string RiderName,
+        string WorkingId,
+        RiderMonthlyHistorys? History,
+        bool Found
+    );
+
+    Task<Result<BulkRiderHistoryResult>> GetBulkRiderMonthlyHistoryAsync(
+        List<long> iqamaNumbers,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<byte[]>> ExportBulkRiderHistoryToExcelAsync(
+        List<long> iqamaNumbers,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<byte[]>> ExportBulkRiderHistoryFromExcelAsync(
+        Stream excelInputStream,
+        CancellationToken cancellationToken = default);
+
+
+
+    public record RiderRecentMonthsResult(
+        int TotalRequested,
+        int TotalFound,
+        List<long> NotFound,
+        DateOnly CurrentMonth,
+        List<MonthLabel> MonthsQueried,
+        List<RiderRecentMonthsEntry> Riders
+    );
+
+    public record MonthLabel(
+        int Year,
+        int Month,
+        string MonthName,
+        string Label  // e.g. "Current", "1 Month Ago", "2 Months Ago", "3 Months Ago"
+    );
+
+    public record RiderRecentMonthsEntry(
+        long IqamaNo,
+        string RiderNameAR,
+        string RiderNameEN,
+        string WorkingId,
+        bool Found,
+        // Each month slot — always 4 entries ordered: 3 months ago → current
+        List<RiderMonthOrders> MonthlyOrders,
+        // Quick totals
+        int TotalOrders,
+        int TotalShifts,
+        decimal AverageOrdersPerActiveMonth,
+        // Trend: difference between current month and average of the previous 3
+        decimal TrendVsPrevious3Avg
+    );
+
+    public record RiderMonthOrders(
+        int Year,
+        int Month,
+        string MonthName,
+        string Label,
+        bool HasData,
+        int AcceptedOrders,
+        int TotalShifts,
+        int RejectedOrders,
+        int RealRejectedOrders,
+        float WorkingHours,
+        int CompletedShifts,
+        int IncompleteShifts,
+        int FailedShifts,
+        decimal CompletionRate,
+        decimal AverageOrdersPerShift
+    );
+
+    // ── Interface ─────────────────────────────────────────────────────────────────
+
+    public interface IRiderRecentMonthsService
+    {
+        /// <summary>
+        /// Read iqama numbers from an Excel stream (column A),
+        /// return last 3 months + current month orders for each rider.
+        /// </summary>
+        Task<Result<RiderRecentMonthsResult>> GetRecentMonthsFromExcelAsync(
+            Stream excelInputStream,
+            CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Same but accepts a plain list of iqama numbers directly.
+        /// </summary>
+        Task<Result<RiderRecentMonthsResult>> GetRecentMonthsAsync(
+            List<long> iqamaNumbers,
+            CancellationToken cancellationToken = default);
+    }
     /// <summary>Read-model for the singleton validation config.</summary>
     public record Company2ValidationConfigDto(
         // Targets

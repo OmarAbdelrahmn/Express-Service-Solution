@@ -2,9 +2,11 @@
 using Application.Contracts.ReportCo;
 using Application.Service.Member;
 using Application.Service.Riders;
+using ClosedXML.Excel;
 using Domain;
 using Domain.Entities;
 using Domain.Entities.Keeta;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using static Application.Service.Reports.IReportService;
 
@@ -35,6 +37,926 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
     private const int FULL_MONTH_TARGET_ORDERS = 300;
     private const int FIRST_CRITICAL_DAYS = 3;
     private const int LAST_CRITICAL_DAYS = 4;
+
+
+    public async Task<Result<RiderRecentMonthsResult>> GetRecentMonthsFromExcelAsync(
+        Stream excelInputStream,
+        CancellationToken cancellationToken = default)
+    {
+        List<long> iqamaNumbers;
+        try
+        {
+            iqamaNumbers = ReadIqamaNumbersFromStream1(excelInputStream);
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<RiderRecentMonthsResult>(
+                new Error($"Error reading Excel file: {ex.Message}", "invalid_input", 400));
+        }
+
+        if (!iqamaNumbers.Any())
+            return Result.Failure<RiderRecentMonthsResult>(
+                new Error(
+                    "No valid Iqama numbers found in the Excel file. " +
+                    "Ensure column A contains numeric Iqama numbers.",
+                    "invalid_input", 400));
+
+        return await GetRecentMonthsAsync(iqamaNumbers, cancellationToken);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // PUBLIC: from list of iqama numbers
+    // ─────────────────────────────────────────────────────────────────────────
+    public async Task<Result<RiderRecentMonthsResult>> GetRecentMonthsAsync(
+        List<long> iqamaNumbers,
+        CancellationToken cancellationToken = default)
+    {
+        if (iqamaNumbers == null || !iqamaNumbers.Any())
+            return Result.Failure<RiderRecentMonthsResult>(
+                new Error("IqamaNumbers list cannot be empty", "invalid_input", 400));
+
+        try
+        {
+            // ── Build the 4 month slots (3 months ago → current) ─────────
+            var today = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3));
+            var currentMonth = new DateOnly(today.Year, today.Month, 1);
+            var monthSlots = BuildMonthSlots(currentMonth);
+
+            var rangeStart = monthSlots.First().Start;   // 3 months ago, day 1
+            var rangeEnd = monthSlots.Last().End;       // current month, last day
+
+            // ── Single query: all matching riders ─────────────────────────
+            var riders = await dbcontext.RiderDetails
+                .Include(r => r.Employee)
+                .Where(r => iqamaNumbers.Contains(r.EmployeeIqamaNo))
+                .AsNoTracking()
+                .ToListAsync(cancellationToken);
+
+            // ── Single query: all shifts in the 4-month window ────────────
+            var riderIds = riders.Select(r => r.Id).ToList();
+
+            var allShifts = await dbcontext.RiderShifts
+                .Where(s => riderIds.Contains(s.RiderId)
+                         &&( s.CompanyId == 1 || s.CompanyId == 2)
+                         && s.ShiftDate >= rangeStart
+                         && s.ShiftDate <= rangeEnd)
+                .AsNoTracking()
+                .ToListAsync(cancellationToken);
+
+            // Index for fast lookup
+            var shiftsByRider = allShifts
+                .GroupBy(s => s.RiderId)
+                .ToDictionary(g => g.Key, g => g.ToList());
+
+            var riderByIqama = riders
+                .ToDictionary(r => r.EmployeeIqamaNo);
+
+            // ── Build result per requested iqama ──────────────────────────
+            var entries = new List<RiderRecentMonthsEntry>();
+            var notFound = new List<long>();
+
+            foreach (var iqamaNo in iqamaNumbers)
+            {
+                if (!riderByIqama.TryGetValue(iqamaNo, out var rider))
+                {
+                    notFound.Add(iqamaNo);
+                    entries.Add(BuildNotFoundEntry(iqamaNo, monthSlots));
+                    continue;
+                }
+
+                shiftsByRider.TryGetValue(rider.Id, out var riderShifts);
+                entries.Add(BuildRiderEntry(rider, riderShifts ?? [], monthSlots));
+            }
+
+            // ── Assemble final result ─────────────────────────────────────
+            var monthLabels = monthSlots
+                .Select(s => new MonthLabel(s.Year, s.Month, s.MonthName, s.Label))
+                .ToList();
+
+            return Result.Success(new RiderRecentMonthsResult(
+                TotalRequested: iqamaNumbers.Count,
+                TotalFound: entries.Count(e => e.Found),
+                NotFound: notFound,
+                CurrentMonth: currentMonth,
+                MonthsQueried: monthLabels,
+                Riders: entries
+            ));
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<RiderRecentMonthsResult>(
+                new Error($"Error generating recent months data: {ex.Message}", "server_error", 500));
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // PRIVATE: build month slot descriptors
+    // ─────────────────────────────────────────────────────────────────────────
+    private record MonthSlot(
+        int Year, int Month, string MonthName, string Label,
+        DateOnly Start, DateOnly End);
+
+    private static List<MonthSlot> BuildMonthSlots(DateOnly currentMonth)
+    {
+        var slots = new List<MonthSlot>();
+        string[] labels = { "3 Months Ago", "2 Months Ago", "1 Month Ago", "Current Month" };
+
+        for (int offset = -3; offset <= 0; offset++)
+        {
+            var start = currentMonth.AddMonths(offset);
+            var end = start.AddMonths(1).AddDays(-1);
+            var label = labels[offset + 3];
+            var dt = new DateTime(start.Year, start.Month, 1);
+
+            slots.Add(new MonthSlot(
+                Year: start.Year,
+                Month: start.Month,
+                MonthName: dt.ToString("MMMM"),
+                Label: label,
+                Start: start,
+                End: end
+            ));
+        }
+        return slots;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // PRIVATE: build a single rider entry
+    // ─────────────────────────────────────────────────────────────────────────
+    private static RiderRecentMonthsEntry BuildRiderEntry(
+        RiderDetails rider,
+        List<RiderShift> shifts,
+        List<MonthSlot> monthSlots)
+    {
+        // Pre-index shifts by (Year, Month) for fast lookup
+        var shiftsByMonth = shifts
+            .GroupBy(s => (s.ShiftDate.Year, s.ShiftDate.Month))
+            .ToDictionary(g => g.Key, g => g.ToList());
+
+        var monthlyOrders = new List<RiderMonthOrders>();
+
+        foreach (var slot in monthSlots)
+        {
+            var key = (slot.Year, slot.Month);
+            if (shiftsByMonth.TryGetValue(key, out var ms) && ms.Any())
+            {
+                var total = ms.Count;
+                var completed = ms.Count(s => s.ShiftStatus == "Completed");
+                var accepted = ms.Sum(s => s.AcceptedDailyOrders);
+
+                monthlyOrders.Add(new RiderMonthOrders(
+                    Year: slot.Year,
+                    Month: slot.Month,
+                    MonthName: slot.MonthName,
+                    Label: slot.Label,
+                    HasData: true,
+                    AcceptedOrders: accepted,
+                    TotalShifts: total,
+                    RejectedOrders: ms.Sum(s => s.RejectedDailyOrders),
+                    RealRejectedOrders: ms.Sum(s => s.RealRejectedDailyOrders),
+                    WorkingHours: ms.Sum(s => s.WorkingHours),
+                    CompletedShifts: completed,
+                    IncompleteShifts: ms.Count(s => s.ShiftStatus == "Incomplete"),
+                    FailedShifts: ms.Count(s => s.ShiftStatus == "Failed"),
+                    CompletionRate: total > 0 ? Math.Round((decimal)completed / total * 100, 2) : 0,
+                    AverageOrdersPerShift: total > 0 ? Math.Round((decimal)accepted / total, 2) : 0
+                ));
+            }
+            else
+            {
+                monthlyOrders.Add(new RiderMonthOrders(
+                    Year: slot.Year,
+                    Month: slot.Month,
+                    MonthName: slot.MonthName,
+                    Label: slot.Label,
+                    HasData: false,
+                    AcceptedOrders: 0,
+                    TotalShifts: 0,
+                    RejectedOrders: 0,
+                    RealRejectedOrders: 0,
+                    WorkingHours: 0,
+                    CompletedShifts: 0,
+                    IncompleteShifts: 0,
+                    FailedShifts: 0,
+                    CompletionRate: 0,
+                    AverageOrdersPerShift: 0
+                ));
+            }
+        }
+
+        // ── Totals & trend ────────────────────────────────────────────────
+        var totalOrders = monthlyOrders.Sum(m => m.AcceptedOrders);
+        var totalShifts = monthlyOrders.Sum(m => m.TotalShifts);
+        var activeMonths = monthlyOrders.Where(m => m.HasData).ToList();
+
+        var avgPerActiveMonth = activeMonths.Count > 0
+            ? Math.Round((decimal)activeMonths.Sum(m => m.AcceptedOrders) / activeMonths.Count, 2)
+            : 0;
+
+        // Trend: current month orders vs average of the previous 3 months
+        var currentMonthOrders = monthlyOrders.Last().AcceptedOrders;
+        var prev3 = monthlyOrders.Take(3).ToList();
+        var prev3WithData = prev3.Where(m => m.HasData).ToList();
+        decimal trendVsPrev3Avg = 0;
+
+        if (prev3WithData.Any())
+        {
+            var prev3Avg = (decimal)prev3WithData.Sum(m => m.AcceptedOrders) / prev3WithData.Count;
+            trendVsPrev3Avg = prev3Avg > 0
+                ? Math.Round((currentMonthOrders - prev3Avg) / prev3Avg * 100, 2)
+                : currentMonthOrders > 0 ? 100 : 0;
+        }
+
+        return new RiderRecentMonthsEntry(
+            IqamaNo: rider.EmployeeIqamaNo,
+            RiderNameAR: rider.Employee.NameAR,
+            RiderNameEN: rider.Employee.NameEN,
+            WorkingId: rider.WorkingId ?? "0",
+            Found: true,
+            MonthlyOrders: monthlyOrders,
+            TotalOrders: totalOrders,
+            TotalShifts: totalShifts,
+            AverageOrdersPerActiveMonth: avgPerActiveMonth,
+            TrendVsPrevious3Avg: trendVsPrev3Avg
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // PRIVATE: not-found placeholder entry
+    // ─────────────────────────────────────────────────────────────────────────
+    private static RiderRecentMonthsEntry BuildNotFoundEntry(
+        long iqamaNo, List<MonthSlot> monthSlots)
+    {
+        var emptyMonths = monthSlots.Select(slot => new RiderMonthOrders(
+            Year: slot.Year, Month: slot.Month,
+            MonthName: slot.MonthName, Label: slot.Label,
+            HasData: false, AcceptedOrders: 0, TotalShifts: 0,
+            RejectedOrders: 0, RealRejectedOrders: 0, WorkingHours: 0,
+            CompletedShifts: 0, IncompleteShifts: 0, FailedShifts: 0,
+            CompletionRate: 0, AverageOrdersPerShift: 0
+        )).ToList();
+
+        return new RiderRecentMonthsEntry(
+            IqamaNo: iqamaNo,
+            RiderNameAR: string.Empty,
+            RiderNameEN: string.Empty,
+            WorkingId: string.Empty,
+            Found: false,
+            MonthlyOrders: emptyMonths,
+            TotalOrders: 0,
+            TotalShifts: 0,
+            AverageOrdersPerActiveMonth: 0,
+            TrendVsPrevious3Avg: 0
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // PRIVATE: read iqama numbers from Excel stream
+    // ─────────────────────────────────────────────────────────────────────────
+    private static List<long> ReadIqamaNumbersFromStream1(Stream stream)
+    {
+        var numbers = new List<long>();
+        using var wb = new XLWorkbook(stream);
+        var ws = wb.Worksheets.First();
+        var lastRow = ws.LastRowUsed()?.RowNumber() ?? 0;
+
+        for (int row = 1; row <= lastRow; row++)
+        {
+            var cell = ws.Cell(row, 1);
+            if (cell.IsEmpty()) continue;
+            var raw = cell.GetValue<string>()?.Trim();
+            if (string.IsNullOrWhiteSpace(raw)) continue;
+            // Skip non-numeric header if present
+            if (row == 1 && !long.TryParse(raw, out _)) continue;
+            if (long.TryParse(raw, out var iqama))
+                numbers.Add(iqama);
+        }
+        return numbers;
+    }
+
+ 
+
+    private const int COL_IQAMA = 1;
+    private const int COL_NAME = 2;
+    private const int COL_WORKING_ID = 3;
+    private const int COL_YEAR = 4;
+    private const int COL_MONTH_NUM = 5;
+    private const int COL_MONTH_NAME = 6;
+    private const int COL_SHIFTS = 7;
+    private const int COL_ACCEPTED = 8;
+    private const int COL_REJECTED = 9;
+    private const int COL_REAL_REJ = 10;
+    private const int COL_HOURS = 11;
+    private const int COL_COMPLETED = 12;
+    private const int COL_INCOMPLETE = 13;
+    private const int COL_FAILED = 14;
+    private const int COL_COMP_RATE = 15;
+    private const int TOTAL_COLS = 15;
+
+    // ── Color palette ─────────────────────────────────────────────────────────
+    private static readonly XLColor HeaderBg = XLColor.FromHtml("#1F3864"); // dark navy
+    private static readonly XLColor RiderHeaderBg = XLColor.FromHtml("#2E75B6"); // blue
+    private static readonly XLColor TotalRowBg = XLColor.FromHtml("#D6E4F0"); // light blue
+    private static readonly XLColor ActiveRowBg = XLColor.FromHtml("#FFFFFF"); // white
+    private static readonly XLColor EmptyRowBg = XLColor.FromHtml("#F5F5F5"); // light grey
+    private static readonly XLColor NotFoundBg = XLColor.FromHtml("#FCE4D6"); // light red
+    private static readonly XLColor GoodRate = XLColor.FromHtml("#E2EFDA"); // light green
+    private static readonly XLColor BadRate = XLColor.FromHtml("#FCE4D6"); // light red
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // PUBLIC: get raw data
+    // ─────────────────────────────────────────────────────────────────────────
+    public async Task<Result<BulkRiderHistoryResult>> GetBulkRiderMonthlyHistoryAsync(
+        List<long> iqamaNumbers,
+        CancellationToken cancellationToken = default)
+    {
+        if (iqamaNumbers == null || !iqamaNumbers.Any())
+            return Result.Failure<BulkRiderHistoryResult>(
+                new Error("IqamaNumbers list cannot be empty", "invalid_input", 400));
+
+        try
+        {
+            // Single query: all matching riders
+            var riders = await dbcontext.RiderDetails
+                .Include(r => r.Employee)
+                .Where(r => iqamaNumbers.Contains(r.EmployeeIqamaNo))
+                .AsNoTracking()
+                .ToListAsync(cancellationToken);
+
+            // Single query: all shifts for those riders (Company 1 only)
+            var riderIds = riders.Select(r => r.Id).ToList();
+            var allShifts = await dbcontext.RiderShifts
+                .Where(s => riderIds.Contains(s.RiderId) && (s.CompanyId == 1 || s.CompanyId == 2))
+                .OrderBy(s => s.ShiftDate)
+                .AsNoTracking()
+                .ToListAsync(cancellationToken);
+
+            var shiftsByRider = allShifts.GroupBy(s => s.RiderId)
+                                          .ToDictionary(g => g.Key, g => g.ToList());
+            var riderByIqama = riders.ToDictionary(r => r.EmployeeIqamaNo);
+            var today = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3));
+
+            var results = new List<RiderHistoryEntry>();
+            var notFound = new List<long>();
+
+            foreach (var iqamaNo in iqamaNumbers)
+            {
+                if (!riderByIqama.TryGetValue(iqamaNo, out var rider))
+                {
+                    notFound.Add(iqamaNo);
+                    results.Add(new RiderHistoryEntry(iqamaNo, string.Empty, string.Empty, null, false));
+                    continue;
+                }
+
+                if (!shiftsByRider.TryGetValue(rider.Id, out var shifts) || !shifts.Any())
+                {
+                    results.Add(new RiderHistoryEntry(
+                        iqamaNo, rider.Employee.NameAR, rider.WorkingId ?? "0", null, true));
+                    continue;
+                }
+
+                var firstDate = shifts.First().ShiftDate;
+                var lastDate = shifts.Last().ShiftDate;
+                var endDate = lastDate > today ? lastDate : today;
+                var monthly = GenerateMonthlyShiftSummaries1(shifts, firstDate, endDate);
+                var active = monthly.Where(m => m.TotalAcceptedOrders > 0).ToList();
+
+                var history = new RiderMonthlyHistorys(
+                    IqamaNo: iqamaNo,
+                    RiderName: rider.Employee.NameAR,
+                    WorkingId: rider.WorkingId ?? "0",
+                    FirstShiftDate: firstDate,
+                    LastShiftDate: lastDate,
+                    TotalMonths: monthly.Count,
+                    ActiveMonthsCount: active.Count,
+                    AverageOrdersPerActiveMonth:
+                        active.Count > 0
+                            ? (decimal)active.Sum(m => m.TotalAcceptedOrders) / active.Count
+                            : 0,
+                    ActiveMonthNumbers: active.Select(m => m.Month).ToList(),
+                    MonthlyData: monthly
+                );
+
+                results.Add(new RiderHistoryEntry(
+                    iqamaNo, rider.Employee.NameAR, rider.WorkingId ?? "0", history, true));
+            }
+
+            return Result.Success(new BulkRiderHistoryResult(
+                Results: results,
+                NotFound: notFound,
+                TotalRequested: iqamaNumbers.Count,
+                TotalFound: results.Count(r => r.Found)
+            ));
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<BulkRiderHistoryResult>(
+                new Error($"Error generating bulk rider history: {ex.Message}", "server_error", 500));
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // PUBLIC: export from list of iqama numbers
+    // ─────────────────────────────────────────────────────────────────────────
+    public async Task<Result<byte[]>> ExportBulkRiderHistoryToExcelAsync(
+        List<long> iqamaNumbers,
+        CancellationToken cancellationToken = default)
+    {
+        var dataResult = await GetBulkRiderMonthlyHistoryAsync(iqamaNumbers, cancellationToken);
+        if (!dataResult.IsSuccess)
+            return Result.Failure<byte[]>(dataResult.Error);
+
+        return Result.Success(BuildExcelFile(dataResult.Value));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // PUBLIC: read iqama numbers from uploaded Excel, then export result
+    // ─────────────────────────────────────────────────────────────────────────
+    public async Task<Result<byte[]>> ExportBulkRiderHistoryFromExcelAsync(
+        Stream excelInputStream,
+        CancellationToken cancellationToken = default)
+    {
+        List<long> iqamaNumbers;
+        try
+        {
+            iqamaNumbers = ReadIqamaNumbersFromStream(excelInputStream);
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<byte[]>(
+                new Error($"Error reading Excel file: {ex.Message}", "invalid_input", 400));
+        }
+
+        if (!iqamaNumbers.Any())
+            return Result.Failure<byte[]>(
+                new Error(
+                    "No valid Iqama numbers found in the Excel file. " +
+                    "Ensure column A contains numeric Iqama numbers.",
+                    "invalid_input", 400));
+
+        return await ExportBulkRiderHistoryToExcelAsync(iqamaNumbers, cancellationToken);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // PRIVATE: read iqama numbers from an Excel stream
+    // ─────────────────────────────────────────────────────────────────────────
+    private static List<long> ReadIqamaNumbersFromStream(Stream stream)
+    {
+        var numbers = new List<long>();
+        using var wb = new XLWorkbook(stream);
+        var ws = wb.Worksheets.First();
+        var lastRow = ws.LastRowUsed()?.RowNumber() ?? 0;
+
+        for (int row = 1; row <= lastRow; row++)
+        {
+            var cell = ws.Cell(row, 1);
+            if (cell.IsEmpty()) continue;
+            var raw = cell.GetValue<string>()?.Trim();
+            if (string.IsNullOrWhiteSpace(raw)) continue;
+            // Skip header row if it's not a number
+            if (row == 1 && !long.TryParse(raw, out _)) continue;
+            if (long.TryParse(raw, out var iqama))
+                numbers.Add(iqama);
+        }
+        return numbers;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // PRIVATE: build the Excel workbook bytes
+    // ─────────────────────────────────────────────────────────────────────────
+    private static byte[] BuildExcelFile(BulkRiderHistoryResult data)
+    {
+        using var wb = new XLWorkbook();
+
+        // ── Sheet 1: Monthly Detail ───────────────────────────────────────
+        var wsDetail = wb.Worksheets.Add("Monthly Detail");
+        WriteDetailSheet(wsDetail, data);
+
+        // ── Sheet 2: Summary (one row per rider) ──────────────────────────
+        var wsSummary = wb.Worksheets.Add("Summary");
+        WriteSummarySheet(wsSummary, data);
+
+        // ── Sheet 3: Not Found ────────────────────────────────────────────
+        if (data.NotFound.Any())
+        {
+            var wsNF = wb.Worksheets.Add("Not Found");
+            WriteNotFoundSheet(wsNF, data.NotFound);
+        }
+
+        using var ms = new MemoryStream();
+        wb.SaveAs(ms);
+        return ms.ToArray();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // SHEET 1 — Monthly Detail
+    // Each rider gets a blue header row, then one row per month,
+    // then a totals row.  Riders are separated by a blank row.
+    // ─────────────────────────────────────────────────────────────────────────
+    private static void WriteDetailSheet(IXLWorksheet ws, BulkRiderHistoryResult data)
+    {
+        // ── Global column header (row 1) ──────────────────────────────────
+        int headerRow = 1;
+        WriteGlobalHeader(ws, headerRow);
+
+        int currentRow = 2;
+
+        foreach (var entry in data.Results)
+        {
+            // ── Rider header row ──────────────────────────────────────────
+            WriteRiderHeaderRow(ws, currentRow, entry);
+            int riderHeaderRow = currentRow;
+            currentRow++;
+
+            if (!entry.Found)
+            {
+                // Not-found notice
+                var notFoundRange = ws.Range(currentRow, COL_IQAMA, currentRow, TOTAL_COLS);
+                notFoundRange.Merge();
+                notFoundRange.Value = "⚠ Rider not found in the system";
+                notFoundRange.Style.Fill.BackgroundColor = NotFoundBg;
+                notFoundRange.Style.Font.Italic = true;
+                notFoundRange.Style.Font.FontColor = XLColor.DarkRed;
+                notFoundRange.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+                currentRow++;
+                AddBlankRow(ws, currentRow++);
+                continue;
+            }
+
+            if (entry.History == null || !entry.History.MonthlyData.Any())
+            {
+                var noDataRange = ws.Range(currentRow, COL_IQAMA, currentRow, TOTAL_COLS);
+                noDataRange.Merge();
+                noDataRange.Value = "No shift history recorded";
+                noDataRange.Style.Fill.BackgroundColor = EmptyRowBg;
+                noDataRange.Style.Font.Italic = true;
+                noDataRange.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+                currentRow++;
+                AddBlankRow(ws, currentRow++);
+                continue;
+            }
+
+            // ── Data rows (one per month) ─────────────────────────────────
+            int dataStartRow = currentRow;
+            foreach (var month in entry.History.MonthlyData)
+            {
+                bool hasData = month.TotalAcceptedOrders > 0 || month.TotalShifts > 0;
+                WriteMonthRow(ws, currentRow, entry, month, hasData);
+                currentRow++;
+            }
+
+            // ── Totals row ────────────────────────────────────────────────
+            WriteTotalsRow(ws, currentRow, dataStartRow, currentRow - 1);
+            currentRow++;
+
+            // ── Blank separator ───────────────────────────────────────────
+            AddBlankRow(ws, currentRow++);
+        }
+
+        // ── Format columns ────────────────────────────────────────────────
+        SetDetailColumnWidths(ws);
+        ws.SheetView.FreezeRows(1);
+        ws.TabColor = XLColor.FromHtml("#2E75B6");
+    }
+
+    private static void WriteGlobalHeader(IXLWorksheet ws, int row)
+    {
+        string[] headers =
+        {
+            "Iqama No", "Rider Name (AR)", "Working ID",
+            "Year", "Month #", "Month",
+            "Shifts", "Accepted Orders", "Rejected Orders", "Real Rejected",
+            "Working Hours", "Completed", "Incomplete", "Failed",
+            "Completion Rate"
+        };
+
+        for (int c = 1; c <= headers.Length; c++)
+        {
+            var cell = ws.Cell(row, c);
+            cell.Value = headers[c - 1];
+            cell.Style.Font.Bold = true;
+            cell.Style.Font.FontColor = XLColor.White;
+            cell.Style.Fill.BackgroundColor = HeaderBg;
+            cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+            cell.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+            cell.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+            cell.Style.Border.OutsideBorderColor = XLColor.White;
+        }
+        ws.Row(row).Height = 22;
+    }
+
+    private static void WriteRiderHeaderRow(IXLWorksheet ws, int row, RiderHistoryEntry entry)
+    {
+        // Merge cols 1-3 for rider identity info
+        var identityRange = ws.Range(row, COL_IQAMA, row, COL_WORKING_ID);
+        identityRange.Merge();
+        identityRange.Value = entry.Found
+            ? $"  {entry.IqamaNo}  |  {entry.RiderName}  |  WID: {entry.WorkingId}"
+            : $"  {entry.IqamaNo}  |  NOT FOUND";
+
+        // Fill rest of rider header
+        var fullRange = ws.Range(row, COL_IQAMA, row, TOTAL_COLS);
+        fullRange.Style.Fill.BackgroundColor = entry.Found ? RiderHeaderBg : NotFoundBg;
+        fullRange.Style.Font.Bold = true;
+        fullRange.Style.Font.FontColor = XLColor.White;
+        fullRange.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+
+        if (entry.Found && entry.History != null)
+        {
+            ws.Cell(row, COL_YEAR).Value = $"Active months: {entry.History.ActiveMonthsCount}";
+            ws.Cell(row, COL_MONTH_NUM).Value = $"Total months: {entry.History.TotalMonths}";
+            ws.Cell(row, COL_MONTH_NAME).Value = $"Avg orders/active month: {entry.History.AverageOrdersPerActiveMonth:F1}";
+            ws.Cell(row, COL_SHIFTS).Value = $"First shift: {entry.History.FirstShiftDate:yyyy-MM-dd}";
+            ws.Cell(row, COL_ACCEPTED).Value = $"Last shift: {entry.History.LastShiftDate:yyyy-MM-dd}";
+        }
+
+        ws.Row(row).Height = 20;
+        // Bottom border
+        fullRange.Style.Border.BottomBorder = XLBorderStyleValues.Medium;
+        fullRange.Style.Border.BottomBorderColor = XLColor.White;
+    }
+
+    private static void WriteMonthRow(
+        IXLWorksheet ws, int row, RiderHistoryEntry entry,
+        MonthlyShiftSummary month, bool hasData)
+    {
+        var bg = hasData ? ActiveRowBg : EmptyRowBg;
+
+        ws.Cell(row, COL_IQAMA).Value = entry.IqamaNo;
+        ws.Cell(row, COL_NAME).Value = entry.RiderName;
+        ws.Cell(row, COL_WORKING_ID).Value = entry.WorkingId;
+        ws.Cell(row, COL_YEAR).Value = month.Year;
+        ws.Cell(row, COL_MONTH_NUM).Value = month.Month;
+        ws.Cell(row, COL_MONTH_NAME).Value = month.MonthName;
+        ws.Cell(row, COL_SHIFTS).Value = month.TotalShifts;
+        ws.Cell(row, COL_ACCEPTED).Value = month.TotalAcceptedOrders;
+        ws.Cell(row, COL_REJECTED).Value = month.TotalRejectedOrders;
+        ws.Cell(row, COL_REAL_REJ).Value = month.TotalRealRejectedOrders;
+        ws.Cell(row, COL_HOURS).Value = Math.Round(month.TotalWorkingHours, 1);
+        ws.Cell(row, COL_COMPLETED).Value = month.CompletedShifts;
+        ws.Cell(row, COL_INCOMPLETE).Value = month.IncompleteShifts;
+        ws.Cell(row, COL_FAILED).Value = month.FailedShifts;
+
+        // Completion rate as actual percentage value
+        var compRateCell = ws.Cell(row, COL_COMP_RATE);
+        compRateCell.Value = month.CompletionRate / 100m; // store as 0.xx fraction
+        compRateCell.Style.NumberFormat.Format = "0.0%";
+
+        // Color code completion rate
+        if (hasData)
+        {
+            compRateCell.Style.Fill.BackgroundColor =
+                month.CompletionRate >= 80 ? GoodRate : BadRate;
+        }
+
+        // Row background
+        var rowRange = ws.Range(row, COL_IQAMA, row, TOTAL_COLS);
+        rowRange.Style.Fill.BackgroundColor = bg;
+
+        if (!hasData)
+        {
+            rowRange.Style.Font.FontColor = XLColor.Gray;
+            rowRange.Style.Font.Italic = true;
+        }
+
+        // Subtle left border to indicate same rider group
+        ws.Cell(row, COL_IQAMA).Style.Border.LeftBorder = XLBorderStyleValues.Medium;
+        ws.Cell(row, COL_IQAMA).Style.Border.LeftBorderColor = RiderHeaderBg;
+        ws.Cell(row, TOTAL_COLS).Style.Border.RightBorder = XLBorderStyleValues.Medium;
+        ws.Cell(row, TOTAL_COLS).Style.Border.RightBorderColor = RiderHeaderBg;
+
+        // Light bottom border between months
+        rowRange.Style.Border.BottomBorder = XLBorderStyleValues.Hair;
+        rowRange.Style.Border.BottomBorderColor = XLColor.LightGray;
+
+        // Center numeric columns
+        for (int c = COL_YEAR; c <= TOTAL_COLS; c++)
+            ws.Cell(row, c).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+
+        ws.Row(row).Height = 17;
+    }
+
+    private static void WriteTotalsRow(IXLWorksheet ws, int row, int dataStart, int dataEnd)
+    {
+        var range = ws.Range(row, COL_IQAMA, row, TOTAL_COLS);
+        range.Style.Fill.BackgroundColor = TotalRowBg;
+        range.Style.Font.Bold = true;
+        range.Style.Border.TopBorder = XLBorderStyleValues.Medium;
+        range.Style.Border.TopBorderColor = RiderHeaderBg;
+        range.Style.Border.BottomBorder = XLBorderStyleValues.Medium;
+        range.Style.Border.BottomBorderColor = RiderHeaderBg;
+
+        // Merge first 3 cols for label
+        ws.Range(row, COL_IQAMA, row, COL_WORKING_ID).Merge();
+        ws.Cell(row, COL_IQAMA).Value = "TOTAL";
+        ws.Cell(row, COL_IQAMA).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Right;
+
+        // SUM formulas for numeric cols
+        var sumCols = new[]
+        {
+            COL_SHIFTS, COL_ACCEPTED, COL_REJECTED, COL_REAL_REJ,
+            COL_HOURS, COL_COMPLETED, COL_INCOMPLETE, COL_FAILED
+        };
+
+        foreach (var col in sumCols)
+        {
+            var colLetter = ColumnLetter(col);
+            ws.Cell(row, col).FormulaA1 = $"=SUM({colLetter}{dataStart}:{colLetter}{dataEnd})";
+            ws.Cell(row, col).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+        }
+
+        // Average completion rate
+        var compLetter = ColumnLetter(COL_COMP_RATE);
+        var compCell = ws.Cell(row, COL_COMP_RATE);
+        compCell.FormulaA1 =
+            $"=IFERROR(AVERAGEIF({ColumnLetter(COL_SHIFTS)}{dataStart}:{ColumnLetter(COL_SHIFTS)}{dataEnd},\">0\",{compLetter}{dataStart}:{compLetter}{dataEnd}),0)";
+        compCell.Style.NumberFormat.Format = "0.0%";
+        compCell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+
+        ws.Row(row).Height = 18;
+    }
+
+    private static void AddBlankRow(IXLWorksheet ws, int row)
+    {
+        ws.Row(row).Height = 8;
+        var r = ws.Range(row, COL_IQAMA, row, TOTAL_COLS);
+        r.Style.Fill.BackgroundColor = XLColor.White;
+        r.Style.Border.BottomBorder = XLBorderStyleValues.Thin;
+        r.Style.Border.BottomBorderColor = XLColor.LightGray;
+    }
+
+    private static void SetDetailColumnWidths(IXLWorksheet ws)
+    {
+        ws.Column(COL_IQAMA).Width = 16;
+        ws.Column(COL_NAME).Width = 28;
+        ws.Column(COL_WORKING_ID).Width = 13;
+        ws.Column(COL_YEAR).Width = 10;
+        ws.Column(COL_MONTH_NUM).Width = 10;
+        ws.Column(COL_MONTH_NAME).Width = 14;
+        ws.Column(COL_SHIFTS).Width = 10;
+        ws.Column(COL_ACCEPTED).Width = 17;
+        ws.Column(COL_REJECTED).Width = 16;
+        ws.Column(COL_REAL_REJ).Width = 15;
+        ws.Column(COL_HOURS).Width = 14;
+        ws.Column(COL_COMPLETED).Width = 13;
+        ws.Column(COL_INCOMPLETE).Width = 13;
+        ws.Column(COL_FAILED).Width = 10;
+        ws.Column(COL_COMP_RATE).Width = 16;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // SHEET 2 — Summary (one row per rider)
+    // ─────────────────────────────────────────────────────────────────────────
+    private static void WriteSummarySheet(IXLWorksheet ws, BulkRiderHistoryResult data)
+    {
+        string[] headers =
+        {
+            "Iqama No", "Rider Name (AR)", "Working ID",
+            "Status", "First Shift", "Last Shift",
+            "Total Months", "Active Months",
+            "Total Shifts", "Total Accepted", "Total Rejected",
+            "Total Hours", "Avg Orders / Active Month"
+        };
+
+        // Header row
+        for (int c = 1; c <= headers.Length; c++)
+        {
+            var cell = ws.Cell(1, c);
+            cell.Value = headers[c - 1];
+            cell.Style.Font.Bold = true;
+            cell.Style.Font.FontColor = XLColor.White;
+            cell.Style.Fill.BackgroundColor = HeaderBg;
+            cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+            cell.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+            cell.Style.Border.OutsideBorderColor = XLColor.White;
+        }
+        ws.Row(1).Height = 22;
+
+        int row = 2;
+        foreach (var entry in data.Results)
+        {
+            var bg = !entry.Found ? NotFoundBg :
+                     entry.History == null ? EmptyRowBg :
+                     XLColor.White;
+
+            ws.Cell(row, 1).Value = entry.IqamaNo;
+            ws.Cell(row, 2).Value = entry.RiderName;
+            ws.Cell(row, 3).Value = entry.WorkingId;
+            ws.Cell(row, 4).Value = !entry.Found ? "Not Found" :
+                                    entry.History == null ? "No Data" : "Found";
+
+            if (entry.History != null)
+            {
+                ws.Cell(row, 5).Value = entry.History.FirstShiftDate.ToString("yyyy-MM-dd");
+                ws.Cell(row, 6).Value = entry.History.LastShiftDate.ToString("yyyy-MM-dd");
+                ws.Cell(row, 7).Value = entry.History.TotalMonths;
+                ws.Cell(row, 8).Value = entry.History.ActiveMonthsCount;
+
+                var active = entry.History.MonthlyData.Where(m => m.TotalAcceptedOrders > 0).ToList();
+                ws.Cell(row, 9).Value = active.Sum(m => m.TotalShifts);
+                ws.Cell(row, 10).Value = active.Sum(m => m.TotalAcceptedOrders);
+                ws.Cell(row, 11).Value = active.Sum(m => m.TotalRejectedOrders);
+                ws.Cell(row, 12).Value = Math.Round((double)active.Sum(m => m.TotalWorkingHours), 1);
+                ws.Cell(row, 13).Value = Math.Round(entry.History.AverageOrdersPerActiveMonth, 1);
+            }
+
+            var rowRange = ws.Range(row, 1, row, headers.Length);
+            rowRange.Style.Fill.BackgroundColor = bg;
+            rowRange.Style.Border.BottomBorder = XLBorderStyleValues.Hair;
+            rowRange.Style.Border.BottomBorderColor = XLColor.LightGray;
+
+            for (int c = 5; c <= headers.Length; c++)
+                ws.Cell(row, c).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+
+            ws.Row(row).Height = 17;
+            row++;
+        }
+
+        // Auto-fit
+        int[] summaryColWidths = { 16, 28, 12, 11, 13, 13, 14, 14, 13, 16, 15, 14, 24 };
+        for (int c = 1; c <= summaryColWidths.Length; c++)
+            ws.Column(c).Width = summaryColWidths[c - 1];
+
+        ws.SheetView.FreezeRows(1);
+        ws.TabColor = XLColor.FromHtml("#1F3864");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // SHEET 3 — Not Found
+    // ─────────────────────────────────────────────────────────────────────────
+    private static void WriteNotFoundSheet(IXLWorksheet ws, List<long> notFound)
+    {
+        ws.Cell(1, 1).Value = "Iqama No";
+        ws.Cell(1, 1).Style.Font.Bold = true;
+        ws.Cell(1, 1).Style.Fill.BackgroundColor = NotFoundBg;
+
+        for (int i = 0; i < notFound.Count; i++)
+            ws.Cell(i + 2, 1).Value = notFound[i];
+
+        ws.Column(1).Width = 18;
+        ws.TabColor = XLColor.Red;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // PRIVATE HELPER: reuse from ReportService
+    // ─────────────────────────────────────────────────────────────────────────
+    private static List<MonthlyShiftSummary> GenerateMonthlyShiftSummaries1(
+        List<RiderShift> shifts, DateOnly startDate, DateOnly endDate)
+    {
+        var result = new List<MonthlyShiftSummary>();
+        var current = new DateOnly(startDate.Year, startDate.Month, 1);
+        var final = new DateOnly(endDate.Year, endDate.Month, 1);
+
+        var byMonth = shifts
+            .GroupBy(s => (s.ShiftDate.Year, s.ShiftDate.Month))
+            .ToDictionary(g => g.Key, g => g.ToList());
+
+        while (current <= final)
+        {
+            var key = (current.Year, current.Month);
+            if (byMonth.TryGetValue(key, out var ms))
+            {
+                var total = ms.Count;
+                var completed = ms.Count(s => s.ShiftStatus == "Completed");
+                result.Add(new MonthlyShiftSummary(
+                    Year: current.Year,
+                    Month: current.Month,
+                    MonthName: new DateTime(current.Year, current.Month, 1).ToString("MMMM"),
+                    TotalShifts: total,
+                    TotalAcceptedOrders: ms.Sum(s => s.AcceptedDailyOrders),
+                    TotalRejectedOrders: ms.Sum(s => s.RejectedDailyOrders),
+                    TotalRealRejectedOrders: ms.Sum(s => s.RealRejectedDailyOrders),
+                    TotalWorkingHours: ms.Sum(s => s.WorkingHours),
+                    CompletedShifts: completed,
+                    IncompleteShifts: ms.Count(s => s.ShiftStatus == "Incomplete"),
+                    FailedShifts: ms.Count(s => s.ShiftStatus == "Failed"),
+                    CompletionRate: total > 0 ? (decimal)completed / total * 100 : 0
+                ));
+            }
+            else
+            {
+                result.Add(new MonthlyShiftSummary(
+                    current.Year, current.Month,
+                    new DateTime(current.Year, current.Month, 1).ToString("MMMM"),
+                    0, 0, 0, 0, 0, 0, 0, 0, 0));
+            }
+            current = current.AddMonths(1);
+        }
+        return result;
+    }
+
+    private static string ColumnLetter(int col)
+    {
+        string result = "";
+        while (col > 0)
+        {
+            col--;
+            result = (char)('A' + col % 26) + result;
+            col /= 26;
+        }
+        return result;
+    }
+
 
 
 

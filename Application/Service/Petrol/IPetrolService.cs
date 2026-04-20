@@ -7,6 +7,11 @@ namespace Application.Service.Petrol;
 
 public interface IPetrolService
 {
+    Task<Result<DailyPetrolReport>> GetDailyReportAsync(
+    DateOnly date,
+    CancellationToken ct = default);
+
+
     Task<Result<PetrolUploadResult>> ProcessUploadAsync(
         IFormFile file,
         DateOnly reportDate,

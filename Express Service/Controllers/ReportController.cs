@@ -14,6 +14,61 @@ public class ReportController(IReportService service) : ControllerBase
     private readonly IReportService service = service;
 
 
+
+    // ── POST /api/Report/rider-recent-months/from-file
+    // Form  : file  (Excel — column A = IqamaNo, optional header row)
+    // Returns: JSON  RiderRecentMonthsResult
+    [HttpPost("rider-recent-months/from-file")]
+    [Consumes("multipart/form-data")]
+    public async Task<IActionResult> GetRiderRecentMonthsFromFile(
+        IFormFile file,
+        CancellationToken cancellationToken = default)
+    {
+        if (file == null || file.Length == 0)
+            return BadRequest(new { message = "Excel file is required" });
+
+        var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
+        if (ext != ".xlsx" && ext != ".xls")
+            return BadRequest(new { message = "Only .xlsx / .xls files are accepted" });
+
+        using var stream = file.OpenReadStream();
+        var result = await service.GetRecentMonthsFromExcelAsync(stream, cancellationToken);
+
+        return result.IsSuccess
+            ? Ok(result.Value)
+            : result.ToProblem();
+    }
+
+
+
+    // ── POST /api/Report/bulk-rider-history/export-excel/from-file
+    // Form: file (Excel with iqama numbers in column A)
+    [HttpPost("bulk-rider-history/export-excel/from-file")]
+    [Consumes("multipart/form-data")]
+    public async Task<IActionResult> ExportBulkRiderHistoryFromExcelFile(
+        IFormFile file,
+        CancellationToken cancellationToken = default)
+    {
+        if (file == null || file.Length == 0)
+            return BadRequest(new { message = "Excel file is required" });
+
+        var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
+        if (ext != ".xlsx" && ext != ".xls")
+            return BadRequest(new { message = "Only .xlsx / .xls files are accepted" });
+
+        using var stream = file.OpenReadStream();
+        var result = await service.ExportBulkRiderHistoryFromExcelAsync(
+            stream, cancellationToken);
+
+        if (!result.IsSuccess)
+            result.ToProblem();
+
+        return File(
+            result.Value,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            $"RiderHistory_{DateTime.Now:yyyyMMdd_HHmm}.xlsx");
+    }
+
     [HttpGet("config/validation")]
     public async Task<IActionResult> GetValidationConfig(CancellationToken ct)
     {

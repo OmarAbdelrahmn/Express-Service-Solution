@@ -31,6 +31,35 @@ public record PetrolUploadRowDetail(
     string? ErrorMessage
 );
 
+
+public record DailyPetrolReport(
+    DateOnly Date,
+    decimal TotalCost,
+    int TotalVehicles,
+    int TotalAttributedRows,
+    int TotalUnattributedRows,
+    IReadOnlyList<DailyVehicleEntry> Vehicles
+);
+
+public record DailyVehicleEntry(
+    string? VehicleNumber,
+    string PlateNumberE,
+    decimal Cost,
+    bool HasResolutionError,
+    string? ResolutionErrorMessage,
+    string? Note,
+    IReadOnlyList<DailyRiderAttribution> Attributions
+);
+
+public record DailyRiderAttribution(
+    long? RiderIqamaNo,
+    string? RiderNameEN,
+    string? RiderNameAR,
+    decimal Cost,
+    PetrolAttributionSource AttributionSource,
+    string? Notes
+);
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // RIDER REPORT  — "give me all petrol costs for rider X in month Y"
 // ═══════════════════════════════════════════════════════════════════════════════

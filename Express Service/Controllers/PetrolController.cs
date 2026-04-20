@@ -11,6 +11,26 @@ public class PetrolController(IPetrolService service) : ControllerBase
 {
     private readonly IPetrolService _service = service;
 
+
+
+    /// <summary>
+    /// Full petrol picture for a given date:
+    /// every vehicle cost with all its rider attributions (including unattributed rows).
+    /// </summary>
+    [HttpGet("daily")]
+    [Authorize(Roles = "Master,Admin,Member")]
+    public async Task<IActionResult> GetDailyReport(
+        [FromQuery] DateOnly date,
+        CancellationToken ct)
+    {
+        var response = await _service.GetDailyReportAsync(date, ct);
+
+        return response.IsSuccess
+            ? Ok(response.Value)
+            : response.ToProblem();
+    }
+
+
     // ═══════════════════════════════════════════════════════════════════════
     // UPLOAD & ATTRIBUTION
     // ═══════════════════════════════════════════════════════════════════════
