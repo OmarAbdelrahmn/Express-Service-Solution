@@ -1090,7 +1090,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                     g.Sum(s => s.AcceptedDailyOrders),
                     g.Sum(s => s.RealRejectedDailyOrders),
                     g.Count(),
-                    g.Select(s => s.RiderId).Distinct().Count()
+                    g.Count()
                 ))
                 .OrderBy(s => s.ShiftDate)
                 .ThenBy(s => s.CompanyId)

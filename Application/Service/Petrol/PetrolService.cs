@@ -268,14 +268,44 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
     // ═══════════════════════════════════════════════════════════════════════
 
     public async Task<Result<(int total, int attributed, int unattributed)>> AttributePendingAsync(
-        CancellationToken ct = default)
+     CancellationToken ct = default)
     {
         try
         {
-            var pending = await _db.VehiclePetrolCosts
-                .Where(v => !v.IsAttributed && !v.HasResolutionError)
+            // ── Step 1: Find VehiclePetrolCost IDs that still have unattributed rider rows ──
+            var unattributedVehicleIds = await _db.RiderPetrolCosts
+                .Where(r => r.RiderIqamaNo == null
+                         && r.AttributionSource == PetrolAttributionSource.Unattributed)
+                .Select(r => r.VehiclePetrolCostId)
+                .Distinct()
                 .ToListAsync(ct);
 
+            // ── Step 2: Load those VehiclePetrolCost records (no resolution error only) ──
+            var pending = await _db.VehiclePetrolCosts
+                .Where(v => !v.HasResolutionError
+                         && (!v.IsAttributed || unattributedVehicleIds.Contains(v.Id)))
+                .ToListAsync(ct);
+
+            if (pending.Count == 0)
+                return Result.Success((0, 0, 0));
+
+            // ── Step 3: Delete the old Unattributed RiderPetrolCost rows for those records ──
+            //    so AttributeSingleAsync can write fresh ones
+            var oldUnattributedRows = await _db.RiderPetrolCosts
+                .Where(r => r.RiderIqamaNo == null
+                         && r.AttributionSource == PetrolAttributionSource.Unattributed
+                         && unattributedVehicleIds.Contains(r.VehiclePetrolCostId))
+                .ToListAsync(ct);
+
+            _db.RiderPetrolCosts.RemoveRange(oldUnattributedRows);
+
+            // ── Step 4: Reset IsAttributed so AttributeSingleAsync processes them fresh ──
+            foreach (var v in pending.Where(v => unattributedVehicleIds.Contains(v.Id)))
+                v.IsAttributed = false;
+
+            await _db.SaveChangesAsync(ct); // commit deletions + resets before re-running
+
+            // ── Step 5: Re-run attribution engine ────────────────────────────────────────
             int attributed = 0;
             int unattributed = 0;
 
@@ -284,51 +314,6 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
                 var count = await AttributeSingleAsync(record, ct);
                 if (count > 0) attributed++;
                 else unattributed++;
-            }
-
-            // Second pass — find today's active Permission for yesterday's unattributed rows
-            var today = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3));
-            var todayDt = today.ToDateTime(TimeOnly.MinValue);
-
-            var unattributedRows = await _db.RiderPetrolCosts
-                .Where(r => r.RiderIqamaNo == null && r.Date == today.AddDays(-1))
-                .ToListAsync(ct);
-
-            foreach (var row in unattributedRows)
-            {
-                if (string.IsNullOrWhiteSpace(row.VehicleNumber))
-                    continue;
-
-                var permission = await _db.RiderVehicleStatus
-                    .Where(s => s.VehicleNumber == row.VehicleNumber
-                             && s.EmployeeIqamaNo.HasValue
-                             && s.PermissionStartDate.HasValue
-                             && s.PermissionEndDate.HasValue
-                             && s.PermissionStartDate.Value.Date <= todayDt.Date
-                             && s.PermissionEndDate.Value.Date >= todayDt.Date)
-                    .FirstOrDefaultAsync(ct);
-
-                if (permission == null) continue;
-
-                var employeeExists = await _db.Employees
-                    .AnyAsync(e => e.IqamaNo == permission.EmployeeIqamaNo!.Value, ct);
-
-                if (!employeeExists)
-                {
-                    row.Notes = $"[Second-pass skipped] IqamaNo {permission.EmployeeIqamaNo} " +
-                                "not found in Employees.";
-                    continue;
-                }
-
-                row.RiderIqamaNo = permission.EmployeeIqamaNo!.Value;
-                row.AttributionSource = PetrolAttributionSource.Permission;
-                row.ResolvedFromStatusId = permission.Id;
-                row.Notes = $"[Resolved via today's permission] " +
-                            $"Window: {permission.PermissionStartDate:yyyy-MM-dd} → " +
-                            $"{permission.PermissionEndDate:yyyy-MM-dd}";
-
-                unattributed--;
-                attributed++;
             }
 
             await _db.SaveChangesAsync(ct);
@@ -660,7 +645,8 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
                 .AsNoTracking()
                 .Where(r => r.RiderIqamaNo == null
                          && r.Date.Year == year
-                         && r.Date.Month == month)
+                         && r.Date.Month == month 
+                         && (r.VehicleNumber != null && r.VehicleNumber != "MHKBC31E9BK204918"))
                 .OrderBy(r => r.VehicleNumber)
                 .ThenBy(r => r.Date)
                 .ToListAsync(ct);
@@ -973,6 +959,15 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
             if (!decimal.TryParse(costRaw, out var cost)) continue;
 
             var plate = NormalizePlate(plateRaw);
+
+            plate = plate.ToUpperInvariant() switch
+            {
+                "TS564" => "TS488",
+                "BE7191" => "BE7291",
+                // add more aliases here if needed: "OLD" => "NEW",
+                _ => plate
+            };
+
             result.Add(new PetrolExcelRow(plate, cost));
         }
 
