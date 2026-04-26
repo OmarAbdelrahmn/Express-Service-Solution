@@ -135,12 +135,16 @@ public class Temp(ApplicationDbcontext dbcontext) : ITemp
                     bool excelSaysVacation = exitReturnValue.Equals("نعم", StringComparison.OrdinalIgnoreCase);
                     bool dbIsVacation = existingEmployee.Status?.Equals("vacation", StringComparison.OrdinalIgnoreCase) == true;
 
-                    if (excelSaysVacation && !dbIsVacation)
-                    exitReturnNotes.Add(
-                    $"رقم الإقامة {IqamaNo} ({existingEmployee.NameAR}): في Excel 'خروج وعودة = نعم' لكن حالته في النظام '{existingEmployee.Status}' وليست إجازة.");
-                     else if (!excelSaysVacation && dbIsVacation)
+                    if (excelSaysVacation != dbIsVacation)
+                    {
+                        string message = excelSaysVacation
+                            ? $"في Excel 'خروج وعودة = نعم' لكن حالته في النظام اخرى وليست إجازة."
+                            : $"في Excel 'خروج وعودة = لا' لكن حالته في النظام مسجلة كـ 'إجازة'.";
+
                         exitReturnNotes.Add(
-                            $"رقم الإقامة {IqamaNo} ({existingEmployee.NameAR}): في Excel 'خروج وعودة = لا' لكن حالته في النظام مسجلة كـ 'إجازة'.");
+                            $"({existingEmployee.NameAR}): {message}"
+                        );
+                    }
                 }
 
 
