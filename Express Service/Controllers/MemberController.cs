@@ -12,6 +12,20 @@ public class MemberController(IMemberService housingService) : ControllerBase
 {
     private readonly IMemberService housingService = housingService;
 
+
+    [HttpGet("housing/detailed-daily-performance")]
+    public async Task<IActionResult> GetDetailedDailyPerformance(
+    [FromQuery] DateOnly startDate,
+    [FromQuery] DateOnly endDate,
+    CancellationToken cancellationToken = default)
+    {
+        var managerIqamaNo = User.GetUserIqamaNo()!;
+        var result = await housingService.GetHousingDetailedDailyPerformanceForManagerAsync(
+            managerIqamaNo, startDate, endDate, cancellationToken);
+
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
     [HttpPost("transfers")]
     public async Task<IActionResult> TransferFromHousing([FromBody] MemberTransferRequest request)
     {

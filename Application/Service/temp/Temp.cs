@@ -26,15 +26,21 @@ public class Temp(ApplicationDbcontext dbcontext) : ITemp
             if (!columnMapping.ContainsKey("IqamaNo"))
                 return Result.Failure<BulkUploadResult>(
                     new Error("MissingIqama", "Excel must contain IqamaNo column", 400));
-
-            // Get all employees from database
+           
+            // NEW — scope only to this sponsor
             var allEmployees = await dbcontext.Employees
                 .AsNoTracking()
+                .Where(e => e.Sponsor == "الخدمة السريعة")
                 .ToListAsync();
+
+            int totalInDB = allEmployees.Count;
 
             var tempUpdates = new List<TempEmployeeUpdate>();
             var rowCount = worksheet.LastRowUsed()?.RowNumber() ?? 0;
             int skippedCount = 0;
+            var exitReturnNotes = new List<string>();
+            var directUpdateItems = new List<(long IqamaNo, DateOnly? NewIqamaEndH, long? NewSponsorNo, string? NewJobTitle)>();
+            int excelValidRowCount = 0;
 
             // Track all IqamaNo values from Excel
             var excelIqamaNumbers = new HashSet<long>();
@@ -48,6 +54,10 @@ public class Temp(ApplicationDbcontext dbcontext) : ITemp
                     continue;
 
                 excelIqamaNumbers.Add(IqamaNo);
+
+                excelValidRowCount++;
+
+                var exitReturnValue = GetStringValue(worksheet, row, columnMapping, "ExitReturn")?.Trim();
 
                 var existingEmployee = allEmployees.FirstOrDefault(e => e.IqamaNo == IqamaNo);
 
@@ -91,23 +101,48 @@ public class Temp(ApplicationDbcontext dbcontext) : ITemp
 
                 bool hasChanges = false;
 
-                if (HasChanged(existingEmployee.IqamaEndH, newIqamaEndH))
+
+                // Direct-update fields — bypass temp table entirely
+                bool needsDirect = false;
+                DateOnly? directIqamaEndH = null;
+                long? directSponsorNo = null;
+                string? directJobTitle = null;
+
+                if (newIqamaEndH.HasValue && HasChanged(existingEmployee.IqamaEndH, newIqamaEndH.Value))
                 {
-                    tempUpdateExisting.OldIqamaEndH = existingEmployee.IqamaEndH;
-                    tempUpdateExisting.NewIqamaEndH = newIqamaEndH;
-                    tempUpdateExisting.OldIqamaEndM = existingEmployee.IqamaEndM;
-                    tempUpdateExisting.NewIqamaEndM = newIqamaEndH.HasValue
-                        ? HijriToGregorian(newIqamaEndH.Value)
-                        : null;
-                    hasChanges = true;
+                    directIqamaEndH = newIqamaEndH;
+                    needsDirect = true;
                 }
 
-                if (HasChanged(existingEmployee.PassportNo, newPassportNo))
+                if (newSponsorNo.HasValue && HasChanged(existingEmployee.sponsorNo, newSponsorNo.Value))
                 {
-                    tempUpdateExisting.OldPassportNo = existingEmployee.PassportNo;
-                    tempUpdateExisting.NewPassportNo = newPassportNo;
-                    hasChanges = true;
+                    directSponsorNo = newSponsorNo;
+                    needsDirect = true;
                 }
+
+                if (!string.IsNullOrWhiteSpace(newJobTitle) && HasChanged(existingEmployee.JobTitle, newJobTitle))
+                {
+                    directJobTitle = newJobTitle;
+                    needsDirect = true;
+                }
+
+                if (needsDirect)
+                    directUpdateItems.Add((IqamaNo, directIqamaEndH, directSponsorNo, directJobTitle));
+
+                // ExitReturn vs Status mismatch note (no DB change)
+                if (!string.IsNullOrWhiteSpace(exitReturnValue))
+                {
+                    bool excelSaysVacation = exitReturnValue.Equals("نعم", StringComparison.OrdinalIgnoreCase);
+                    bool dbIsVacation = existingEmployee.Status?.Equals("vacation", StringComparison.OrdinalIgnoreCase) == true;
+
+                    if (excelSaysVacation && !dbIsVacation)
+                        exitReturnNotes.Add(
+                            $"IqamaNo {IqamaNo} ({existingEmployee.NameEN}): Excel يشير إلى 'خروج وعودة = نعم' لكن الحالة في النظام '{existingEmployee.Status}'");
+                    else if (!excelSaysVacation && dbIsVacation)
+                        exitReturnNotes.Add(
+                            $"IqamaNo {IqamaNo} ({existingEmployee.NameEN}): Excel يشير إلى 'خروج وعودة = لا' لكن الحالة في النظام 'vacation'");
+                }
+
 
                 if (HasChanged(existingEmployee.PassportEnd, newPassportEnd))
                 {
@@ -120,13 +155,6 @@ public class Temp(ApplicationDbcontext dbcontext) : ITemp
                 {
                     tempUpdateExisting.OldSponsorNo = existingEmployee.sponsorNo;
                     tempUpdateExisting.NewSponsorNo = newSponsorNo;
-                    hasChanges = true;
-                }
-
-                if (HasChanged(existingEmployee.JobTitle, newJobTitle))
-                {
-                    tempUpdateExisting.OldJobTitle = existingEmployee.JobTitle;
-                    tempUpdateExisting.NewJobTitle = newJobTitle;
                     hasChanges = true;
                 }
 
@@ -163,6 +191,49 @@ public class Temp(ApplicationDbcontext dbcontext) : ITemp
                 ))
                 .ToList();
 
+            // Apply direct updates immediately
+            var directlyUpdatedInfos = new List<DirectUpdateInfo>();
+
+            if (directUpdateItems.Count > 0)
+            {
+                var iqamaNosToUpdate = directUpdateItems.Select(d => d.IqamaNo).ToList();
+                var employeesToUpdate = await dbcontext.Employees
+                    .Where(e => iqamaNosToUpdate.Contains(e.IqamaNo))
+                    .ToListAsync();
+
+                foreach (var item in directUpdateItems)
+                {
+                    var emp = employeesToUpdate.FirstOrDefault(e => e.IqamaNo == item.IqamaNo);
+                    if (emp == null) continue;
+
+                    var changedFields = new List<string>();
+
+                    if (item.NewIqamaEndH.HasValue)
+                    {
+                        changedFields.Add($"IqamaEndH: {emp.IqamaEndH} → {item.NewIqamaEndH.Value}");
+                        emp.IqamaEndH = item.NewIqamaEndH.Value;
+                        emp.IqamaEndM = HijriToGregorian(item.NewIqamaEndH.Value);
+                    }
+
+                    if (item.NewSponsorNo.HasValue)
+                    {
+                        changedFields.Add($"SponsorNo: {emp.sponsorNo} → {item.NewSponsorNo.Value}");
+                        emp.sponsorNo = item.NewSponsorNo.Value;
+                    }
+
+                    if (item.NewJobTitle != null)
+                    {
+                        changedFields.Add($"JobTitle: '{emp.JobTitle}' → '{item.NewJobTitle}'");
+                        emp.JobTitle = item.NewJobTitle;
+                    }
+
+                    emp.UpdatedAt = DateTime.UtcNow.AddHours(3);
+                    directlyUpdatedInfos.Add(new DirectUpdateInfo(item.IqamaNo, emp.NameEN, changedFields));
+                }
+
+                await dbcontext.SaveChangesAsync();
+            }
+
             // Save only the updates (changes to existing employees)
             if (tempUpdates.Count > 0)
             {
@@ -170,15 +241,24 @@ public class Temp(ApplicationDbcontext dbcontext) : ITemp
                 await dbcontext.SaveChangesAsync();
             }
 
+            // NEW
+            string countNote = excelValidRowCount == totalInDB
+                ? $"Excel and DB both have {totalInDB} employees for sponsor الخدمة السريعة."
+                : excelValidRowCount > totalInDB
+                    ? $"Excel has {excelValidRowCount} employees but DB has {totalInDB} — {excelValidRowCount - totalInDB} new employee(s) found in Excel not in DB."
+                    : $"DB has {totalInDB} employees but Excel has {excelValidRowCount} — {totalInDB - excelValidRowCount} employee(s) may have dropped from the system (see EmployeesInDBNotInExcel).";
+
             var result = new BulkUploadResult(
-                TotalRows: tempUpdates.Count,
-                NewEmployees: 0, // We're not creating TempEmployeeUpdate for new employees anymore
-                ExistingEmployees: tempUpdates.Count,
+                TotalInDB: totalInDB,
+                TotalInExcel: excelValidRowCount,
+                TotalPendingApproval: tempUpdates.Count,
+                DirectlyUpdated: directlyUpdatedInfos,
                 SkippedRows: skippedCount,
                 UploadedAt: DateTime.UtcNow.AddHours(3),
-                Message: $"Excel uploaded successfully. {tempUpdates.Count} changes detected, {skippedCount} rows skipped (no changes).",
+                Message: $"{countNote} {directlyUpdatedInfos.Count} record(s) updated directly. {tempUpdates.Count} change(s) pending approval. {skippedCount} row(s) skipped.",
                 EmployeesInExcelNotInDB: newEmployeesFromExcel,
-                EmployeesInDBNotInExcel: missingFromExcel
+                EmployeesInDBNotInExcel: missingFromExcel,
+                ExitReturnNotes: exitReturnNotes
             );
 
             return Result.Success(result);
@@ -352,7 +432,9 @@ public class Temp(ApplicationDbcontext dbcontext) : ITemp
             { "PassportNo", new[] { "رقم الجواز" } },
             { "PassportEnd",new[] { "تاريخ انتهاء الجواز" } },
             { "SponsorNo",  new[] { "رقم صاحب العمل" } },
-            { "JobTitle",   new[] { "المهنة" } }
+            { "JobTitle",   new[] { "المهنة" } },
+            { "ExitReturn", new[] { "خارج المملكه"} },
+
         };
 
         for (int col = 1; col <= lastColumn; col++)
@@ -476,15 +558,24 @@ public class Temp(ApplicationDbcontext dbcontext) : ITemp
 }
 
 // Updated BulkUploadResult with new properties
+// NEW
 public record BulkUploadResult(
-    int TotalRows,
-    int NewEmployees,
-    int ExistingEmployees,
+    int TotalInDB,                                      // Employees in DB with sponsor الخدمة السريعة
+    int TotalInExcel,                                   // Valid rows found in Excel
+    int TotalPendingApproval,                           // Temp records needing review (PassportNo/End)
+    List<DirectUpdateInfo> DirectlyUpdated,             // IqamaEndH / SponsorNo / JobTitle applied immediately
     int SkippedRows,
     DateTime UploadedAt,
     string Message,
     List<EmployeeRowInfo> EmployeesInExcelNotInDB,
-    List<EmployeeRowInfo> EmployeesInDBNotInExcel
+    List<EmployeeRowInfo> EmployeesInDBNotInExcel,
+    List<string> ExitReturnNotes                        // خروج وعودة vs status mismatches
+);
+
+public record DirectUpdateInfo(
+    long IqamaNo,
+    string EmployeeNameEN,
+    List<string> ChangedFields                          // e.g. ["IqamaEndH: 1446/01/01 → 1447/01/01"]
 );
 // Response record for individual temp employee update
 public record TempEmployeeUpdateResponse(

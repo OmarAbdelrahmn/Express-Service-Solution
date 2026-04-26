@@ -10,6 +10,12 @@ namespace Application.Service.Member;
 
 public interface IMemberService
 {
+
+    Task<Result<HousingDetailedDailyPerformanceReport>> GetHousingDetailedDailyPerformanceForManagerAsync(
+    long managerIqamaNo,
+    DateOnly startDate,
+    DateOnly endDate,
+    CancellationToken cancellationToken = default);
     // Add to IMemberService interface
 
     /// <summary>
