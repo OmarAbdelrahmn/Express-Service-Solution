@@ -30,7 +30,7 @@ public class Temp(ApplicationDbcontext dbcontext) : ITemp
             // NEW — scope only to this sponsor
             var allEmployees = await dbcontext.Employees
                 .AsNoTracking()
-                .Where(e => e.Sponsor == "الخدمة السريعة")
+                .Where(e => e.Sponsor == "الخدمة السريعة"&& !e.IsDeleted)
                 .ToListAsync();
 
             int totalInDB = allEmployees.Count;
@@ -136,11 +136,11 @@ public class Temp(ApplicationDbcontext dbcontext) : ITemp
                     bool dbIsVacation = existingEmployee.Status?.Equals("vacation", StringComparison.OrdinalIgnoreCase) == true;
 
                     if (excelSaysVacation && !dbIsVacation)
+                    exitReturnNotes.Add(
+                    $"رقم الإقامة {IqamaNo} ({existingEmployee.NameEN}): في Excel 'خروج وعودة = نعم' لكن حالته في النظام '{existingEmployee.Status}' وليست إجازة.");
+                     else if (!excelSaysVacation && dbIsVacation)
                         exitReturnNotes.Add(
-                            $"IqamaNo {IqamaNo} ({existingEmployee.NameEN}): Excel يشير إلى 'خروج وعودة = نعم' لكن الحالة في النظام '{existingEmployee.Status}'");
-                    else if (!excelSaysVacation && dbIsVacation)
-                        exitReturnNotes.Add(
-                            $"IqamaNo {IqamaNo} ({existingEmployee.NameEN}): Excel يشير إلى 'خروج وعودة = لا' لكن الحالة في النظام 'vacation'");
+                            $"رقم الإقامة {IqamaNo} ({existingEmployee.NameEN}): في Excel 'خروج وعودة = لا' لكن حالته في النظام مسجلة كـ 'vacation'.");
                 }
 
 
@@ -210,20 +210,20 @@ public class Temp(ApplicationDbcontext dbcontext) : ITemp
 
                     if (item.NewIqamaEndH.HasValue)
                     {
-                        changedFields.Add($"IqamaEndH: {emp.IqamaEndH} → {item.NewIqamaEndH.Value}");
+                        changedFields.Add($"تاريخ انتهاء الإقامة بالهجري: {emp.IqamaEndH} ← {item.NewIqamaEndH.Value}");
                         emp.IqamaEndH = item.NewIqamaEndH.Value;
                         emp.IqamaEndM = HijriToGregorian(item.NewIqamaEndH.Value);
                     }
 
                     if (item.NewSponsorNo.HasValue)
                     {
-                        changedFields.Add($"SponsorNo: {emp.sponsorNo} → {item.NewSponsorNo.Value}");
+                        changedFields.Add($"رقم صاحب العمل: {emp.sponsorNo} ← {item.NewSponsorNo.Value}");
                         emp.sponsorNo = item.NewSponsorNo.Value;
                     }
 
                     if (item.NewJobTitle != null)
                     {
-                        changedFields.Add($"JobTitle: '{emp.JobTitle}' → '{item.NewJobTitle}'");
+                        changedFields.Add($"المهنة: '{emp.JobTitle}' ← '{item.NewJobTitle}'");
                         emp.JobTitle = item.NewJobTitle;
                     }
 
@@ -241,12 +241,12 @@ public class Temp(ApplicationDbcontext dbcontext) : ITemp
                 await dbcontext.SaveChangesAsync();
             }
 
-            // NEW
+
             string countNote = excelValidRowCount == totalInDB
-                ? $"Excel and DB both have {totalInDB} employees for sponsor الخدمة السريعة."
+                ? $"عدد الموظفين في Excel وقاعدة البيانات متطابق: {totalInDB} موظف لدى الكفيل 'الخدمة السريعة'."
                 : excelValidRowCount > totalInDB
-                    ? $"Excel has {excelValidRowCount} employees but DB has {totalInDB} — {excelValidRowCount - totalInDB} new employee(s) found in Excel not in DB."
-                    : $"DB has {totalInDB} employees but Excel has {excelValidRowCount} — {totalInDB - excelValidRowCount} employee(s) may have dropped from the system (see EmployeesInDBNotInExcel).";
+                    ? $"Excel يحتوي على {excelValidRowCount} موظف بينما قاعدة البيانات تحتوي على {totalInDB} — تم العثور على {excelValidRowCount - totalInDB} موظف جديد في Excel غير موجود في النظام."
+                    : $"قاعدة البيانات تحتوي على {totalInDB} موظف بينما Excel يحتوي على {excelValidRowCount} — يبدو أن {totalInDB - excelValidRowCount} موظف قد غادر أو سقط من النظام (راجع قائمة الموظفين الغائبين عن Excel).";
 
             var result = new BulkUploadResult(
                 TotalInDB: totalInDB,
@@ -255,7 +255,7 @@ public class Temp(ApplicationDbcontext dbcontext) : ITemp
                 DirectlyUpdated: directlyUpdatedInfos,
                 SkippedRows: skippedCount,
                 UploadedAt: DateTime.UtcNow.AddHours(3),
-                Message: $"{countNote} {directlyUpdatedInfos.Count} record(s) updated directly. {tempUpdates.Count} change(s) pending approval. {skippedCount} row(s) skipped.",
+                Message: $"{countNote} تم تحديث {directlyUpdatedInfos.Count} سجل مباشرةً. {tempUpdates.Count} تغيير بانتظار الموافقة. تم تجاهل {skippedCount} صف (لا يوجد تغيير).",
                 EmployeesInExcelNotInDB: newEmployeesFromExcel,
                 EmployeesInDBNotInExcel: missingFromExcel,
                 ExitReturnNotes: exitReturnNotes
@@ -363,14 +363,14 @@ public class Temp(ApplicationDbcontext dbcontext) : ITemp
                                 if (changedFields > 0)
                                 {
                                     dbcontext.Employees.Update(employee);
-                                    details.Add($"Updated employee: {employee.IqamaNo} - {employee.NameEN} ({changedFields} fields)");
+                                    details.Add($"تم تحديث الموظف: {employee.IqamaNo} - {employee.NameEN} ({changedFields} حقول)");
                                 }
                             }
                         }
                     }
                     else
                     {
-                        details.Add($"Rejected update for IqamaNo: {update.IqamaNo}");
+                        details.Add($"تم رفض التحديث لرقم الإقامة: {update.IqamaNo}");
                     }
 
                     update.IsResolved = true;
@@ -383,7 +383,7 @@ public class Temp(ApplicationDbcontext dbcontext) : ITemp
                 catch (Exception ex)
                 {
                     failedCount++;
-                    details.Add($"Failed for IqamaNo {update.IqamaNo}: {ex.Message}");
+                    details.Add($"فشلت العملية لرقم الإقامة {update.IqamaNo}: {ex.Message}");
                 }
             }
 
