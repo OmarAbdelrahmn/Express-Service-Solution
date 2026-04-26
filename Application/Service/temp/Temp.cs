@@ -137,10 +137,10 @@ public class Temp(ApplicationDbcontext dbcontext) : ITemp
 
                     if (excelSaysVacation && !dbIsVacation)
                     exitReturnNotes.Add(
-                    $"رقم الإقامة {IqamaNo} ({existingEmployee.NameEN}): في Excel 'خروج وعودة = نعم' لكن حالته في النظام '{existingEmployee.Status}' وليست إجازة.");
+                    $"رقم الإقامة {IqamaNo} ({existingEmployee.NameAR}): في Excel 'خروج وعودة = نعم' لكن حالته في النظام '{existingEmployee.Status}' وليست إجازة.");
                      else if (!excelSaysVacation && dbIsVacation)
                         exitReturnNotes.Add(
-                            $"رقم الإقامة {IqamaNo} ({existingEmployee.NameEN}): في Excel 'خروج وعودة = لا' لكن حالته في النظام مسجلة كـ 'vacation'.");
+                            $"رقم الإقامة {IqamaNo} ({existingEmployee.NameAR}): في Excel 'خروج وعودة = لا' لكن حالته في النظام مسجلة كـ 'إجازة'.");
                 }
 
 
