@@ -127,6 +127,15 @@ public class RiderController(IRiderService service) : ControllerBase
         return result.IsSuccess
             ? Ok(new Re("Rider Deleted Successfully")) : result.ToProblem();
     }
+    [HttpDelete("not/{IqamaNo:long}")]
+    //[Authorize(Roles = "Master,Admin")]
+    public async Task<IActionResult> NotDeleteRider(long IqamaNo)
+    {
+        var result = await service.NotDeleteAsync(IqamaNo);
+
+        return result.IsSuccess
+            ? Ok(new Re("Rider Not Deleted Successfully")) : result.ToProblem();
+    }
 
     [HttpPost("change-working-id")]
     [Authorize(Roles = "Master,Admin")]

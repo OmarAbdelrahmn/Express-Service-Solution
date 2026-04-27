@@ -23,6 +23,7 @@ public interface IRiderService
     Task<Result<IEnumerable<RiderResponse>>> Filter(EmployeeFilterr filter);
     Task<Result<VehicleResponse>> GetRiderVehicle(long IqamaNo);
     Task<Result<EmployeeStatusLogsWithInfoResponse>> GetStatusLogsAsync(long iqamaNo);
+    Task<Result> NotDeleteAsync(long IqamaNo, CancellationToken cancellationToken = default);
 }
 public record EmployeeStatisticsResponse(
     int Total,

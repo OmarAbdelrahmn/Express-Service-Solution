@@ -300,6 +300,38 @@ public class RiderService(ApplicationDbcontext dbcontext, IRiderWorkingIdHistory
             return Result.Failure(new Error("ServerError", ex.Message, 500));
         }
     }
+    public async Task<Result> NotDeleteAsync(long IqamaNo, CancellationToken cancellationToken = default)
+    {
+        using var transaction = await dbcontext.Database.BeginTransactionAsync(cancellationToken);
+
+        try
+        {
+            var employee = await dbcontext.Employees
+                .Include(c => c.RiderDetails)
+                .FirstOrDefaultAsync(c => c.IqamaNo == IqamaNo, cancellationToken);
+
+            if (employee is null)
+                return Result.Failure(new Error("NotFound",
+                    "Employee/Rider not found with this Iqama", 404));
+
+            if (!employee.IsDeleted)
+                return Result.Failure(new Error("NotDeleted",
+                    "Employee/Rider is not deleted", 400));
+
+            // ✅ Soft delete: Mark as deleted instead of removing
+            employee.IsDeleted = false;
+
+            await dbcontext.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+
+            return Result.Success();
+        }
+        catch (Exception ex)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            return Result.Failure(new Error("ServerError", ex.Message, 500));
+        }
+    }
     public async Task<Result<RiderResponse>> UpdateAsync(long IqamaNo, URiderRequest request ,string userId)
     {
         using var transaction = await dbcontext.Database.BeginTransactionAsync();
