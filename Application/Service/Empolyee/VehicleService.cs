@@ -521,7 +521,29 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
                 .FirstOrDefaultAsync(x => x.EmployeeIqamaNo == IqamaNo);
 
             if (rider == null)
-                return Result.Failure(new Error("NoRider", "No rider found with this Iqama", 400));
+            {
+                // Check if the employee at least exists
+                var employee = await dbcontext.Employees
+                    .FirstOrDefaultAsync(e => e.IqamaNo == IqamaNo);
+
+                if (employee == null)
+                    return Result.Failure(new Error("NoEmployee",
+                        "No employee found with this Iqama", 404));
+
+                // Auto-create RiderDetails
+                rider = new RiderDetails
+                {
+                    EmployeeIqamaNo = IqamaNo,
+                    CompanyId = 1,  // ⚠️ Set your default CompanyId here, or add it as a parameter
+                    CreatedAt = DateTime.UtcNow.AddHours(3)
+                };
+
+                rider.Employee = employee; // Attach so status check below works
+
+                dbcontext.RiderDetails.Add(rider);
+            }
+
+
 
             if (rider.Employee.Status != "enable")
                 return Result.Failure(new Error("RiderDisabled", "Rider is disabled and cannot take a vehicle", 403));
@@ -950,7 +972,26 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
                 .FirstOrDefaultAsync(r => r.EmployeeIqamaNo == request.RiderIqamaNo);
 
             if (rider is null)
-                return Result.Failure(new Error("NoRider found", "Rider not found", 404));
+            {
+                var employee = await dbcontext.Employees
+                    .FirstOrDefaultAsync(e => e.IqamaNo == request.RiderIqamaNo);
+
+                if (employee == null)
+                    return Result.Failure(new Error("NoEmployee",
+                        "No employee found with this Iqama", 404));
+
+                rider = new RiderDetails
+                {
+                    EmployeeIqamaNo = request.RiderIqamaNo,
+                    CompanyId = 1, // ⚠️ Set your default CompanyId or add to request
+                    CreatedAt = DateTime.UtcNow.AddHours(3)
+                };
+
+                rider.Employee = employee;
+
+                dbcontext.RiderDetails.Add(rider);
+                await dbcontext.SaveChangesAsync();
+            }
 
             if (rider.Employee.Status != "enable")
                 return Result.Failure(new Error("RiderDisabled", "Rider is disabled and cannot take a vehicle", 403));
