@@ -260,6 +260,15 @@ public class ReportController(IReportService service) : ControllerBase
             riderIqamaNo);
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
+    [HttpGet("rider-history2")]
+    public async Task<IActionResult> GetRiderHistory2(
+        [FromQuery] long riderIqamaNo)
+
+    {
+        var result = await service.GetRiderMonthlyHistoryAsync2(
+            riderIqamaNo);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
 
     /// <summary>
     /// Get summary report for ALL riders across all housings

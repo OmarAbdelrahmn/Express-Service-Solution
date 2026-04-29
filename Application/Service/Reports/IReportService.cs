@@ -492,6 +492,11 @@ public interface IReportService
         DateOnly reportDate,
         CancellationToken cancellationToken = default);
 
+
+    Task<Result<RiderMonthlyHistorys>> GetRiderMonthlyHistoryAsync2(
+     long riderIqamaNo,
+     CancellationToken cancellationToken = default);
+
     /// <summary>
     /// Get detailed daily report with individual riders grouped by housing
     /// </summary>

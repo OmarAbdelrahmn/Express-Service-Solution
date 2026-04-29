@@ -722,7 +722,7 @@ public class DashboardService(ApplicationDbcontext dbcontext) : IDashboardServic
             var data = await dbcontext.RiderDetails
                 .Include(rd => rd.Employee)
                 .Include(rd => rd.Company)
-                .Where(rd => !rd.Employee.IsDeleted)
+                .Where(rd => !rd.Employee.IsDeleted && !rd.Employee.IsEmployee)
                 .GroupBy(rd => new { rd.CompanyId, rd.Company.Name })
                 .Select(g => new
                 {

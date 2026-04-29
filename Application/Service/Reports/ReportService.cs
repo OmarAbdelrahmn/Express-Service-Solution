@@ -3925,6 +3925,83 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                 new Error($"Error generating rider monthly history: {ex.Message}", "server_error", 500));
         }
     }
+    public async Task<Result<RiderMonthlyHistorys>> GetRiderMonthlyHistoryAsync2(
+     long riderIqamaNo,
+     CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            // Get rider details
+            var rider = await _dbcontext.RiderDetails
+                .Include(r => r.Employee)
+                .FirstOrDefaultAsync(r => r.EmployeeIqamaNo == riderIqamaNo, cancellationToken);
+
+            if (rider == null)
+            {
+                return Result.Failure<RiderMonthlyHistorys>(
+                    new Error($"Rider with Iqama number {riderIqamaNo} not found", "not_found", 404));
+            }
+
+            // Get all shifts for this rider
+            var shifts = await _dbcontext.RiderShifts
+                .Where(s => s.RiderId == rider.Id && s.CompanyId == 2)
+                .OrderBy(s => s.ShiftDate)
+                .AsNoTracking()
+                .ToListAsync(cancellationToken);
+
+            if (!shifts.Any())
+            {
+                return Result.Failure<RiderMonthlyHistorys>(
+                    new Error("No shift history found for this rider", "no_data", 404));
+            }
+
+            // Calculate monthly summaries
+            var firstShiftDate = shifts.First().ShiftDate;
+            var lastShiftDate = shifts.Last().ShiftDate;
+            var today = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3));
+
+            // Use the later of last shift date or today
+            var endDate = lastShiftDate > today ? lastShiftDate : today;
+
+            var monthlyData = GenerateMonthlyShiftSummaries(shifts, firstShiftDate, endDate);
+
+            // Get active months (months with orders > 0)
+            var activeMonths = monthlyData
+                .Where(m => m.TotalAcceptedOrders > 0)
+                .ToList();
+
+            var activeMonthNumbers = activeMonths
+                .Select(m => m.Month)
+                .ToList();
+
+            var activeMonthsCount = activeMonths.Count;
+
+            // Calculate average orders per active month
+            var avgOrdersPerActiveMonth = activeMonthsCount > 0
+                ? (decimal)activeMonths.Sum(m => m.TotalAcceptedOrders) / activeMonthsCount
+                : 0;
+
+            var history = new RiderMonthlyHistorys(
+                IqamaNo: riderIqamaNo,
+                RiderName: rider.Employee.NameAR,
+                WorkingId: rider.WorkingId ?? "0",
+                FirstShiftDate: firstShiftDate,
+                LastShiftDate: lastShiftDate,
+                TotalMonths: monthlyData.Count,
+                ActiveMonthsCount: activeMonthsCount,
+                AverageOrdersPerActiveMonth: avgOrdersPerActiveMonth,
+                ActiveMonthNumbers: activeMonthNumbers,
+                MonthlyData: monthlyData
+            );
+
+            return Result.Success(history);
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<RiderMonthlyHistorys>(
+                new Error($"Error generating rider monthly history: {ex.Message}", "server_error", 500));
+        }
+    }
     // Helper method for generating monthly summaries
     private List<MonthlyShiftSummary> GenerateMonthlyShiftSummaries(
         List<RiderShift> shifts,
