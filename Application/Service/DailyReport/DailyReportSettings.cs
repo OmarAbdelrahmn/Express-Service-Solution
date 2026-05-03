@@ -10,4 +10,6 @@ public class DailyReportSettings
     public string FromEmail { get; set; } = string.Empty;
     public string FromName { get; set; } = string.Empty;
     public bool UseSsl { get; set; } = true;
+    // In DailyReportSettings.cs — optional addition
+    public string ImapHost { get; set; } = string.Empty; // fallback to SmtpHost if empty
 }

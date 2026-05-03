@@ -3,7 +3,7 @@ using MailKit.Security;
 using Microsoft.Extensions.Options;
 using MimeKit;
 using Application.Service.DailyReport;
-using Application.EmailWarmup; // reuse DailyReportSettings
+using Application.EmailWarmup;
 
 namespace Application.Service.EmailWarmup;
 
@@ -27,11 +27,13 @@ public class EmailWarmupJob : IEmailWarmupJob
         message.To.Add(MailboxAddress.Parse(toEmail));
         message.Subject = subject;
         message.Headers.Add("Content-Language", "ar");
+        message.Date = DateTimeOffset.Now;
 
-        var bodyBuilder = new BodyBuilder
-        {
-            TextBody = body
-        };
+        // BCC yourself — copy lands in your inbox
+        // Then set a webmail filter to auto-move it to Sent folder
+        message.Bcc.Add(MailboxAddress.Parse(_settings.FromEmail));
+
+        var bodyBuilder = new BodyBuilder { TextBody = body };
         message.Body = bodyBuilder.ToMessageBody();
 
         using var smtp = new SmtpClient();
