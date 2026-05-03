@@ -1,3 +1,4 @@
+using Application.EmailWarmup;
 using Application.Service.DailyReport;
 using Application.Service.VehiclePermission;
 using Express_Service;
@@ -75,6 +76,16 @@ RecurringJob.AddOrUpdate<IVehiclePermissionRenewalJob>(
     {
         TimeZone = TimeZoneInfo.FindSystemTimeZoneById("Arab Standard Time")
     });
+
+RecurringJob.AddOrUpdate<IEmailWarmupJob>(
+    "email-warmup",
+    x => x.RunAsync(CancellationToken.None),
+    "*/20 9-17 * * *",   // Every 20 min, between 9:00 and 17:59
+    new RecurringJobOptions
+    {
+        TimeZone = TimeZoneInfo.FindSystemTimeZoneById("Arab Standard Time")
+    });
+
 
 app.UseStaticFiles();
 

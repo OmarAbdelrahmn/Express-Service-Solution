@@ -1,4 +1,5 @@
 ﻿using Application.Authentication;
+using Application.EmailWarmup;
 using Application.Roles;
 using Application.Service.Admin;
 using Application.Service.AI;
@@ -8,6 +9,7 @@ using Application.Service.Dahsboard;
 using Application.Service.DailyReport;
 using Application.Service.Dashboard;
 using Application.Service.DE;
+using Application.Service.EmailWarmup;
 using Application.Service.EmployeesFiles;
 using Application.Service.Empolyee;
 using Application.Service.EscapedEmployee;
@@ -88,6 +90,7 @@ public static class ApplicationDependencies
         Services.AddScoped<IPetrolService, PetrolService>();
         Services.AddScoped<IVehiclePermissionRenewalJob, VehiclePermissionRenewalJob>();
         Services.AddScoped<IGeminiService, GeminiService>();
+        Services.AddScoped<IEmailWarmupJob, EmailWarmupJob>();
 
 
         #region Hnagfire + Daily Report Job
