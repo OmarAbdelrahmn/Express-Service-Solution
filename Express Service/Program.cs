@@ -18,8 +18,7 @@ builder.Services.AddCors(options =>
         {
             policy.WithOrigins(
                       "http://localhost:3000",
-                      "https://fastexp.netlify.app",
-                      "https://forsenex.com"
+                      "https://expserco.com"
                   )
                   .AllowAnyHeader()
                   .AllowAnyMethod()
