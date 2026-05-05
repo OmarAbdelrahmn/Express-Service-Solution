@@ -138,7 +138,6 @@ public class EscapedEmployeeController(IEscapedEmployeeService service) : Contro
 
     // DELETE api/escaped/{iqamaNo}/force
     [HttpDelete("{iqamaNo:long}/force")]
-    [Authorize(Roles = "Admin")]          
     public async Task<IActionResult> ForceDelete(
         long iqamaNo,
         CancellationToken ct)
