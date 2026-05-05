@@ -20,6 +20,7 @@ using Application.Service.Import;
 using Application.Service.KetaValidation;
 using Application.Service.Member;
 using Application.Service.MonthlyValidity;
+using Application.Service.Orders;
 using Application.Service.Petrol;
 using Application.Service.Reports;
 using Application.Service.Return;
@@ -91,6 +92,7 @@ public static class ApplicationDependencies
         Services.AddScoped<IVehiclePermissionRenewalJob, VehiclePermissionRenewalJob>();
         Services.AddScoped<IGeminiService, GeminiService>();
         Services.AddScoped<IEmailWarmupJob, EmailWarmupJob>();
+        Services.AddScoped<IOrderService, OrderService>();
 
 
         #region Hnagfire + Daily Report Job

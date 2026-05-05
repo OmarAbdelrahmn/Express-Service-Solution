@@ -51,6 +51,7 @@ public class ApplicationDbcontext(DbContextOptions<ApplicationDbcontext> options
 
     public DbSet<VehiclePetrolCost>  VehiclePetrolCosts  { get; set; }
     public DbSet<RiderPetrolCost> RiderPetrolCosts { get; set; }
+    public DbSet<EmployeeOrder> EmployeeOrders{ get; set; }
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplyConfigurationsFromAssembly(Assembly.GetExecutingAssembly());
