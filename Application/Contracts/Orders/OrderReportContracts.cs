@@ -20,7 +20,8 @@ public record Company4EmployeeResponse(
     // Today's order snapshot
     bool IsCurrentlyOnOrder,
     int TotalOrdersToday,
-    DateTime? CurrentOrderStartedAt
+    DateTime? CurrentOrderStartedAt,
+    string? ProfileImagePath
 );
 
 // ── Single Order Detail ───────────────────────────────────────────────────────
