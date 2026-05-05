@@ -21,7 +21,7 @@ public class OrderService(ApplicationDbcontext dbcontext) : IOrderService
 
         // IqamaNos in company 4
         var eligibleIqamas = await dbcontext.RiderDetails
-            .Where(r => r.CompanyId == 4)
+            .Where(r => r.CompanyId == 3)
             .Select(r => new { r.EmployeeIqamaNo, r.WorkingId })
             .ToListAsync();
 
@@ -32,7 +32,7 @@ public class OrderService(ApplicationDbcontext dbcontext) : IOrderService
         var iqamaSet = eligibleIqamas.Select(x => x.EmployeeIqamaNo).ToList();
 
         var employees = await dbcontext.Employees
-            .Where(e => iqamaSet.Contains(e.IqamaNo) && e.IsEmployee && e.Status.ToLower() == "enable")
+            .Where(e => iqamaSet.Contains(e.IqamaNo)  && e.Status.ToLower() == "enable")
             .Include(e => e.Housing)
             .AsNoTracking()
             .ToListAsync();
@@ -89,7 +89,7 @@ public class OrderService(ApplicationDbcontext dbcontext) : IOrderService
 
         var riderDetail = await dbcontext.RiderDetails
             .AsNoTracking()
-            .FirstOrDefaultAsync(r => r.EmployeeIqamaNo == iqamaNo && r.CompanyId == 4);
+            .FirstOrDefaultAsync(r => r.EmployeeIqamaNo == iqamaNo && r.CompanyId == 3);
 
         if (riderDetail is null)
             return Result.Failure<Company4EmployeeResponse>(
@@ -99,7 +99,7 @@ public class OrderService(ApplicationDbcontext dbcontext) : IOrderService
         var employee = await dbcontext.Employees
             .Include(e => e.Housing)
             .AsNoTracking()
-            .FirstOrDefaultAsync(e => e.IqamaNo == iqamaNo && e.IsEmployee && e.Status.ToLower() == "enable");
+            .FirstOrDefaultAsync(e => e.IqamaNo == iqamaNo  && e.Status.ToLower() == "enable");
 
         if (employee is null)
             return Result.Failure<Company4EmployeeResponse>(
@@ -145,7 +145,7 @@ public class OrderService(ApplicationDbcontext dbcontext) : IOrderService
         // Validate employee: IsEmployee, enable, company 4
         var riderDetail = await dbcontext.RiderDetails
             .AsNoTracking()
-            .FirstOrDefaultAsync(r => r.EmployeeIqamaNo == request.EmployeeIqamaNo && r.CompanyId == 4);
+            .FirstOrDefaultAsync(r => r.EmployeeIqamaNo == request.EmployeeIqamaNo && r.CompanyId == 3);
 
         if (riderDetail is null)
             return Result.Failure<OrderDetailResponse>(new Error(
@@ -155,7 +155,6 @@ public class OrderService(ApplicationDbcontext dbcontext) : IOrderService
             .Include(e => e.Housing)
             .FirstOrDefaultAsync(e =>
                 e.IqamaNo == request.EmployeeIqamaNo &&
-                e.IsEmployee &&
                 e.Status.ToLower() == "enable");
 
         if (employee is null)
@@ -244,7 +243,7 @@ public class OrderService(ApplicationDbcontext dbcontext) : IOrderService
     {
         var riderDetail = await dbcontext.RiderDetails
             .AsNoTracking()
-            .FirstOrDefaultAsync(r => r.EmployeeIqamaNo == iqamaNo && r.CompanyId == 4);
+            .FirstOrDefaultAsync(r => r.EmployeeIqamaNo == iqamaNo && r.CompanyId == 3);
 
         if (riderDetail is null)
             return Result.Failure<EmployeeOrderHistoryResponse>(new Error(
@@ -310,14 +309,14 @@ public class OrderService(ApplicationDbcontext dbcontext) : IOrderService
 
         // All eligible employees
         var eligibleIqamas = await dbcontext.RiderDetails
-            .Where(r => r.CompanyId == 4)
+            .Where(r => r.CompanyId == 3)
             .Select(r => new { r.EmployeeIqamaNo, r.WorkingId })
             .ToListAsync();
 
         var iqamaSet = eligibleIqamas.Select(x => x.EmployeeIqamaNo).ToList();
 
         var employees = await dbcontext.Employees
-            .Where(e => iqamaSet.Contains(e.IqamaNo) && e.IsEmployee && e.Status.ToLower() == "enable")
+            .Where(e => iqamaSet.Contains(e.IqamaNo)  && e.Status.ToLower() == "enable")
             .Include(e => e.Housing)
             .AsNoTracking()
             .ToListAsync();
@@ -402,14 +401,14 @@ public class OrderService(ApplicationDbcontext dbcontext) : IOrderService
     {
         // All eligible employees
         var eligibleIqamas = await dbcontext.RiderDetails
-            .Where(r => r.CompanyId == 4)
+            .Where(r => r.CompanyId == 3)
             .Select(r => new { r.EmployeeIqamaNo, r.WorkingId })
             .ToListAsync();
 
         var iqamaSet = eligibleIqamas.Select(x => x.EmployeeIqamaNo).ToList();
 
         var employees = await dbcontext.Employees
-            .Where(e => iqamaSet.Contains(e.IqamaNo) && e.IsEmployee && e.Status.ToLower() == "enable")
+            .Where(e => iqamaSet.Contains(e.IqamaNo)  && e.Status.ToLower() == "enable")
             .Include(e => e.Housing)
             .AsNoTracking()
             .ToListAsync();
@@ -487,7 +486,7 @@ public class OrderService(ApplicationDbcontext dbcontext) : IOrderService
         DateTime end)
     {
         var eligibleIqamas = await dbcontext.RiderDetails
-            .Where(r => r.CompanyId == 4)
+            .Where(r => r.CompanyId == 3)
             .Select(r => new { r.EmployeeIqamaNo, r.WorkingId })
             .ToListAsync();
 
@@ -566,13 +565,12 @@ public class OrderService(ApplicationDbcontext dbcontext) : IOrderService
         var today = DateOnly.FromDateTime(now);
 
         var eligibleIqamas = await dbcontext.RiderDetails
-            .Where(r => r.CompanyId == 4)
+            .Where(r => r.CompanyId == 3)
             .Select(r => r.EmployeeIqamaNo)
             .ToListAsync();
 
         var totalEligible = await dbcontext.Employees
             .CountAsync(e => eligibleIqamas.Contains(e.IqamaNo)
-                          && e.IsEmployee
                           && e.Status.ToLower() == "enable");
 
         var allOrders = await dbcontext.EmployeeOrders
