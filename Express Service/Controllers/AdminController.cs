@@ -26,7 +26,7 @@ public class AdminController(IAdminService service, IUserService service1) : Con
     //}
 
     [HttpGet("adminreset")]
-    [Authorize(Roles = "Master")]
+    //[Authorize(Roles = "Master")]
     public async Task<IActionResult> AdminReset(string UserName)
     {
         var result = await service.ResetPasswordAsync(UserName);
