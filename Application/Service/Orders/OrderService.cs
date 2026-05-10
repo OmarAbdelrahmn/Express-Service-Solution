@@ -694,7 +694,7 @@ public class OrderService(ApplicationDbcontext dbcontext) : IOrderService
             var ordersByEmployee = allOrders
                 .GroupBy(o => o.EmployeeIqamaNo)
                 .ToDictionary(
-                    g => g.First().Employee?.NameEN ?? g.Key.ToString(),
+                    g => g.First().Employee?.NameAR ?? g.Key.ToString(),
                     g => g.Count());
 
             var minutesByEmployee = closedOrders
