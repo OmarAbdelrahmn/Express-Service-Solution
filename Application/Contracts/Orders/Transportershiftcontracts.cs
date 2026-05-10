@@ -4,6 +4,52 @@
 // Import / Parse
 // ═══════════════════════════════════════════════════════════════════════════════
 
+
+/// <summary>
+/// Represents a single parsed cell from the transporter schedule Excel grid.
+/// One cell = one rider × one calendar day.
+/// </summary>
+public record ImportScheduleCell(
+    /// <summary>
+    /// Column B value — maps to RiderDetails.WorkingId.
+    /// </summary>
+    string TransporterId,
+
+    /// <summary>
+    /// Column A value — used for warning messages only, not stored.
+    /// </summary>
+    string AssociateName,
+
+    /// <summary>
+    /// Raw column header text, e.g. "Sun, 03/May".
+    /// Parsed into a DateOnly by ScheduleHeaderParser inside the service.
+    /// </summary>
+    string ColumnHeader,
+
+    /// <summary>
+    /// Raw cell content. Examples:
+    ///   "Driver • 6 PM • 5h"                          → single shift
+    ///   "Driver • 6 PM • 5h\nDriver • 12 PM • 5h"    → two shifts
+    ///   null / empty                                   → break day
+    /// </summary>
+    string? CellContent
+);
+
+/// <summary>
+/// Request payload for ImportScheduleAsync.
+/// Produced either by the Excel parser or supplied directly as JSON.
+/// </summary>
+public record ImportTransporterScheduleRequest(
+    /// <summary>All rider × day cells extracted from the schedule.</summary>
+    List<ImportScheduleCell> Cells,
+
+    /// <summary>
+    /// Optional year override. When null the service infers the year from
+    /// the current Saudi time (UTC+3), bumping to the next year when the
+    /// parsed month is January and the current month is December.
+    /// </summary>
+    int? OverrideYear = null
+);
 /// <summary>
 /// One cell from the Excel sheet, already extracted by the client.
 /// Column headers (e.g. "Sun, 03/May") are parsed server-side.
@@ -15,11 +61,6 @@ public record ExcelShiftCell(
     string CellContent          // e.g. "Driver • 6 PM • 5h\nDriver • 12 PM • 5h"
 );
 
-/// <summary>Bulk import request – the full parsed grid from one Excel file/sheet.</summary>
-public record ImportTransporterScheduleRequest(
-    List<ExcelShiftCell> Cells,
-    int? OverrideYear = null    // Optional – defaults to current year
-);
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Responses

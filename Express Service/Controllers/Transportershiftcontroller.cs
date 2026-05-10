@@ -1,4 +1,5 @@
 ﻿using Application.Contracts.TransporterShifts;
+using Application.Service.Orders;
 using Application.Service.TransporterShifts;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -37,17 +38,67 @@ public class TransporterShiftController(ITransporterShiftService service) : Cont
     ///
     /// Existing shifts for the same (riderId, date) are replaced atomically.
     /// </summary>
-    [HttpPost("import")]
+    [HttpPost("upload")]
     [Authorize(Roles = "Master,Admin")]
-    public async Task<IActionResult> Import([FromBody] ImportTransporterScheduleRequest request)
+    [RequestSizeLimit(10 * 1024 * 1024)] // 10 MB cap – schedule files are tiny
+    public async Task<IActionResult> UploadSchedule(
+            IFormFile file,
+            [FromQuery] int? overrideYear = null)
     {
-        if (request.Cells is null || request.Cells.Count == 0)
-            return BadRequest(new { error = "No cells provided." });
+        // ── Basic validation ──────────────────────────────────────────────
+        if (file is null || file.Length == 0)
+            return BadRequest(new { error = "No file uploaded." });
 
-        var result = await service.ImportScheduleAsync(request, Actor);
-        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+        var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
+        if (ext is not ".xlsx" and not ".xls")
+            return BadRequest(new { error = "Only .xlsx / .xls files are accepted." });
+
+        // ── Parse Excel → ImportTransporterScheduleRequest ────────────────
+        List<string> parserWarnings;
+        Application.Contracts.TransporterShifts.ImportTransporterScheduleRequest importRequest;
+
+        try
+        {
+            await using var stream = file.OpenReadStream();
+            (importRequest, parserWarnings) =
+                TransporterScheduleExcelParser.Parse(stream, overrideYear);
+        }
+        catch (InvalidOperationException ex)
+        {
+            // Sheet structure problems (no worksheets, no date columns, …)
+            return BadRequest(new { error = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { error = $"Failed to read Excel file: {ex.Message}" });
+        }
+
+        if (importRequest.Cells.Count == 0)
+            return BadRequest(new
+            {
+                error = "The file contained no data rows to import.",
+                parserWarnings
+            });
+
+        // ── Hand off to the service (same path as the JSON import) ────────
+        var result = await service.ImportScheduleAsync(importRequest, Actor);
+
+        if (!result.IsSuccess)
+            return result.ToProblem();
+
+        // Merge parser warnings into the response so callers see everything
+        return Ok(new
+        {
+            result.Value.TotalCellsProcessed,
+            result.Value.ShiftsCreated,
+            result.Value.BreakDaysMarked,
+            result.Value.UnmatchedTransporterIds,
+            Warnings = result.Value.Warnings.Concat(parserWarnings).ToList(),
+            ParserWarningsOnly = parserWarnings
+        });
     }
 
+ 
     // ═══════════════════════════════════════════════════════════════════════
     // Schedule Queries
     // ═══════════════════════════════════════════════════════════════════════
