@@ -35,14 +35,14 @@ public class OrderService(ApplicationDbcontext dbcontext) : IOrderService
             var employees = await dbcontext.Employees
                 .Where(e => iqamaSet.Contains(e.IqamaNo) && e.Status.ToLower() == "enable")
                 .Include(e => e.Housing)
-                .Include(e => e.EmployeeDocuments)   // ← ADD THIS
+                .Include(e => e.EmployeeDocuments)
                 .AsNoTracking()
                 .ToListAsync();
 
             if (employees.Count == 0)
                 return Result.Failure<IEnumerable<Company4EmployeeResponse>>(
                     new Error("Company4.NoActiveEmployees",
-                        "No active (enable + IsEmployee) employees found in Company 4.", 404));
+                        "No active employees found in Company 4.", 404));
 
             var todayOrders = await dbcontext.EmployeeOrders
                 .Where(o => iqamaSet.Contains(o.EmployeeIqamaNo) && o.OrderDate == today)
@@ -77,7 +77,7 @@ public class OrderService(ApplicationDbcontext dbcontext) : IOrderService
                     IsCurrentlyOnOrder: openOrder is not null,
                     TotalOrdersToday: empOrders.Count,
                     CurrentOrderStartedAt: openOrder?.StartedAt,
-                    ProfileImagePath: emp.EmployeeDocuments?.ProfileImagePath  // ← ADD THIS
+                    ProfileImagePath: emp.EmployeeDocuments?.ProfileImagePath
                 );
             }).ToList();
 
@@ -108,7 +108,7 @@ public class OrderService(ApplicationDbcontext dbcontext) : IOrderService
 
             var employee = await dbcontext.Employees
                 .Include(e => e.Housing)
-                .Include(e => e.EmployeeDocuments)   // ← ADD THIS
+                .Include(e => e.EmployeeDocuments)
                 .AsNoTracking()
                 .FirstOrDefaultAsync(e => e.IqamaNo == iqamaNo && e.Status.ToLower() == "enable");
 
@@ -142,7 +142,7 @@ public class OrderService(ApplicationDbcontext dbcontext) : IOrderService
                 IsCurrentlyOnOrder: openOrder is not null,
                 TotalOrdersToday: todayOrders.Count,
                 CurrentOrderStartedAt: openOrder?.StartedAt,
-                ProfileImagePath: employee.EmployeeDocuments?.ProfileImagePath  // ← ADD THIS
+                ProfileImagePath: employee.EmployeeDocuments?.ProfileImagePath
             ));
         }
         catch (Exception ex)
@@ -165,7 +165,8 @@ public class OrderService(ApplicationDbcontext dbcontext) : IOrderService
         {
             var riderDetail = await dbcontext.RiderDetails
                 .AsNoTracking()
-                .FirstOrDefaultAsync(r => r.EmployeeIqamaNo == request.EmployeeIqamaNo && r.CompanyId == 3);
+                .FirstOrDefaultAsync(r => r.EmployeeIqamaNo == request.EmployeeIqamaNo
+                                       && r.CompanyId == 3);
 
             if (riderDetail is null)
                 return Result.Failure<OrderDetailResponse>(new Error(
@@ -185,6 +186,7 @@ public class OrderService(ApplicationDbcontext dbcontext) : IOrderService
             var now = DateTime.UtcNow.AddHours(3);
             var today = DateOnly.FromDateTime(now);
 
+            // Auto-close any open order for today before creating a new one
             var openOrder = await dbcontext.EmployeeOrders
                 .Where(o => o.EmployeeIqamaNo == request.EmployeeIqamaNo
                          && o.OrderDate == today
@@ -334,12 +336,10 @@ public class OrderService(ApplicationDbcontext dbcontext) : IOrderService
             var distinctDays = orders.Select(o => o.OrderDate).Distinct().Count();
 
             double avgOrdersPerDay = distinctDays > 0
-                ? Math.Round((double)orders.Count / distinctDays, 2)
-                : 0;
+                ? Math.Round((double)orders.Count / distinctDays, 2) : 0;
 
             double avgMinutesPerOrder = closedOrders.Count > 0
-                ? Math.Round(totalMinutes / closedOrders.Count, 2)
-                : 0;
+                ? Math.Round(totalMinutes / closedOrders.Count, 2) : 0;
 
             var details = orders
                 .Select(o => MapToDetail(o, employee, riderDetail.WorkingId))
@@ -393,7 +393,9 @@ public class OrderService(ApplicationDbcontext dbcontext) : IOrderService
                 .ToListAsync();
 
             var activeOrders = await dbcontext.EmployeeOrders
-                .Where(o => o.OrderDate == today && o.EndedAt == null && iqamaSet.Contains(o.EmployeeIqamaNo))
+                .Where(o => o.OrderDate == today
+                         && o.EndedAt == null
+                         && iqamaSet.Contains(o.EmployeeIqamaNo))
                 .ToListAsync();
 
             var activeIqamas = activeOrders.Select(o => o.EmployeeIqamaNo).ToHashSet();
@@ -447,7 +449,7 @@ public class OrderService(ApplicationDbcontext dbcontext) : IOrderService
                         IsCurrentlyOnOrder: false,
                         TotalOrdersToday: empOrders.Count,
                         CurrentOrderStartedAt: null,
-                        null
+                        ProfileImagePath: null
                     );
                 }).ToList();
 
@@ -506,10 +508,7 @@ public class OrderService(ApplicationDbcontext dbcontext) : IOrderService
 
             var employeeSummaries = employees.Select(emp =>
             {
-                var empOrders = orders
-                    .Where(o => o.EmployeeIqamaNo == emp.IqamaNo)
-                    .ToList();
-
+                var empOrders = orders.Where(o => o.EmployeeIqamaNo == emp.IqamaNo).ToList();
                 var closedOrders = empOrders.Where(o => o.EndedAt.HasValue).ToList();
 
                 double totalMinutes = closedOrders
@@ -673,20 +672,18 @@ public class OrderService(ApplicationDbcontext dbcontext) : IOrderService
 
             var todayOrders = allOrders.Where(o => o.OrderDate == today).ToList();
             var activeNow = todayOrders.Count(o => o.EndedAt == null);
-
             var closedOrders = allOrders.Where(o => o.EndedAt.HasValue).ToList();
 
             double totalMinutes = closedOrders
                 .Sum(o => (o.EndedAt!.Value - o.StartedAt).TotalMinutes);
 
             var distinctDays = allOrders.Select(o => o.OrderDate).Distinct().Count();
+
             double avgOrdersPerDay = distinctDays > 0
-                ? Math.Round((double)allOrders.Count / distinctDays, 2)
-                : 0;
+                ? Math.Round((double)allOrders.Count / distinctDays, 2) : 0;
 
             double avgMinutesPerOrder = closedOrders.Count > 0
-                ? Math.Round(totalMinutes / closedOrders.Count, 2)
-                : 0;
+                ? Math.Round(totalMinutes / closedOrders.Count, 2) : 0;
 
             var ordersByMonth = allOrders
                 .GroupBy(o => $"{o.OrderDate.Year}-{o.OrderDate.Month:D2}")
@@ -698,15 +695,13 @@ public class OrderService(ApplicationDbcontext dbcontext) : IOrderService
                 .GroupBy(o => o.EmployeeIqamaNo)
                 .ToDictionary(
                     g => g.First().Employee?.NameEN ?? g.Key.ToString(),
-                    g => g.Count()
-                );
+                    g => g.Count());
 
             var minutesByEmployee = closedOrders
                 .GroupBy(o => o.EmployeeIqamaNo)
                 .ToDictionary(
                     g => g.First().Employee?.NameEN ?? g.Key.ToString(),
-                    g => Math.Round(g.Sum(o => (o.EndedAt!.Value - o.StartedAt).TotalMinutes), 2)
-                );
+                    g => Math.Round(g.Sum(o => (o.EndedAt!.Value - o.StartedAt).TotalMinutes), 2));
 
             return Result.Success(new OrderStatisticsResponse(
                 GeneratedAt: now,
@@ -731,8 +726,236 @@ public class OrderService(ApplicationDbcontext dbcontext) : IOrderService
     }
 
     // ══════════════════════════════════════════════════════════════════════════
+    // Dispatch  (Shift-Aware)
+    // ══════════════════════════════════════════════════════════════════════════
+
+    public Task<Result<DispatchSnapshotResponse>> GetDispatchNowAsync()
+    {
+        var now = DateTime.UtcNow.AddHours(3);
+        return GetDispatchAtAsync(
+            DateOnly.FromDateTime(now),
+            TimeOnly.FromDateTime(now));
+    }
+
+    public async Task<Result<DispatchSnapshotResponse>> GetDispatchAtAsync(
+        DateOnly date, TimeOnly time)
+    {
+        try
+        {
+            var (riders, shifts, orderMap) = await LoadDispatchDataAsync(date);
+
+            var active = new List<DispatchRiderResponse>();
+            var inactive = new List<DispatchRiderResponse>();
+
+            foreach (var rider in riders)
+            {
+                var dayShifts = shifts
+                    .Where(s => s.RiderId == rider.Id)
+                    .OrderBy(s => s.ShiftIndex)
+                    .ToList();
+
+                bool isBreak = dayShifts.Any(s => s.IsBreakDay);
+                bool onShift = !isBreak && dayShifts.Any(s =>
+                                    s.StartTime.HasValue &&
+                                    s.EndTime.HasValue &&
+                                    IsTimeInShift(s.StartTime.Value, s.EndTime.Value, time));
+
+                var row = BuildDispatchRider(rider, dayShifts, orderMap);
+
+                if (onShift) active.Add(row);
+                else inactive.Add(row);
+            }
+
+            var now = DateTime.UtcNow.AddHours(3);
+            return Result.Success(new DispatchSnapshotResponse(
+                Date: date,
+                Time: time,
+                GeneratedAt: now,
+                ActiveCount: active.Count,
+                InactiveCount: inactive.Count,
+                ActiveRiders: active,
+                InactiveRiders: inactive
+            ));
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<DispatchSnapshotResponse>(new Error(
+                "Order.DispatchFailed",
+                $"An unexpected error occurred while building the dispatch view: {ex.Message}", 500));
+        }
+    }
+
+    public async Task<Result<DispatchDayResponse>> GetDispatchAllAsync(DateOnly date)
+    {
+        try
+        {
+            var (riders, shifts, orderMap) = await LoadDispatchDataAsync(date);
+
+            var rows = riders
+                .Select(r =>
+                {
+                    var dayShifts = shifts
+                        .Where(s => s.RiderId == r.Id)
+                        .OrderBy(s => s.ShiftIndex)
+                        .ToList();
+                    return BuildDispatchRider(r, dayShifts, orderMap);
+                })
+                .OrderBy(r => r.WorkingId)
+                .ToList();
+
+            var now = DateTime.UtcNow.AddHours(3);
+            return Result.Success(new DispatchDayResponse(
+                Date: date,
+                GeneratedAt: now,
+                TotalRiders: rows.Count,
+                RidersWithShifts: rows.Count(r => r.HasShift && !r.IsBreakDay),
+                RidersOnBreak: rows.Count(r => r.IsBreakDay),
+                RidersWithNoData: rows.Count(r => !r.HasShift && !r.IsBreakDay),
+                Riders: rows
+            ));
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<DispatchDayResponse>(new Error(
+                "Order.DispatchAllFailed",
+                $"An unexpected error occurred while building the day dispatch view: {ex.Message}", 500));
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
     // Private Helpers
     // ══════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Single DB round-trip bundle for all dispatch queries:
+    /// riders (Company 3) + their TransporterShifts for the date
+    /// + today's order summaries keyed by IqamaNo.
+    /// </summary>
+    private async Task<(
+        List<RiderDetails> riders,
+        List<TransporterShift> shifts,
+        Dictionary<long, DailyEmployeeOrderSummary> orderMap)>
+        LoadDispatchDataAsync(DateOnly date)
+    {
+        // 1. All Company-3 riders with employee info
+        var riders = await dbcontext.RiderDetails
+            .Where(r => r.CompanyId == 3)
+            .Include(r => r.Employee)
+                .ThenInclude(e => e!.Housing)
+            .AsNoTracking()
+            .ToListAsync();
+
+        var riderIds = riders.Select(r => r.Id).ToList();
+        var iqamaSet = riders.Select(r => r.EmployeeIqamaNo).ToList();
+
+        // 2. Transporter shifts for the date
+        var shifts = await dbcontext.TransporterShifts
+            .Where(s => s.ShiftDate == date && riderIds.Contains(s.RiderId))
+            .AsNoTracking()
+            .ToListAsync();
+
+        // 3. All orders for the date (we build the summary in-memory to reuse
+        //    the same logic as GetDailyReportAsync without a second method call)
+        var orders = await dbcontext.EmployeeOrders
+            .Where(o => o.OrderDate == date && iqamaSet.Contains(o.EmployeeIqamaNo))
+            .OrderBy(o => o.EmployeeIqamaNo)
+            .ThenBy(o => o.StartedAt)
+            .AsNoTracking()
+            .ToListAsync();
+
+        var workingIdMap = riders.ToDictionary(r => r.EmployeeIqamaNo, r => r.WorkingId);
+        var employeeMap = riders.ToDictionary(r => r.EmployeeIqamaNo, r => r.Employee);
+        var now = DateTime.UtcNow.AddHours(3);
+
+        var orderMap = iqamaSet.ToDictionary(
+            iqama => iqama,
+            iqama =>
+            {
+                var emp = employeeMap.GetValueOrDefault(iqama);
+                var empOrders = orders.Where(o => o.EmployeeIqamaNo == iqama).ToList();
+                var closed = empOrders.Where(o => o.EndedAt.HasValue).ToList();
+
+                double totalMins = closed.Sum(o => (o.EndedAt!.Value - o.StartedAt).TotalMinutes);
+                var openOrder = empOrders.FirstOrDefault(o => o.EndedAt == null);
+                if (openOrder is not null)
+                    totalMins += (now - openOrder.StartedAt).TotalMinutes;
+
+                var details = empOrders
+                    .Select(o => MapToDetail(o, emp!, workingIdMap.GetValueOrDefault(iqama)))
+                    .ToList();
+
+                return new DailyEmployeeOrderSummary(
+                    IqamaNo: iqama,
+                    NameAR: emp?.NameAR ?? "",
+                    NameEN: emp?.NameEN ?? "",
+                    JobTitle: emp?.JobTitle ?? "",
+                    HousingName: emp?.Housing?.Name,
+                    WorkingId: workingIdMap.GetValueOrDefault(iqama),
+                    HadOrderToday: empOrders.Count > 0,
+                    IsCurrentlyOnOrder: openOrder is not null,
+                    TotalOrders: empOrders.Count,
+                    TotalMinutesOnOrder: Math.Round(totalMins, 2),
+                    FirstOrderAt: empOrders.Any() ? empOrders.Min(o => o.StartedAt) : null,
+                    LastOrderAt: empOrders.Any() ? empOrders.Max(o => o.StartedAt) : null,
+                    Orders: details
+                );
+            });
+
+        return (riders, shifts, orderMap);
+    }
+
+    /// <summary>
+    /// Builds one <see cref="DispatchRiderResponse"/> by merging shift blocks
+    /// with the pre-computed order summary for the same rider.
+    /// </summary>
+    private static DispatchRiderResponse BuildDispatchRider(
+        RiderDetails rider,
+        List<TransporterShift> dayShifts,
+        Dictionary<long, DailyEmployeeOrderSummary> orderMap)
+    {
+        bool isBreak = dayShifts.Any(s => s.IsBreakDay);
+        bool hasShift = dayShifts.Count > 0;
+        float totalH = isBreak ? 0f : dayShifts.Sum(s => s.DurationHours);
+
+        var shiftBlocks = dayShifts
+            .Where(s => !s.IsBreakDay)
+            .Select(s => new ShiftBlockSummary(
+                ShiftIndex: s.ShiftIndex,
+                StartTime: s.StartTime,
+                EndTime: s.EndTime,
+                DurationHours: s.DurationHours,
+                IsManuallyEdited: s.IsManuallyEdited,
+                RawEntry: s.RawEntry
+            ))
+            .ToList();
+
+        orderMap.TryGetValue(rider.EmployeeIqamaNo, out var ord);
+
+        return new DispatchRiderResponse(
+            // ── Identity ─────────────────────────────────────────────────
+            RiderId: rider.Id,
+            EmployeeIqamaNo: rider.EmployeeIqamaNo,
+            WorkingId: rider.WorkingId ?? "",
+            NameEN: rider.Employee?.NameEN ?? "",
+            NameAR: rider.Employee?.NameAR ?? "",
+            HousingName: rider.Employee?.Housing?.Name,
+
+            // ── Shift ─────────────────────────────────────────────────────
+            HasShift: hasShift,
+            IsBreakDay: isBreak,
+            TotalHoursScheduled: totalH,
+            Shifts: shiftBlocks,
+
+            // ── Orders ────────────────────────────────────────────────────
+            HadOrderToday: ord?.HadOrderToday ?? false,
+            IsCurrentlyOnOrder: ord?.IsCurrentlyOnOrder ?? false,
+            TotalOrdersToday: ord?.TotalOrders ?? 0,
+            TotalMinutesOnOrder: ord?.TotalMinutesOnOrder ?? 0d,
+            FirstOrderAt: ord?.FirstOrderAt,
+            LastOrderAt: ord?.LastOrderAt,
+            Orders: ord?.Orders ?? []
+        );
+    }
 
     private static OrderDetailResponse MapToDetail(
         EmployeeOrder order,
@@ -760,4 +983,13 @@ public class OrderService(ApplicationDbcontext dbcontext) : IOrderService
             Notes: order.Notes
         );
     }
+
+    /// <summary>
+    /// True when <paramref name="time"/> falls within [start, end).
+    /// Handles overnight shifts where end wraps past midnight.
+    /// </summary>
+    private static bool IsTimeInShift(TimeOnly start, TimeOnly end, TimeOnly time)
+        => end >= start
+            ? time >= start && time < end      // normal    e.g. 12:00–17:00
+            : time >= start || time < end;     // overnight e.g. 22:00–04:00
 }

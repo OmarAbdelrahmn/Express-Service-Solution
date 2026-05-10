@@ -2,6 +2,85 @@
 
 // ── Employee List ─────────────────────────────────────────────────────────────
 
+
+// ── Shared sub-record ─────────────────────────────────────────────────────────
+
+/// <summary>
+/// Lightweight shift block summary embedded inside DispatchRiderResponse.
+/// Does not carry the full ShiftBlockResponse (no DB id needed on the dispatch view).
+/// </summary>
+public record ShiftBlockSummary(
+    int ShiftIndex,
+    TimeOnly? StartTime,
+    TimeOnly? EndTime,
+    float DurationHours,
+    bool IsManuallyEdited,
+    string? RawEntry
+);
+
+// ── Per-rider merged row ──────────────────────────────────────────────────────
+
+/// <summary>
+/// One rider entry in a dispatch response.
+/// Combines transporter shift schedule with the order summary for the same day.
+/// </summary>
+public record DispatchRiderResponse(
+    // Identity
+    int RiderId,
+    long EmployeeIqamaNo,
+    string WorkingId,
+    string NameEN,
+    string NameAR,
+    string? HousingName,
+
+    // Shift
+    bool HasShift,
+    bool IsBreakDay,
+    float TotalHoursScheduled,
+    List<ShiftBlockSummary> Shifts,
+
+    // Orders
+    bool HadOrderToday,
+    bool IsCurrentlyOnOrder,
+    int TotalOrdersToday,
+    double TotalMinutesOnOrder,
+    DateTime? FirstOrderAt,
+    DateTime? LastOrderAt,
+    List<OrderDetailResponse> Orders
+);
+
+// ── Snapshot (time-filtered) ──────────────────────────────────────────────────
+
+/// <summary>
+/// Response for GetDispatchNowAsync / GetDispatchAtAsync.
+/// Riders are split into active (shift window covers the queried time)
+/// and inactive (off-shift, break, or no schedule data).
+/// </summary>
+public record DispatchSnapshotResponse(
+    DateOnly Date,
+    TimeOnly Time,
+    DateTime GeneratedAt,
+    int ActiveCount,
+    int InactiveCount,
+    List<DispatchRiderResponse> ActiveRiders,
+    List<DispatchRiderResponse> InactiveRiders
+);
+
+// ── Full day ──────────────────────────────────────────────────────────────────
+
+/// <summary>
+/// Response for GetDispatchAllAsync.
+/// All riders for the day, no time filter — each with shift + order data.
+/// </summary>
+public record DispatchDayResponse(
+    DateOnly Date,
+    DateTime GeneratedAt,
+    int TotalRiders,
+    int RidersWithShifts,
+    int RidersOnBreak,
+    int RidersWithNoData,
+    List<DispatchRiderResponse> Riders
+);
 public record Company4EmployeeResponse(
     long IqamaNo,
     string NameAR,

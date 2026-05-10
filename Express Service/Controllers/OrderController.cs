@@ -14,7 +14,7 @@ public class OrderController(IOrderService service) : ControllerBase
 
     // ── Employees ─────────────────────────────────────────────────────────────
 
-    /// <summary>List all Company 4 employees (IsEmployee + enable) with today's order snapshot.</summary>
+    /// <summary>List all Company 3 employees with today's order snapshot.</summary>
     [HttpGet("employees")]
     [Authorize(Roles = "Master,Admin,Member")]
     public async Task<IActionResult> GetEmployees()
@@ -23,7 +23,7 @@ public class OrderController(IOrderService service) : ControllerBase
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
 
-    /// <summary>Single Company 4 employee detail with today's snapshot.</summary>
+    /// <summary>Single Company 3 employee detail with today's snapshot.</summary>
     [HttpGet("employees/{iqamaNo:long}")]
     [Authorize(Roles = "Master,Admin,Member")]
     public async Task<IActionResult> GetEmployee(long iqamaNo)
@@ -71,9 +71,7 @@ public class OrderController(IOrderService service) : ControllerBase
 
     // ── Live Queries ──────────────────────────────────────────────────────────
 
-    /// <summary>
-    /// Live snapshot: who is currently on an order, who is not.
-    /// </summary>
+    /// <summary>Live snapshot: who is currently on an order, who is not.</summary>
     [HttpGet("active")]
     [Authorize(Roles = "Master,Admin,Member")]
     public async Task<IActionResult> GetActiveSnapshot()
@@ -127,11 +125,64 @@ public class OrderController(IOrderService service) : ControllerBase
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
 
-    /// <summary>All-time statistics for Company 4 orders.</summary>
+    /// <summary>All-time statistics for Company 3 orders.</summary>
     [HttpGet("report/statistics")]
     public async Task<IActionResult> GetStatistics()
     {
         var result = await service.GetStatisticsAsync();
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    // ── Dispatch (Shift-Aware) ────────────────────────────────────────────────
+
+    /// <summary>
+    /// Riders active RIGHT NOW based on their shift schedule,
+    /// each enriched with their live order status.
+    /// Also returns riders currently off-shift or on break.
+    /// </summary>
+    [HttpGet("dispatch/now")]
+    [Authorize(Roles = "Master,Admin,Member")]
+    public async Task<IActionResult> GetDispatchNow()
+    {
+        var result = await service.GetDispatchNowAsync();
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    /// <summary>
+    /// Riders active at any given date + time, enriched with order status.
+    ///
+    /// Query params (both optional – default to current Saudi time):
+    ///   date  yyyy-MM-dd
+    ///   time  HH:mm
+    /// </summary>
+    [HttpGet("dispatch")]
+    [Authorize(Roles = "Master,Admin,Member")]
+    public async Task<IActionResult> GetDispatch(
+        [FromQuery] DateOnly? date,
+        [FromQuery] TimeOnly? time)
+    {
+        var now = DateTime.UtcNow.AddHours(3);
+        var d = date ?? DateOnly.FromDateTime(now);
+        var t = time ?? TimeOnly.FromDateTime(now);
+
+        var result = await service.GetDispatchAtAsync(d, t);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    /// <summary>
+    /// Full day planner: every Company-3 rider with their complete shift schedule
+    /// and order summary for the given date. No time filter.
+    ///
+    /// Query param:
+    ///   date  yyyy-MM-dd  (defaults to today)
+    /// </summary>
+    [HttpGet("dispatch/all")]
+    [Authorize(Roles = "Master,Admin,Member")]
+    public async Task<IActionResult> GetDispatchAll([FromQuery] DateOnly? date)
+    {
+        var d = date ?? DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3));
+
+        var result = await service.GetDispatchAllAsync(d);
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
 }

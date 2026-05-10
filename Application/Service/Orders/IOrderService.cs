@@ -7,7 +7,7 @@ public interface IOrderService
 {
     // ── Employee Queries ──────────────────────────────────────────────────────
 
-    /// <summary>All employees in Company 4 that are IsEmployee + enable.</summary>
+    /// <summary>All employees in Company 3 that are enable.</summary>
     Task<Result<IEnumerable<Company4EmployeeResponse>>> GetCompany4EmployeesAsync();
 
     /// <summary>Single employee detail with today's order snapshot.</summary>
@@ -43,9 +43,32 @@ public interface IOrderService
     /// <summary>Date-range report with per-day and per-employee breakdown.</summary>
     Task<Result<DateRangeOrderReportResponse>> GetDateRangeReportAsync(DateTime start, DateTime end);
 
-    /// <summary>All-time statistics for Company 4 orders.</summary>
+    /// <summary>All-time statistics for Company 3 orders.</summary>
     Task<Result<OrderStatisticsResponse>> GetStatisticsAsync();
 
     /// <summary>Today's summary: every eligible employee with their order status.</summary>
     Task<Result<DailyOrderReportResponse>> GetTodayReportAsync();
+
+    // ── Dispatch (Shift-Aware) ─────────────────────────────────────────────────
+
+    /// <summary>
+    /// Riders whose shift window is active RIGHT NOW, each enriched with their
+    /// order status for today. Also returns riders currently off-shift / on break.
+    /// </summary>
+    Task<Result<DispatchSnapshotResponse>> GetDispatchNowAsync();
+
+    /// <summary>
+    /// Riders whose shift window is active at the given date + time, each
+    /// enriched with their order status for that day.
+    /// </summary>
+    Task<Result<DispatchSnapshotResponse>> GetDispatchAtAsync(DateOnly date, TimeOnly time);
+
+    /// <summary>
+    /// Full day planner: every Company-3 rider with their complete shift schedule
+    /// AND their order summary for the given date. No time filter applied.
+    /// </summary>
+    Task<Result<DispatchDayResponse>> GetDispatchAllAsync(DateOnly date);
 }
+
+
+// ── Add these records to Application/Contracts/Orders/ ───────────────────────

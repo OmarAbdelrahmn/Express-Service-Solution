@@ -30,6 +30,7 @@ using Application.Service.SparePart;
 using Application.Service.SupplierSer;
 using Application.Service.temp;
 using Application.Service.Transfer;
+using Application.Service.TransporterShifts;
 using Application.Service.User;
 using Application.Service.VehiclePermission;
 using Application.Service.Wallet;
@@ -93,7 +94,7 @@ public static class ApplicationDependencies
         Services.AddScoped<IGeminiService, GeminiService>();
         Services.AddScoped<IEmailWarmupJob, EmailWarmupJob>();
         Services.AddScoped<IOrderService, OrderService>();
-
+        Services.AddScoped<ITransporterShiftService, TransporterShiftService>();
 
         #region Hnagfire + Daily Report Job
         // ── Hangfire ────────────────────────────────────────────────────────────────
