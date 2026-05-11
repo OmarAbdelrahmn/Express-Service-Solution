@@ -74,7 +74,7 @@ public static class ShiftCellParser
         if (duration <= 0) return null;
 
         bool isFloating = IsFloatingTime(timePart);
-        TimeOnly? start = isFloating ? null : ParseTime(timePart);
+        TimeOnly? start = isFloating ? new TimeOnly(0, 0) : ParseTime(timePart);
         TimeOnly? end = (start is not null) ? AddHours(start.Value, duration) : null;
 
         return new ParsedShiftBlock(

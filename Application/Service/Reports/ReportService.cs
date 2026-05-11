@@ -26,7 +26,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
     private const float TARGET_HOURS_PER_DAY = 9f;
     private const float TARGET_HOURS_PER_DAY2 = 10.5f;
     private const int TARGET_ORDERS_PER_DAY = 14;
-    private const int TARGET_ORDERS_PER_DAY2 = 12;
+    private const int TARGET_ORDERS_PER_DAY2 = 13;
 
 
     // Add this method to the ReportService class
