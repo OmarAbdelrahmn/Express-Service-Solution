@@ -28,7 +28,7 @@ public class OrderService(ApplicationDbcontext dbcontext) : IOrderService
 
             if (eligibleIqamas.Count == 0)
                 return Result.Failure<IEnumerable<Company4EmployeeResponse>>(
-                    new Error("Company4.NoEmployees", "No employees found in Company 4.", 404));
+                    new Error("Company4.NoEmployees", "No employees found in Company 3.", 404));
 
             var iqamaSet = eligibleIqamas.Select(x => x.EmployeeIqamaNo).ToList();
 
@@ -170,7 +170,7 @@ public class OrderService(ApplicationDbcontext dbcontext) : IOrderService
 
             if (riderDetail is null)
                 return Result.Failure<OrderDetailResponse>(new Error(
-                    "Order.NotInCompany4", "Employee is not in Company 4.", 400));
+                    "Order.NotInCompany3", "Employee is not in Company 3.", 400));
 
             var employee = await dbcontext.Employees
                 .Include(e => e.Housing)
@@ -181,7 +181,7 @@ public class OrderService(ApplicationDbcontext dbcontext) : IOrderService
             if (employee is null)
                 return Result.Failure<OrderDetailResponse>(new Error(
                     "Order.InvalidEmployee",
-                    "Employee not found, not IsEmployee, or not enabled.", 404));
+                    "المندوب غير موجود أو غير نشط.", 404));
 
             var now = DateTime.UtcNow.AddHours(3);
             var today = DateOnly.FromDateTime(now);
