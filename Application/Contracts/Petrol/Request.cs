@@ -163,7 +163,9 @@ public record RiderPetrolSummaryRow(
     string RiderNameAR,
     decimal TotalCost,
     int UniqueVehiclesUsed,
-    int TotalDaysWithCost
+    int TotalDaysWithCost,
+    int TotalAcceptedOrders,       // ← NEW
+    string OrderSource
 );
 
 /// <summary>One row in a cross-vehicle petrol summary for a given month.</summary>

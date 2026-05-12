@@ -412,12 +412,13 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
     }
 
     public async Task<Result<IReadOnlyList<RiderPetrolSummaryRow>>> GetAllRidersSummaryAsync(
-        int year,
-        int month,
-        CancellationToken ct = default)
+      int year,
+      int month,
+      CancellationToken ct = default)
     {
         try
         {
+            // ── Step 1: Load petrol data ──────────────────────────────────────
             var data = await _db.RiderPetrolCosts
                 .AsNoTracking()
                 .Where(r => r.RiderIqamaNo != null
@@ -434,15 +435,79 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
                 })
                 .ToListAsync(ct);
 
+            var allIqamas = data.Select(r => r.RiderIqamaNo).Distinct().ToList();
+
+            // ── Step 2: Load RiderDetails.Id for those IqamaNos ──────────────
+            // RiderShift links via RiderDetails.Id (int), not IqamaNo directly
+            var riderDetailsMap = await _db.RiderDetails
+                .AsNoTracking()
+                .Where(rd => allIqamas.Contains(rd.EmployeeIqamaNo))
+                .Select(rd => new { rd.Id, rd.EmployeeIqamaNo })
+                .ToListAsync(ct);
+
+            var iqamaToRiderDetailsId = riderDetailsMap
+                .ToDictionary(rd => rd.EmployeeIqamaNo, rd => rd.Id);
+
+            var riderDetailsIds = riderDetailsMap.Select(rd => rd.Id).ToList();
+
+            // ── Step 3: Load RiderShift totals for this month ─────────────────
+            var shiftTotals = await _db.RiderShifts          // DbSet<RiderShift>
+                .AsNoTracking()
+                .Where(s => riderDetailsIds.Contains(s.RiderId)
+                         && s.ShiftDate.Year == year
+                         && s.ShiftDate.Month == month)
+                .GroupBy(s => s.RiderId)
+                .Select(g => new { RiderId = g.Key, TotalOrders = g.Sum(s => s.AcceptedDailyOrders) })
+                .ToListAsync(ct);
+
+            var shiftByRiderDetailsId = shiftTotals.ToDictionary(s => s.RiderId, s => s.TotalOrders);
+
+            // ── Step 4: Load KetaFreeLancer for this month ────────────────────
+            // KetaFreeLancer.Month is a string — adjust the format to match your data
+            // e.g. "2025-01" or "01/2025" — check your existing rows and match here
+            var monthKey = $"{year}-{month:D2}";
+
+            var freelancerTotals = await _db.KetaFreeLancers    // DbSet<KetaFreeLancer>
+                .AsNoTracking()
+                .Where(f => riderDetailsIds.Contains(f.RiderId) && f.Month == monthKey)
+                .Select(f => new { f.RiderId, f.TotalOrders })
+                .ToListAsync(ct);
+
+            var freelancerByRiderDetailsId = freelancerTotals
+                .ToDictionary(f => f.RiderId, f => f.TotalOrders);
+
+            // ── Step 5: Build summary rows ────────────────────────────────────
             var rows = data
                 .GroupBy(r => new { r.RiderIqamaNo, r.NameEN, r.NameAR })
-                .Select(g => new RiderPetrolSummaryRow(
-                    g.Key.RiderIqamaNo,
-                    g.Key.NameEN,
-                    g.Key.NameAR,
-                    g.Sum(r => r.Cost),
-                    g.Select(r => r.VehicleNumber).Distinct().Count(),
-                    g.Select(r => r.Date).Distinct().Count()))
+                .Select(g =>
+                {
+                    int totalOrders = 0;
+                    string source = "None";
+
+                    if (iqamaToRiderDetailsId.TryGetValue(g.Key.RiderIqamaNo, out var detailsId))
+                    {
+                        if (shiftByRiderDetailsId.TryGetValue(detailsId, out var shiftOrders))
+                        {
+                            totalOrders = shiftOrders;
+                            source = "Shifts";
+                        }
+                        else if (freelancerByRiderDetailsId.TryGetValue(detailsId, out var flOrders))
+                        {
+                            totalOrders = flOrders;
+                            source = "KetaFreelancer";
+                        }
+                    }
+
+                    return new RiderPetrolSummaryRow(
+                        g.Key.RiderIqamaNo,
+                        g.Key.NameEN,
+                        g.Key.NameAR,
+                        g.Sum(r => r.Cost),
+                        g.Select(r => r.VehicleNumber).Distinct().Count(),
+                        g.Select(r => r.Date).Distinct().Count(),
+                        totalOrders,
+                        source);
+                })
                 .OrderByDescending(r => r.TotalCost)
                 .ToList();
 
