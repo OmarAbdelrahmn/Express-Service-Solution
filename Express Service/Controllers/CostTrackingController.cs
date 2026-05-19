@@ -9,6 +9,20 @@ namespace Express_Service.Controllers;
 [Authorize(Roles = "Master,Admin,Member")]
 public class CostTrackingController(ICostTrackingService service) : ControllerBase
 {
+
+    [HttpGet("vehicles-rider-costs")]
+    public async Task<IActionResult> GetVehiclesWithRiderCosts(
+    [FromQuery] DateTime fromDate,
+    [FromQuery] DateTime toDate)
+    {
+        if (fromDate > toDate)
+            return BadRequest("From date must be before or equal to to date");
+
+        var response = await service.GetVehiclesWithRiderCostsByDateRangeAsync(fromDate, toDate);
+        return response.IsSuccess ? Ok(response.Value) : response.ToProblem();
+    }
+
+
     [HttpGet("vehicle/{vehicleNumber}")]
     public async Task<IActionResult> GetVehicleCost(string vehicleNumber)
     {
