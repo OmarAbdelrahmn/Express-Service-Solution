@@ -7,7 +7,7 @@ namespace Express_Service.Controllers;
 
 [Route("api/ai")]
 [ApiController]
-//[Authorize]
+[Authorize]  // uncomment when ready
 public class AiController(IGeminiService geminiService) : ControllerBase
 {
     [HttpPost("chat")]

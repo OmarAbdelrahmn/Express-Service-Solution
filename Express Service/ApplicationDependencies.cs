@@ -95,6 +95,7 @@ public static class ApplicationDependencies
         Services.AddScoped<IEmailWarmupJob, EmailWarmupJob>();
         Services.AddScoped<IOrderService, OrderService>();
         Services.AddScoped<ITransporterShiftService, TransporterShiftService>();
+        Services.AddScoped<ICostTrackingService, CostTrackingService>();
 
         #region Hnagfire + Daily Report Job
         // ── Hangfire ────────────────────────────────────────────────────────────────
