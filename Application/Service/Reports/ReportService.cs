@@ -1774,6 +1774,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                         PhoneNumber: s.Rider?.Employee.Phone ?? "050",
                         WorkingId: s.WorkingId ?? "0",
                         AcceptedOrders: s.AcceptedDailyOrders,
+                        WorkingHours: s.WorkingHours,
                         ShiftDate: s.ShiftDate
                     ))
                     .OrderByDescending(r => r.AcceptedOrders)

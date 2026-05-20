@@ -654,7 +654,8 @@ public record RiderDailyPerformance(
     string PhoneNumber,
     string WorkingId,
     int AcceptedOrders,
-    DateOnly ShiftDate
+    DateOnly ShiftDate,
+    double? WorkingHours = null 
 );
 public record RiderPeriodComparison(
     int RiderId,

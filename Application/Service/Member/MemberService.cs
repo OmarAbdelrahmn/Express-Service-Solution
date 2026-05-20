@@ -627,17 +627,17 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
             .Where(r => employeeIqamas.Contains(r.EmployeeIqamaNo))
             .AnyAsync(r => r.VehicleNumber == vehicle.VehicleNumber);
 
-        if (!vehicleInHousing && !string.IsNullOrEmpty(vehicle.Location))
-        {
-            if (!vehicle.Location.Contains(housing.Name, StringComparison.OrdinalIgnoreCase))
-            {
-                return Result.Failure(new Error(
-                    "VehicleNotInHousing",
-                    "This vehicle does not belong to your housing",
-                    403
-                ));
-            }
-        }
+        //if (!vehicleInHousing && !string.IsNullOrEmpty(vehicle.Location))
+        //{
+        //    if (!vehicle.Location.Contains(housing.Name, StringComparison.OrdinalIgnoreCase))
+        //    {
+        //        return Result.Failure(new Error(
+        //            "VehicleNotInHousing",
+        //            "This vehicle does not belong to your housing",
+        //            403
+        //        ));
+        //    }
+        //}
 
         // Check if vehicle has an active problem
         var activeProblem = await context.RiderVehicleStatus
@@ -2858,31 +2858,31 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
                 400
             ));
 
-        // Check if vehicle is currently assigned to any rider in this housing
-        var vehicleInHousing = await context.RiderDetails
-            .AnyAsync(r => employeeIqamas.Contains(r.EmployeeIqamaNo)
-                && r.VehicleNumber == vehicle.VehicleNumber);
+        //// Check if vehicle is currently assigned to any rider in this housing
+        //var vehicleInHousing = await context.RiderDetails
+        //    .AnyAsync(r => employeeIqamas.Contains(r.EmployeeIqamaNo)
+        //        && r.VehicleNumber == vehicle.VehicleNumber);
 
-        // If vehicle is assigned elsewhere, check if it's available
-        if (!vehicleInHousing)
-        {
-            var isVehicleAvailable = !await context.RiderVehicleStatus
-                .AnyAsync(s => s.VehicleNumber == vehicle.VehicleNumber
-                    && s.IsActive
-                    && (s.StatusType == VehicleStatusType.Taken
-                        || s.StatusType == VehicleStatusType.Problem
-                        || s.StatusType == VehicleStatusType.Stolen
-                        || s.StatusType == VehicleStatusType.BreakUp));
+        //// If vehicle is assigned elsewhere, check if it's available
+        //if (!vehicleInHousing)
+        //{
+        //    var isVehicleAvailable = !await context.RiderVehicleStatus
+        //        .AnyAsync(s => s.VehicleNumber == vehicle.VehicleNumber
+        //            && s.IsActive
+        //            && (s.StatusType == VehicleStatusType.Taken
+        //                || s.StatusType == VehicleStatusType.Problem
+        //                || s.StatusType == VehicleStatusType.Stolen
+        //                || s.StatusType == VehicleStatusType.BreakUp));
 
-            if (!isVehicleAvailable)
-            {
-                return Result.Failure(new Error(
-                    "VehicleUnavailable",
-                    "This vehicle is not available and not assigned to your housing",
-                    403
-                ));
-            }
-        }
+        //    if (!isVehicleAvailable)
+        //    {
+        //        return Result.Failure(new Error(
+        //            "VehicleUnavailable",
+        //            "This vehicle is not available and not assigned to your housing",
+        //            403
+        //        ));
+        //    }
+        //}
 
         // Get the username of the manager for the request
         var manager = await userManager.FindByNameAsync(managerIqamaNo.ToString());
@@ -3048,24 +3048,24 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
             ));
         }
 
-        // Verify vehicle belongs to housing
-        var vehicleInHousing = await context.RiderDetails
-            .Where(r => employeeIqamas.Contains(r.EmployeeIqamaNo))
-            .AnyAsync(r => r.VehicleNumber == vehicle.VehicleNumber);
+        //// Verify vehicle belongs to housing
+        //var vehicleInHousing = await context.RiderDetails
+        //    .Where(r => employeeIqamas.Contains(r.EmployeeIqamaNo))
+        //    .AnyAsync(r => r.VehicleNumber == vehicle.VehicleNumber);
 
-        if (!vehicleInHousing && !string.IsNullOrEmpty(vehicle.Location))
-        {
-            var housingLocation = housing.Address;
+        //if (!vehicleInHousing && !string.IsNullOrEmpty(vehicle.Location))
+        //{
+        //    var housingLocation = housing.Address;
 
-            if (!vehicle.Location.Contains(housing.Name, StringComparison.OrdinalIgnoreCase))
-            {
-                return Result.Failure(new Error(
-                    "VehicleNotInHousing",
-                    "This vehicle does not belong to your housing",
-                    403
-                ));
-            }
-        }
+        //    if (!vehicle.Location.Contains(housing.Name, StringComparison.OrdinalIgnoreCase))
+        //    {
+        //        return Result.Failure(new Error(
+        //            "VehicleNotInHousing",
+        //            "This vehicle does not belong to your housing",
+        //            403
+        //        ));
+        //    }
+        //}
 
         // Check if vehicle already has an active problem
         var existingProblem = await context.RiderVehicleStatus
@@ -3297,17 +3297,17 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
             .AnyAsync(r => employeeIqamas.Contains(r.EmployeeIqamaNo)
                 && r.VehicleNumber == newVehicle.VehicleNumber);
 
-        if (!newVehicleInHousing && !string.IsNullOrEmpty(newVehicle.Location))
-        {
-            if (!newVehicle.Location.Contains(housing.Name, StringComparison.OrdinalIgnoreCase))
-            {
-                return Result.Failure(new Error(
-                    "VehicleNotInHousing",
-                    "The new vehicle does not belong to your housing",
-                    403
-                ));
-            }
-        }
+        //if (!newVehicleInHousing && !string.IsNullOrEmpty(newVehicle.Location))
+        //{
+        //    if (!newVehicle.Location.Contains(housing.Name, StringComparison.OrdinalIgnoreCase))
+        //    {
+        //        return Result.Failure(new Error(
+        //            "VehicleNotInHousing",
+        //            "The new vehicle does not belong to your housing",
+        //            403
+        //        ));
+        //    }
+        //}
 
         // Check if new vehicle is available
         var isNewVehicleAvailable = !await context.RiderVehicleStatus
@@ -3696,18 +3696,18 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
                         continue;
                     }
 
-                    // Validate vehicle belongs to housing
-                    if (!await IsVehicleInHousing(housing, usage.VehicleNumber))
-                    {
-                        details.Add(new UsageResultDetail(
-                            false,
-                            sparePart.Name,
-                            usage.VehicleNumber,
-                            "Vehicle does not belong to your housing"
-                        ));
-                        failureCount++;
-                        continue;
-                    }
+                    //// Validate vehicle belongs to housing
+                    //if (!await IsVehicleInHousing(housing, usage.VehicleNumber))
+                    //{
+                    //    details.Add(new UsageResultDetail(
+                    //        false,
+                    //        sparePart.Name,
+                    //        usage.VehicleNumber,
+                    //        "Vehicle does not belong to your housing"
+                    //    ));
+                    //    failureCount++;
+                    //    continue;
+                    //}
 
                     // Record usage
                     var sparePartUsage = new SparePartUsage
@@ -3776,7 +3776,7 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
 
         // Verify spare part belongs to housing
         var sparePart = await context.SpareParts
-            .FirstOrDefaultAsync(sp => sp.Id == sparePartId && sp.Location == housing.Name);
+            .FirstOrDefaultAsync(sp => sp.Id == sparePartId);
 
         if (sparePart == null)
             return Result.Failure<IEnumerable<SparePartUsageResponse>>(
@@ -4009,18 +4009,18 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
                         continue;
                     }
 
-                    // Validate rider belongs to housing
-                    if (!await IsRiderInHousing(housing, usage.RiderId))
-                    {
-                        details.Add(new UsageResultDetail(
-                            false,
-                            accessory.Name,
-                            $"Rider ID: {usage.RiderId}",
-                            "Rider does not belong to your housing"
-                        ));
-                        failureCount++;
-                        continue;
-                    }
+                    //// Validate rider belongs to housing
+                    //if (!await IsRiderInHousing(housing, usage.RiderId))
+                    //{
+                    //    details.Add(new UsageResultDetail(
+                    //        false,
+                    //        accessory.Name,
+                    //        $"Rider ID: {usage.RiderId}",
+                    //        "Rider does not belong to your housing"
+                    //    ));
+                    //    failureCount++;
+                    //    continue;
+                    //}
 
                     var rider = await context.RiderDetails
                         .Include(r => r.Employee)

@@ -96,6 +96,9 @@ public static class ApplicationDependencies
         Services.AddScoped<IOrderService, OrderService>();
         Services.AddScoped<ITransporterShiftService, TransporterShiftService>();
         Services.AddScoped<ICostTrackingService, CostTrackingService>();
+        Services.AddMemoryCache();
+        Services.AddScoped<IAiConfirmationStore, AiConfirmationStore>();
+        Services.AddScoped<IAiToolDispatcher, AiToolDispatcher>();
 
         #region Hnagfire + Daily Report Job
         // ── Hangfire ────────────────────────────────────────────────────────────────
