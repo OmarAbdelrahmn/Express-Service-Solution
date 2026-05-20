@@ -51,13 +51,12 @@ public class GeminiService(
             if (firstCandidate.TryGetProperty("finishReason", out var finishReason)
                 && finishReason.GetString() == "MALFORMED_FUNCTION_CALL")
                 return new AiChatResponse(
-                    "I understood what you need but couldn't form the request correctly. " +
-                    "Please be more specific.");
+                    "فهمت طلبك لكن لم أتمكن من تكوين الطلب بشكل صحيح. يرجى تحديد طلبك أكثر.");
 
             if (!firstCandidate.TryGetProperty("content", out var content)
                 || !content.TryGetProperty("parts", out var parts)
                 || parts.GetArrayLength() == 0)
-                return new AiChatResponse("Gemini returned an unreadable response.");
+                return new AiChatResponse("لم أتمكن من قراءة رد النظام.");
 
             foreach (var part in parts.EnumerateArray())
             {
@@ -72,12 +71,12 @@ public class GeminiService(
             if (parts[0].TryGetProperty("text", out var textProp))
                 return new AiChatResponse(textProp.GetString()!);
 
-            return new AiChatResponse("Gemini returned a response I could not read.");
+            return new AiChatResponse("تعذّر قراءة الرد.");
         }
-        catch (TaskCanceledException) { return new AiChatResponse("Request to Gemini timed out. Please try again."); }
-        catch (HttpRequestException ex) { return new AiChatResponse($"Network error reaching Gemini: {ex.Message}"); }
-        catch (JsonException ex) { return new AiChatResponse($"Failed to parse Gemini response: {ex.Message}"); }
-        catch (Exception ex) { return new AiChatResponse($"Unexpected error: {ex.Message}"); }
+        catch (TaskCanceledException) { return new AiChatResponse("انتهت مهلة الاتصال. يرجى المحاولة مرة أخرى."); }
+        catch (HttpRequestException ex) { return new AiChatResponse($"خطأ في الشبكة: {ex.Message}"); }
+        catch (JsonException ex) { return new AiChatResponse($"فشل في تحليل الرد: {ex.Message}"); }
+        catch (Exception ex) { return new AiChatResponse($"خطأ غير متوقع: {ex.Message}"); }
     }
 
     // ── Tool declarations — Gemini learns what it can call ──────────────────
@@ -227,7 +226,7 @@ public class GeminiService(
         You are an intelligent AI assistant for a rider and employee management platform.
         You have access to the ENTIRE system — employees, riders, vehicles, housing, shifts,
         wallet, petrol, spare parts, accessories, suppliers, bills, transfers, and more.
-        
+
         TODAY: {today:yyyy-MM-dd} | CURRENT MONTH: {today:yyyy-MM}
 
         Core rules:
@@ -238,10 +237,107 @@ public class GeminiService(
           get_company_full_dashboard, get_housing_full_dashboard, get_operational_overview).
         - Write operations (toggle/delete/reset/assign/return/start-sub/stop-sub) always require
           confirmation — call the function so the system shows a confirmation dialog.
-        - Respond in the same language the user uses (Arabic or English).
-        - Be concise — the UI renders data in tables; just summarize the key insight.
+        - ALWAYS respond entirely in Arabic, regardless of the language the user writes in.
+        - Be concise — the UI renders data in tables; just summarize the key insight in Arabic.
         - For "top rider", "best performer", "most orders" → use get_top_riders_by_orders_month.
         - For broad system questions ("what's happening today?") → use get_operational_overview.
+
+        Arabic display rules (strictly enforced):
+        - ALWAYS prefer NameAR over NameEN when displaying any person's name.
+          If NameAR is null or empty, fall back to NameEN.
+        - When presenting tabular data, ALL column headers must be in Arabic. Use this mapping:
+            WorkingId            → رقم العمل
+            NameAR / NameEN      → الاسم
+            IqamaNo              → رقم الإقامة
+            CompanyName          → الشركة
+            HousingName          → السكن
+            Status               → الحالة
+            TotalOrders          → إجمالي الطلبات
+            TotalAcceptedOrders  → الطلبات المقبولة
+            TotalRejectedOrders  → الطلبات المرفوضة
+            AcceptedOrders       → الطلبات المقبولة
+            RejectedOrders       → الطلبات المرفوضة
+            TotalAccepted        → المقبول
+            TotalRejected        → المرفوض
+            RejectionRate        → نسبة الرفض
+            WorkingHours         → ساعات العمل
+            TotalWorkingHours    → إجمالي ساعات العمل
+            WorkingDays          → أيام العمل
+            TotalShifts          → إجمالي الشفتات
+            ShiftDate            → تاريخ الشفت
+            ShiftStatus          → حالة الشفت
+            BestDayOrders        → أفضل يوم (طلبات)
+            AvgOrdersPerDay      → متوسط الطلبات اليومية
+            TotalAmount          → إجمالي المبلغ
+            TotalEarnings        → إجمالي الأرباح
+            PaymentDays          → أيام الدفع
+            WalletThisMonth      → المحفظة هذا الشهر
+            VehicleNumber        → رقم المركبة
+            PlateNumberA         → رقم اللوحة
+            VehicleType          → نوع المركبة
+            LicenseExpiryDate    → انتهاء الرخصة
+            LicenseNumber        → رقم الرخصة
+            DaysLeft             → الأيام المتبقية
+            AssignedTo           → مُسنَد إلى
+            Rank                 → الترتيب
+            Phone                → الهاتف
+            JobTitle             → المسمى الوظيفي
+            Capacity             → السعة
+            CurrentOccupancy     → الإشغال الحالي
+            AvailableSlots       → الأماكن المتاحة
+            TotalCost            → التكلفة الإجمالية
+            GrandTotal           → الإجمالي الكلي
+            TotalVehicles        → عدد المركبات
+            TotalRiders          → إجمالي السائقين
+            ActiveRiders         → السائقون النشطون
+            UniqueRiders         → سائقون مختلفون
+            TotalShifts          → إجمالي الشفتات
+            TotalHours           → إجمالي الساعات
+            TshirtSize           → مقاس التيشيرت
+            EscapedAt            → تاريخ الهروب
+            RemovalDeadline      → موعد الإزالة
+            RemainingDays        → الأيام المتبقية
+            ActivePath           → المسار الفعّال
+            IqamaEndM            → انتهاء الإقامة
+            ValidRiders          → السائقون الصالحون
+            InvalidRiders        → السائقون غير الصالحين
+            Freelancer           → مستقل
+            Valid                → صالح
+            Invalid              → غير صالح
+            CreatedAt            → تاريخ الإنشاء
+            TotalOrders          → إجمالي الطلبات
+            Month                → الشهر
+            Date                 → التاريخ
+            Period               → الفترة
+            Count                → العدد
+            GeneratedAt          → وقت التقرير
+            Total                → الإجمالي
+            Enabled              → مفعّل
+            Disabled             → معطّل
+            Escaped              → هارب
+            NotInKSA             → خارج المملكة
+            Riders               → السائقون
+            Employees            → الموظفون
+            Housing              → السكن
+            Vehicles             → المركبات
+            Companies            → الشركات
+            ActiveSubstitutions  → التبديلات النشطة
+            TodayShifts          → شفتات اليوم
+            ThisMonthShifts      → شفتات هذا الشهر
+            Address              → العنوان
+            Top5                 → أفضل 5
+            Bottom5              → أدنى 5
+            MonthlyStats         → إحصائيات الشهر
+            ValidityBreakdown    → تفاصيل الصلاحية
+            PersonalInfo         → البيانات الشخصية
+            Vehicle              → المركبة
+            RecentShifts         → الشفتات الأخيرة
+            Accessories          → الإكسسوارات
+            ExpiringIqamas       → إقامات منتهية قريباً
+            YesterdayPerformance → أداء أمس
+        - All summary sentences, labels, status values, and messages must be written in Arabic.
+        - Numbers and dates remain in standard numeric format (e.g. 2025-01, 150).
+        - Status translations: enable → مفعّل | disable → معطّل | Valid → صالح | Invalid → غير صالح | Freelancer → مستقل
         """;
     }
 
