@@ -267,9 +267,65 @@ public interface IMemberService
     Task<Result<UpdateRiderCompanyResponse>> UpdateRiderCompanyAsync(
         long managerIqamaNo,
         MemberUpdateRiderCompanyRequest request);
+
+    /// <summary>
+    /// Get detailed spending report for spare parts (per vehicle) and accessories (per rider)
+    /// over a date range
+    /// </summary>
+    Task<Result<HousingSpendingReportResponse>> GetHousingSpendingReportAsync(
+        long managerIqamaNo,
+        DateOnly startDate,
+        DateOnly endDate);
+
+
 }
 // Add these records at the end of the IMemberService.cs file
 
+
+public record HousingSpendingReportResponse(
+    DateOnly StartDate,
+    DateOnly EndDate,
+    string HousingName,
+    decimal TotalSparePartsCost,
+    decimal TotalAccessoriesCost,
+    decimal GrandTotal,
+    List<VehicleSpendingDetail> VehicleSpending,
+    List<RiderSpendingDetail> RiderSpending
+);
+
+public record VehicleSpendingDetail(
+    string VehicleNumber,
+    string VehiclePlate,
+    decimal TotalCost,
+    List<SparePartSpendingItem> SparePartUsages
+);
+
+public record SparePartSpendingItem(
+    int SparePartId,
+    string SparePartName,
+    int TotalQuantityUsed,
+    decimal UnitPrice,
+    decimal TotalCost,
+    List<DateTime> UsageDates
+);
+
+public record RiderSpendingDetail(
+    int RiderId,
+    string RiderNameAR,
+    string RiderNameEN,
+    string WorkingId,
+    decimal TotalCost,
+    List<AccessorySpendingItem> AccessoryUsages
+);
+
+public record AccessorySpendingItem(
+    int AccessoryId,
+    string AccessoryName,
+    int TotalQuantityIssued,
+    decimal UnitPrice,
+    decimal TotalCost,
+    List<DateTime> IssuanceDates
+);
 public record MemberBatchSparePartUsageRequest(
     List<MemberSparePartUsageItem> Usages
 );

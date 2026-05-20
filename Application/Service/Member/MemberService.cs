@@ -24,9 +24,187 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
     private readonly IReportService reportService = reportService;
 
 
+
+
+
+    public async Task<Result<HousingSpendingReportResponse>> GetHousingSpendingReportAsync(
+    long managerIqamaNo,
+    DateOnly startDate,
+    DateOnly endDate)
+    {
+        var housingResult = await GetManagedHousing(managerIqamaNo);
+        if (housingResult.IsFailure)
+            return Result.Failure<HousingSpendingReportResponse>(housingResult.Error);
+
+        var housing = housingResult.Value;
+        var employeeIqamas = housing.Employees
+            .Where(e => !e.IsDeleted)
+            .Select(e => e.IqamaNo)
+            .ToList();
+
+        // Convert DateOnly to DateTime boundaries for DateTime-typed UsedAt / IssuedAt columns
+        var fromUtc = startDate.ToDateTime(TimeOnly.MinValue);
+        var toUtc = endDate.ToDateTime(TimeOnly.MaxValue);
+
+        // ── Spare parts ───────────────────────────────────────────────────────
+
+        // All vehicle numbers assigned to riders in this housing
+        var housingVehicleNumbers = await context.RiderDetails
+            .Where(r => employeeIqamas.Contains(r.EmployeeIqamaNo)
+                && !string.IsNullOrEmpty(r.VehicleNumber))
+            .Select(r => r.VehicleNumber!)
+            .Distinct()
+            .ToListAsync();
+
+        // Also include vehicles whose Location matches the housing name
+        var locationVehicleNumbers = await context.Vehicles
+            .Where(v => v.Location.Contains(housing.Name))
+            .Select(v => v.VehicleNumber)
+            .ToListAsync();
+
+        housingVehicleNumbers = housingVehicleNumbers
+            .Union(locationVehicleNumbers)
+            .Distinct()
+            .ToList();
+
+        var sparePartUsages = await context.SparePartUsages
+            .Include(u => u.SparePart)
+            .Where(u => housingVehicleNumbers.Contains(u.VehicleNumber)
+                && u.UsedAt >= fromUtc
+                && u.UsedAt <= toUtc)
+            .OrderBy(u => u.VehicleNumber)
+            .ThenBy(u => u.UsedAt)
+            .AsNoTracking()
+            .ToListAsync();
+
+        // Resolve plate numbers for all vehicles in one query
+        var vehiclePlates = await context.Vehicles
+            .Where(v => housingVehicleNumbers.Contains(v.VehicleNumber))
+            .ToDictionaryAsync(v => v.VehicleNumber, v => v.PlateNumberA);
+
+        // Group by vehicle → group by spare part
+        var vehicleSpending = sparePartUsages
+            .GroupBy(u => u.VehicleNumber)
+            .Select(vehicleGroup =>
+            {
+                var sparePartItems = vehicleGroup
+                    .GroupBy(u => u.SparePartId)
+                    .Select(partGroup =>
+                    {
+                        var first = partGroup.First();
+                        var totalQty = partGroup.Sum(u => u.QuantityUsed);
+                        var unitPrice = first.SparePart.Price;
+
+                        return new SparePartSpendingItem(
+                            SparePartId: first.SparePartId,
+                            SparePartName: first.SparePart.Name,
+                            TotalQuantityUsed: totalQty,
+                            UnitPrice: unitPrice,
+                            TotalCost: partGroup.Sum(u => u.QuantityUsed * unitPrice),
+                            UsageDates: partGroup.Select(u => u.UsedAt).ToList()
+                        );
+                    })
+                    .OrderByDescending(p => p.TotalCost)
+                    .ToList();
+
+                var vehicleNumber = vehicleGroup.Key;
+
+                return new VehicleSpendingDetail(
+                    VehicleNumber: vehicleNumber,
+                    VehiclePlate: vehiclePlates.TryGetValue(vehicleNumber, out var plate)
+                        ? plate
+                        : "N/A",
+                    TotalCost: sparePartItems.Sum(p => p.TotalCost),
+                    SparePartUsages: sparePartItems
+                );
+            })
+            .OrderByDescending(v => v.TotalCost)
+            .ToList();
+
+        // ── Rider accessories ─────────────────────────────────────────────────
+
+        var housingRiderIds = await context.RiderDetails
+            .Where(r => employeeIqamas.Contains(r.EmployeeIqamaNo))
+            .Select(r => r.Id)
+            .ToListAsync();
+
+        var accessoryUsages = await context.RiderAccessoryUsages
+            .Include(u => u.RiderAccessory)
+            .Include(u => u.Rider)
+                .ThenInclude(r => r.Employee)
+            .Where(u => housingRiderIds.Contains(u.RiderId)
+                && u.IssuedAt >= fromUtc
+                && u.IssuedAt <= toUtc)
+            .OrderBy(u => u.RiderId)
+            .ThenBy(u => u.IssuedAt)
+            .AsNoTracking()
+            .ToListAsync();
+
+        // Group by rider → group by accessory
+        var riderSpending = accessoryUsages
+            .GroupBy(u => u.RiderId)
+            .Select(riderGroup =>
+            {
+                var first = riderGroup.First();
+                var rider = first.Rider;
+
+                var accessoryItems = riderGroup
+                    .GroupBy(u => u.RiderAccessoryId)
+                    .Select(accGroup =>
+                    {
+                        var accFirst = accGroup.First();
+                        var qty = accGroup.Count(); // each row = 1 unit issued
+                        var unitPrice = accFirst.RiderAccessory.Price;
+
+                        return new AccessorySpendingItem(
+                            AccessoryId: accFirst.RiderAccessoryId,
+                            AccessoryName: accFirst.RiderAccessory.Name,
+                            TotalQuantityIssued: qty,
+                            UnitPrice: unitPrice,
+                            TotalCost: qty * unitPrice,
+                            IssuanceDates: accGroup.Select(u => u.IssuedAt).ToList()
+                        );
+                    })
+                    .OrderByDescending(a => a.TotalCost)
+                    .ToList();
+
+                return new RiderSpendingDetail(
+                    RiderId: riderGroup.Key,
+                    RiderNameAR: rider?.Employee?.NameAR ?? "N/A",
+                    RiderNameEN: rider?.Employee?.NameEN ?? "N/A",
+                    WorkingId: rider?.WorkingId ?? "N/A",
+                    TotalCost: accessoryItems.Sum(a => a.TotalCost),
+                    AccessoryUsages: accessoryItems
+                );
+            })
+            .OrderByDescending(r => r.TotalCost)
+            .ToList();
+
+        // ── Totals ────────────────────────────────────────────────────────────
+
+        var totalSparePartsCost = vehicleSpending.Sum(v => v.TotalCost);
+        var totalAccessoriesCost = riderSpending.Sum(r => r.TotalCost);
+
+        var report = new HousingSpendingReportResponse(
+            StartDate: startDate,
+            EndDate: endDate,
+            HousingName: housing.Name,
+            TotalSparePartsCost: totalSparePartsCost,
+            TotalAccessoriesCost: totalAccessoriesCost,
+            GrandTotal: totalSparePartsCost + totalAccessoriesCost,
+            VehicleSpending: vehicleSpending,
+            RiderSpending: riderSpending
+        );
+
+        return Result.Success(report);
+    }
+
+
     #region member service
     private const float TARGET_HOURS_PER_DAY = 9f;
     private const int TARGET_ORDERS_PER_DAY = 15;
+
+
 
     private static string DeterminePerformanceLevel(float actualHours, int actualOrders, float targetHours, int targetOrders)
     {

@@ -13,6 +13,21 @@ public class MemberController(IMemberService housingService) : ControllerBase
     private readonly IMemberService housingService = housingService;
 
 
+    /// <summary>
+    /// Get detailed spending breakdown for spare parts (per vehicle) and
+    /// accessories (per rider) over a date range
+    /// </summary>
+    [HttpGet("reports/spending")]
+    public async Task<IActionResult> GetSpendingReport(
+        [FromQuery] DateOnly startDate,
+        [FromQuery] DateOnly endDate)
+    {
+        var managerIqamaNo = User.GetUserIqamaNo()!;
+        var result = await housingService.GetHousingSpendingReportAsync(
+            managerIqamaNo, startDate, endDate);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
     [HttpGet("housing/detailed-daily-performance")]
     public async Task<IActionResult> GetDetailedDailyPerformance(
     [FromQuery] DateOnly startDate,
