@@ -14,6 +14,7 @@ using Application.Service.EmployeesFiles;
 using Application.Service.Empolyee;
 using Application.Service.EscapedEmployee;
 using Application.Service.Freelancer;
+using Application.Service.HousingInventory;
 using Application.Service.Hungerdisa;
 using Application.Service.HungerReports;
 using Application.Service.Import;
@@ -99,6 +100,7 @@ public static class ApplicationDependencies
         Services.AddMemoryCache();
         Services.AddScoped<IAiConfirmationStore, AiConfirmationStore>();
         Services.AddScoped<IAiToolDispatcher, AiToolDispatcher>();
+        Services.AddScoped<IHousingInventorySyncService, HousingInventorySyncService>();
 
         #region Hnagfire + Daily Report Job
         // ── Hangfire ────────────────────────────────────────────────────────────────

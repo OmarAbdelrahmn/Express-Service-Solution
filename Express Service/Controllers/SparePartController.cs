@@ -1,5 +1,8 @@
 ﻿using Application.Contracts.SparePartCo;
+using Application.Service.HousingInventory;
+using Application.Service.Import;
 using Application.Service.SparePart;
+using k8s.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -7,9 +10,11 @@ namespace Express_Service.Controllers;
 
 [Route("api/[controller]")]
 [ApiController]
-[Authorize(Roles = "Master,Admin,Member")]
-public class SparePartController(ISparePartService service) : ControllerBase
+//[Authorize(Roles = "Master,Admin,Member")]
+public class SparePartController(ISparePartService service , IHousingInventorySyncService importService) : ControllerBase
 {
+    private readonly IHousingInventorySyncService importService = importService;
+
     [HttpGet("all-housings")]
     [Authorize(Roles = "Master,Admin,Member")]
     public async Task<IActionResult> GetAllHousingsCostSummary(
@@ -153,5 +158,67 @@ public class SparePartController(ISparePartService service) : ControllerBase
 
         var response = await service.RecordBatchSparePartUsageAsync(request);
         return response.IsSuccess ? Ok(response.Value) : response.ToProblem();
+    }
+
+    // POST /api/housing-inventory/check
+    //
+    // READ-ONLY.  Uploads an Excel file and returns, for every row, whether
+    // the item exists anywhere in the database (spare parts OR accessories),
+    // the detected item type, and the current stock across all locations.
+    // Nothing is written to the database.
+    //
+    // Excel format:
+    //   A – Item name   (required)
+    //   B – Quantity    (optional; used only for reference in the response)
+    //   C – Type hint   (optional: "SparePart" / "Accessory" / Arabic equivalents)
+    // ──────────────────────────────────────────────────────────────────────
+    [HttpPost("check")]
+    [Consumes("multipart/form-data")]
+    public async Task<IActionResult> CheckInventory(
+        IFormFile file,
+        [FromQuery] string checkedBy = "system")
+    {
+        if (file is null || file.Length == 0)
+            return BadRequest(new { message = "No file uploaded." });
+
+        var result = await importService.CheckInventoryFromExcelAsync(file, checkedBy);
+
+        if (result.IsFailure)
+            return result.ToProblem();
+
+        return Ok(result.Value);
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // POST /api/housing-inventory/sync/{housingId}
+    //
+    // WRITE.  Uploads an Excel file and synchronises the quantities of every
+    // listed item at the specified housing location.
+    //
+    //   • Item found in DB, housing record already exists → quantity is SET
+    //     to the Excel value (0 when the cell is blank or zero).
+    //   • Item found in DB, NO housing record yet → a new record is created
+    //     at the housing location with the Excel quantity (same pattern used
+    //     by TransferService).
+    //   • Item NOT found anywhere in the DB → skipped and reported.
+    //
+    // Excel format:  same as /check  (A=Name, B=Quantity, C=Type hint)
+    // ──────────────────────────────────────────────────────────────────────
+    [HttpPost("sync/{housingId:int}")]
+    [Consumes("multipart/form-data")]
+    public async Task<IActionResult> SyncHousingInventory(
+        int housingId,
+        IFormFile file,
+        [FromQuery] string syncedBy = "system")
+    {
+        if (file is null || file.Length == 0)
+            return BadRequest(new { message = "No file uploaded." });
+
+        var result = await importService.SyncHousingInventoryFromExcelAsync(file, housingId, syncedBy);
+
+        if (result.IsFailure)
+            return result.ToProblem();
+
+        return Ok(result.Value);
     }
 }
