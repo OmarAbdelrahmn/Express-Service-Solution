@@ -23,10 +23,6 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
     private readonly ApplicationDbcontext context = context;
     private readonly IReportService reportService = reportService;
 
-
-
-
-
     public async Task<Result<HousingSpendingReportResponse>> GetHousingSpendingReportAsync(
     long managerIqamaNo,
     DateOnly startDate,
@@ -48,28 +44,10 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
 
         // ── Spare parts ───────────────────────────────────────────────────────
 
-        // All vehicle numbers assigned to riders in this housing
-        var housingVehicleNumbers = await context.RiderDetails
-            .Where(r => employeeIqamas.Contains(r.EmployeeIqamaNo)
-                && !string.IsNullOrEmpty(r.VehicleNumber))
-            .Select(r => r.VehicleNumber!)
-            .Distinct()
-            .ToListAsync();
-
-        // Also include vehicles whose Location matches the housing name
-        var locationVehicleNumbers = await context.Vehicles
-            .Where(v => v.Location.Contains(housing.Name))
-            .Select(v => v.VehicleNumber)
-            .ToListAsync();
-
-        housingVehicleNumbers = housingVehicleNumbers
-            .Union(locationVehicleNumbers)
-            .Distinct()
-            .ToList();
 
         var sparePartUsages = await context.SparePartUsages
             .Include(u => u.SparePart)
-            .Where(u => housingVehicleNumbers.Contains(u.VehicleNumber)
+            .Where(u => u.Location == housing.Name
                 && u.UsedAt >= fromUtc
                 && u.UsedAt <= toUtc)
             .OrderBy(u => u.VehicleNumber)
@@ -77,9 +55,10 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
             .AsNoTracking()
             .ToListAsync();
 
-        // Resolve plate numbers for all vehicles in one query
+        // Resolve plate numbers for vehicles that appear in usages
+        var usageVehicleNumbers = sparePartUsages.Select(u => u.VehicleNumber).Distinct().ToList();
         var vehiclePlates = await context.Vehicles
-            .Where(v => housingVehicleNumbers.Contains(v.VehicleNumber))
+            .Where(v => usageVehicleNumbers.Contains(v.VehicleNumber))
             .ToDictionaryAsync(v => v.VehicleNumber, v => v.PlateNumberA);
 
         // Group by vehicle → group by spare part
@@ -123,22 +102,18 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
 
         // ── Rider accessories ─────────────────────────────────────────────────
 
-        var housingRiderIds = await context.RiderDetails
-            .Where(r => employeeIqamas.Contains(r.EmployeeIqamaNo))
-            .Select(r => r.Id)
-            .ToListAsync();
-
         var accessoryUsages = await context.RiderAccessoryUsages
             .Include(u => u.RiderAccessory)
             .Include(u => u.Rider)
                 .ThenInclude(r => r.Employee)
-            .Where(u => housingRiderIds.Contains(u.RiderId)
+            .Where(u => u.Location == housing.Name
                 && u.IssuedAt >= fromUtc
                 && u.IssuedAt <= toUtc)
             .OrderBy(u => u.RiderId)
             .ThenBy(u => u.IssuedAt)
             .AsNoTracking()
             .ToListAsync();
+
 
         // Group by rider → group by accessory
         var riderSpending = accessoryUsages
@@ -3894,7 +3869,8 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
                         VehicleNumber = usage.VehicleNumber,
                         QuantityUsed = usage.QuantityUsed,
                         UsedAt = DateTime.UtcNow.AddHours(3),
-                        Cost = sparePart.Price * usage.QuantityUsed
+                        Cost = sparePart.Price * usage.QuantityUsed,
+                        Location = housing.Name   // ← save the manager's housing
                     };
 
                     await context.SparePartUsages.AddAsync(sparePartUsage);
@@ -4210,7 +4186,8 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
                         RiderAccessoryId = usage.AccessoryId,
                         RiderId = usage.RiderId,
                         IssuedAt = DateTime.UtcNow.AddHours(3),
-                        Cost = accessory.Price
+                        Cost = accessory.Price,
+                        Location = housing.Name   // ← save the manager's housing
                     };
 
                     await context.RiderAccessoryUsages.AddAsync(accessoryUsage);

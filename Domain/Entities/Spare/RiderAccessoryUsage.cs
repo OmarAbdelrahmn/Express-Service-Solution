@@ -14,4 +14,5 @@ public class RiderAccessoryUsage
     [Column(TypeName = "decimal(18,2)")]
     public decimal? Cost { get; set; }
     public DateTime IssuedAt { get; set; } = DateTime.UtcNow.AddHours(3);
+    public string? Location { get; set; }
 }
