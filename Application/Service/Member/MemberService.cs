@@ -3917,7 +3917,6 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
                 new Error("BatchError", $"Batch operation failed: {ex.Message}", 500));
         }
     }
-
     public async Task<Result<IEnumerable<SparePartUsageResponse>>> GetSparePartUsageHistoryAsync(
         long managerIqamaNo,
         int sparePartId)
@@ -3928,7 +3927,6 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
 
         var housing = housingResult.Value;
 
-        // Verify spare part belongs to housing
         var sparePart = await context.SpareParts
             .FirstOrDefaultAsync(sp => sp.Id == sparePartId);
 
@@ -3936,33 +3934,11 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
             return Result.Failure<IEnumerable<SparePartUsageResponse>>(
                 new Error("NotFound", "Spare part not found in your housing inventory", 404));
 
-        // Get all housing vehicles
-        var employeeIqamas = housing.Employees
-            .Where(e => !e.IsDeleted)
-            .Select(e => e.IqamaNo)
-            .ToList();
-
-        var housingVehicleNumbers = await context.RiderDetails
-            .Where(r => employeeIqamas.Contains(r.EmployeeIqamaNo)
-                && !string.IsNullOrEmpty(r.VehicleNumber))
-            .Select(r => r.VehicleNumber!)
-            .Distinct()
-            .ToListAsync();
-
-        // Also include vehicles by location
-        var locationVehicles = await context.Vehicles
-            .Where(v => v.Location.Contains(housing.Name))
-            .Select(v => v.VehicleNumber)
-            .ToListAsync();
-
-        housingVehicleNumbers.AddRange(locationVehicles);
-        housingVehicleNumbers = housingVehicleNumbers.Distinct().ToList();
-
-        // Get usage history for this spare part on housing vehicles
+        // ✅ Filter directly by location — no more employee/vehicle resolution
         var usages = await context.SparePartUsages
             .Include(u => u.SparePart)
             .Where(u => u.SparePartId == sparePartId
-                && housingVehicleNumbers.Contains(u.VehicleNumber))
+                && u.Location == housing.Name)
             .OrderByDescending(u => u.UsedAt)
             .AsNoTracking()
             .ToListAsync();
@@ -3979,7 +3955,6 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
 
         return Result.Success(response);
     }
-
     public async Task<Result<IEnumerable<SparePartUsageResponse>>> GetVehicleSparePartHistoryAsync(
         long managerIqamaNo,
         string vehicleNumber)
@@ -4236,8 +4211,8 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
     }
 
     public async Task<Result<IEnumerable<RiderAccessoryUsageResponse>>> GetAccessoryUsageHistoryAsync(
-        long managerIqamaNo,
-        int accessoryId)
+    long managerIqamaNo,
+    int accessoryId)
     {
         var housingResult = await GetManagedHousing(managerIqamaNo);
         if (housingResult.IsFailure)
@@ -4245,7 +4220,6 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
 
         var housing = housingResult.Value;
 
-        // Verify accessory belongs to housing
         var accessory = await context.RiderAccessories
             .FirstOrDefaultAsync(a => a.Id == accessoryId && a.Location == housing.Name);
 
@@ -4253,24 +4227,13 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
             return Result.Failure<IEnumerable<RiderAccessoryUsageResponse>>(
                 new Error("NotFound", "Accessory not found in your housing inventory", 404));
 
-        // Get all housing riders
-        var employeeIqamas = housing.Employees
-            .Where(e => !e.IsDeleted)
-            .Select(e => e.IqamaNo)
-            .ToList();
-
-        var housingRiderIds = await context.RiderDetails
-            .Where(r => employeeIqamas.Contains(r.EmployeeIqamaNo))
-            .Select(r => r.Id)
-            .ToListAsync();
-
-        // Get usage history for this accessory with housing riders
+        // ✅ Filter directly by location — no more employee/rider ID resolution
         var usages = await context.RiderAccessoryUsages
             .Include(u => u.RiderAccessory)
             .Include(u => u.Rider)
                 .ThenInclude(r => r.Employee)
             .Where(u => u.RiderAccessoryId == accessoryId
-                && housingRiderIds.Contains(u.RiderId))
+                && u.Location == housing.Name)
             .OrderByDescending(u => u.IssuedAt)
             .AsNoTracking()
             .ToListAsync();
@@ -4288,7 +4251,6 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
 
         return Result.Success(response);
     }
-
     public async Task<Result<IEnumerable<RiderAccessoryUsageResponse>>> GetRiderAccessoryHistoryAsync(
         long managerIqamaNo,
         int riderId)
@@ -4546,9 +4508,9 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
     }
 
     public async Task<Result<MemberHousingCostSummaryResponse>> GetHousingCostSummaryAsync(
-        long managerIqamaNo,
-        DateTime fromDate,
-        DateTime toDate)
+      long managerIqamaNo,
+      DateTime fromDate,
+      DateTime toDate)
     {
         var housingResult = await GetManagedHousing(managerIqamaNo);
         if (housingResult.IsFailure)
@@ -4556,38 +4518,10 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
 
         var housing = housingResult.Value;
 
-        // Get all housing vehicles
-        var employeeIqamas = housing.Employees
-            .Where(e => !e.IsDeleted)
-            .Select(e => e.IqamaNo)
-            .ToList();
-
-        var housingVehicleNumbers = await context.RiderDetails
-            .Where(r => employeeIqamas.Contains(r.EmployeeIqamaNo)
-                && !string.IsNullOrEmpty(r.VehicleNumber))
-            .Select(r => r.VehicleNumber!)
-            .Distinct()
-            .ToListAsync();
-
-        // Also include vehicles by location
-        var locationVehicles = await context.Vehicles
-            .Where(v => v.Location.Contains(housing.Name))
-            .Select(v => v.VehicleNumber)
-            .ToListAsync();
-
-        housingVehicleNumbers.AddRange(locationVehicles);
-        housingVehicleNumbers = housingVehicleNumbers.Distinct().ToList();
-
-        // Get all housing riders
-        var housingRiderIds = await context.RiderDetails
-            .Where(r => employeeIqamas.Contains(r.EmployeeIqamaNo))
-            .Select(r => r.Id)
-            .ToListAsync();
-
-        // Get spare parts usage costs
+        // Get spare parts usage costs filtered directly by housing location
         var sparePartUsages = await context.SparePartUsages
             .Include(u => u.SparePart)
-            .Where(u => housingVehicleNumbers.Contains(u.VehicleNumber)
+            .Where(u => u.Location == housing.Name
                 && u.UsedAt >= fromDate
                 && u.UsedAt <= toDate)
             .AsNoTracking()
@@ -4595,10 +4529,10 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
 
         var totalSparePartsCost = sparePartUsages.Sum(u => u.QuantityUsed * u.SparePart.Price);
 
-        // Get accessories usage costs
+        // Get accessories usage costs filtered directly by housing location
         var accessoryUsages = await context.RiderAccessoryUsages
             .Include(u => u.RiderAccessory)
-            .Where(u => housingRiderIds.Contains(u.RiderId)
+            .Where(u => u.Location == housing.Name
                 && u.IssuedAt >= fromDate
                 && u.IssuedAt <= toDate)
             .AsNoTracking()
@@ -4606,32 +4540,43 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
 
         var totalAccessoriesCost = accessoryUsages.Sum(u => u.RiderAccessory.Price);
 
-        // Get vehicle cost summaries
+        // Derive vehicle numbers and rider IDs from actual usages
+        var housingVehicleNumbers = sparePartUsages.Select(u => u.VehicleNumber).Distinct().ToList();
+        var housingRiderIds = accessoryUsages.Select(u => u.RiderId).Distinct().ToList();
+
+        // Batch-load vehicle plates to avoid N+1
+        var vehiclePlates = await context.Vehicles
+            .Where(v => housingVehicleNumbers.Contains(v.VehicleNumber))
+            .Select(v => new { v.VehicleNumber, v.PlateNumberA })
+            .ToDictionaryAsync(v => v.VehicleNumber, v => v.PlateNumberA);
+
+        // Batch-load rider details to avoid N+1
+        var riderDetails = await context.RiderDetails
+            .Include(r => r.Employee)
+            .Where(r => housingRiderIds.Contains(r.Id))
+            .Select(r => new { r.Id, r.Employee.NameEN, r.WorkingId })
+            .ToDictionaryAsync(r => r.Id);
+
+        // Build vehicle cost summaries
         var vehicleCosts = sparePartUsages
             .GroupBy(u => u.VehicleNumber)
             .Select(g => new VehicleCostSummaryItem(
                 g.Key,
-                context.Vehicles
-                    .Where(v => v.VehicleNumber == g.Key)
-                    .Select(v => v.PlateNumberA)
-                    .FirstOrDefault() ?? "N/A",
+                vehiclePlates.GetValueOrDefault(g.Key) ?? "N/A",
                 g.Sum(u => u.QuantityUsed * u.SparePart.Price)
             ))
             .OrderByDescending(v => v.TotalCost)
             .ToList();
 
-        // Get rider cost summaries
+        // Build rider cost summaries
         var riderCosts = accessoryUsages
             .GroupBy(u => u.RiderId)
             .Select(g =>
             {
-                var rider = context.RiderDetails
-                    .Include(r => r.Employee)
-                    .FirstOrDefault(r => r.Id == g.Key);
-
+                var rider = riderDetails.GetValueOrDefault(g.Key);
                 return new RiderCostSummaryItem(
                     g.Key,
-                    rider?.Employee.NameEN ?? "Unknown",
+                    rider?.NameEN ?? "Unknown",
                     rider?.WorkingId ?? "N/A",
                     g.Sum(u => u.RiderAccessory.Price)
                 );
@@ -4654,7 +4599,6 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
 
         return Result.Success(response);
     }
-
     #endregion
 
     // Add these methods to the MemberService class
