@@ -884,6 +884,7 @@ public class SparePartService(ApplicationDbcontext dbcontext) : ISparePartServic
                         VehicleNumber = usage.VehicleNumber,
                         QuantityUsed = usage.QuantityUsed,
                         UsedAt = DateTime.UtcNow.AddHours(3),
+                        Location = "الشركة",
                         Cost = sparePart.Price * usage.QuantityUsed
                     };
 
@@ -1060,7 +1061,8 @@ public class SparePartService(ApplicationDbcontext dbcontext) : ISparePartServic
                 SparePartId = sparePartId,
                 VehicleNumber = request.VehicleNumber,
                 QuantityUsed = request.QuantityUsed,
-                UsedAt = DateTime.UtcNow.AddHours(3)
+                UsedAt = DateTime.UtcNow.AddHours(3),
+                Location = "الشركة",
             };
 
             await _dbcontext.SparePartUsages.AddAsync(usage);

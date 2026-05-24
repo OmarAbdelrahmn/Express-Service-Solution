@@ -20,7 +20,7 @@ public interface IReminderService
         UpdateIntervalRequest request,
         string updatedBy);
 
-    /// <summary>Hard-delete an interval (only when no baselines reference it).</summary>
+    /// <summary>Hard-delete an interval.</summary>
     Task<Result> DeleteIntervalAsync(int id);
 
     /// <summary>Flip IsActive on an interval without deleting it.</summary>
@@ -31,27 +31,6 @@ public interface IReminderService
 
     /// <summary>Get a single interval by id.</summary>
     Task<Result<MaintenanceIntervalResponse>> GetIntervalByIdAsync(int id);
-
-    // ══════════════════════════════════════════════════════════════════════
-    //  ADMIN – Baseline Management
-    // ══════════════════════════════════════════════════════════════════════
-
-    /// <summary>
-    /// Set (or upsert) the "last done" baseline for a vehicle or rider.
-    /// Use this to seed historical data before usage tracking began.
-    /// </summary>
-    Task<Result<BaselineResponse>> SetBaselineAsync(
-        SetBaselineRequest request,
-        string setBy);
-
-    /// <summary>List all baselines for a given interval.</summary>
-    Task<Result<IEnumerable<BaselineResponse>>> GetBaselinesByIntervalAsync(int intervalId);
-
-    /// <summary>List all baselines for a given vehicle (across all intervals).</summary>
-    Task<Result<IEnumerable<BaselineResponse>>> GetBaselinesByVehicleAsync(string vehicleNumber);
-
-    /// <summary>List all baselines for a given rider (across all intervals).</summary>
-    Task<Result<IEnumerable<BaselineResponse>>> GetBaselinesByRiderAsync(int riderId);
 
     // ══════════════════════════════════════════════════════════════════════
     //  ADMIN – Global Reminder Dashboard
@@ -123,35 +102,6 @@ public interface IReminderService
         string? UpdatedBy
     );
 
-    // ── Baseline ──────────────────────────────────────────────────────────
-
-    public record SetBaselineRequest(
-        int MaintenanceIntervalId,
-        /// <summary>Required when the interval is SparePart type.</summary>
-        string? VehicleNumber,
-        /// <summary>Required when the interval is Accessory type.</summary>
-        int? RiderId,
-        DateTime LastDoneAt,
-        string? Notes = null
-    );
-
-    public record BaselineResponse(
-        int Id,
-        int MaintenanceIntervalId,
-        string ItemName,
-        MaintenanceItemType ItemType,
-        string? VehicleNumber,
-        string? VehiclePlate,
-        int? RiderId,
-        string? RiderName,
-        DateTime LastDoneAt,
-        DateTime NextDueAt,
-        int DaysUntilDue,
-        string SetBy,
-        DateTime CreatedAt,
-        string? Notes
-    );
-
     // ── Reminder Report ───────────────────────────────────────────────────
 
     public record MaintenanceReminderReport(
@@ -194,10 +144,10 @@ public interface IReminderService
         MaintenanceItemType ItemType,
         int IntervalDays,
         int AlertDaysBeforeDue,
-        /// <summary>Null when no usage or baseline record exists (NeverDone).</summary>
+        /// <summary>Null when no usage record exists (NeverDone).</summary>
         DateTime? LastDoneAt,
         /// <summary>
-        /// Calculated next due date.  When LastDoneAt is null this is set to
+        /// Calculated next due date. When LastDoneAt is null this is set to
         /// DateTime.MinValue to force NeverDone status.
         /// </summary>
         DateTime NextDueAt,
@@ -209,7 +159,7 @@ public interface IReminderService
         /// </summary>
         int DaysUntilDue,
         MaintenanceStatus Status,
-        /// <summary>Source that produced LastDoneAt: "Usage", "Baseline", or "None".</summary>
+        /// <summary>Source that produced LastDoneAt: "Usage" or "None".</summary>
         string RecordSource
     );
 
@@ -223,7 +173,7 @@ public interface IReminderService
         DueToday = 3,
         /// <summary>Due date has already passed.</summary>
         Overdue = 4,
-        /// <summary>No usage record and no baseline – never been serviced.</summary>
+        /// <summary>No usage record – never been serviced.</summary>
         NeverDone = 5
     }
 }

@@ -54,7 +54,6 @@ public class MaintenanceInterval
     public string? UpdatedBy { get; set; }
 
     // ── Navigation ────────────────────────────────────────────────────────
-    public ICollection<VehicleMaintenanceBaseline> Baselines { get; set; } = [];
 }
 
 public enum MaintenanceItemType

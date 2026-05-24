@@ -1,5 +1,4 @@
-﻿
-using Application.Extensions;
+﻿using Application.Extensions;
 using Application.Service.Reminder;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -8,8 +7,8 @@ using static Application.Service.Reminder.IReminderService;
 namespace Express_Service.Controllers;
 
 /// <summary>
-/// Admin-only controller for managing maintenance interval rules,
-/// vehicle/rider baselines, and the global reminder dashboard.
+/// Admin-only controller for managing maintenance interval rules
+/// and the global reminder dashboard.
 /// </summary>
 [Route("api/maintenance")]
 [ApiController]
@@ -72,10 +71,7 @@ public class MaintenanceReminderController(IReminderService reminderService) : C
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
 
-    /// <summary>
-    /// Permanently delete an interval.
-    /// Fails if baseline records exist — deactivate instead.
-    /// </summary>
+    /// <summary>Permanently delete an interval.</summary>
     [HttpDelete("intervals/{id:int}")]
     public async Task<IActionResult> DeleteInterval(int id)
     {
@@ -83,47 +79,6 @@ public class MaintenanceReminderController(IReminderService reminderService) : C
         return result.IsSuccess
             ? Ok(new { message = "Interval deleted successfully." })
             : result.ToProblem();
-    }
-
-    // ══════════════════════════════════════════════════════════════
-    //  BASELINE MANAGEMENT
-    // ══════════════════════════════════════════════════════════════
-
-    /// <summary>
-    /// Set (or overwrite) the "last maintenance done" date for a specific
-    /// vehicle (SparePart interval) or rider (Accessory interval).
-    /// Use this to seed historical data before system tracking began.
-    /// </summary>
-    [HttpPost("baselines")]
-    public async Task<IActionResult> SetBaseline([FromBody] SetBaselineRequest request)
-    {
-        var setBy = User.Identity?.Name ?? "admin";
-        var result = await _reminder.SetBaselineAsync(request, setBy);
-        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
-    }
-
-    /// <summary>List all baselines for a given interval rule.</summary>
-    [HttpGet("baselines/by-interval/{intervalId:int}")]
-    public async Task<IActionResult> GetBaselinesByInterval(int intervalId)
-    {
-        var result = await _reminder.GetBaselinesByIntervalAsync(intervalId);
-        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
-    }
-
-    /// <summary>List all baseline records for a given vehicle (all intervals).</summary>
-    [HttpGet("baselines/by-vehicle/{vehicleNumber}")]
-    public async Task<IActionResult> GetBaselinesByVehicle(string vehicleNumber)
-    {
-        var result = await _reminder.GetBaselinesByVehicleAsync(vehicleNumber);
-        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
-    }
-
-    /// <summary>List all baseline records for a given rider (all intervals).</summary>
-    [HttpGet("baselines/by-rider/{riderId:int}")]
-    public async Task<IActionResult> GetBaselinesByRider(int riderId)
-    {
-        var result = await _reminder.GetBaselinesByRiderAsync(riderId);
-        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
 
     // ══════════════════════════════════════════════════════════════

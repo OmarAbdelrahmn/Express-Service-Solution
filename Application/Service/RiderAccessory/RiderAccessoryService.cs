@@ -90,7 +90,8 @@ public class RiderAccessoryService(ApplicationDbcontext dbcontext) : IRiderAcces
                         RiderAccessoryId = usage.AccessoryId,
                         RiderId = usage.RiderId,
                         IssuedAt = DateTime.UtcNow.AddHours(3),
-                        Cost = accessory.Price
+                        Cost = accessory.Price,
+                        Location = "الشركة"
                     };
 
                     await _dbcontext.RiderAccessoryUsages.AddAsync(accessoryUsage);
@@ -283,6 +284,7 @@ public class RiderAccessoryService(ApplicationDbcontext dbcontext) : IRiderAcces
                 RiderAccessoryId = accessoryId,
                 RiderId = request.RiderId,
                 IssuedAt = DateTime.UtcNow.AddHours(3),
+                Location = "الشركة",
             };
 
             await _dbcontext.RiderAccessoryUsages.AddAsync(usage);
