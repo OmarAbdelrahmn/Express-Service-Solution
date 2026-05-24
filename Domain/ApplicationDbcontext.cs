@@ -54,6 +54,8 @@ public class ApplicationDbcontext(DbContextOptions<ApplicationDbcontext> options
     public DbSet<EmployeeOrder> EmployeeOrders{ get; set; }
 
     public DbSet<TransporterShift> TransporterShifts { get; set; }
+    public DbSet<VehicleMaintenanceBaseline> VehicleMaintenanceBaselines { get; set; }
+    public DbSet<MaintenanceInterval> MaintenanceIntervals { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

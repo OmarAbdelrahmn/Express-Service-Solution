@@ -23,6 +23,7 @@ using Application.Service.Member;
 using Application.Service.MonthlyValidity;
 using Application.Service.Orders;
 using Application.Service.Petrol;
+using Application.Service.Reminder;
 using Application.Service.Reports;
 using Application.Service.Return;
 using Application.Service.RiderAccessory;
@@ -101,6 +102,7 @@ public static class ApplicationDependencies
         Services.AddScoped<IAiConfirmationStore, AiConfirmationStore>();
         Services.AddScoped<IAiToolDispatcher, AiToolDispatcher>();
         Services.AddScoped<IHousingInventorySyncService, HousingInventorySyncService>();
+        Services.AddScoped<IReminderService, ReminderService>();
 
         #region Hnagfire + Daily Report Job
         // ── Hangfire ────────────────────────────────────────────────────────────────

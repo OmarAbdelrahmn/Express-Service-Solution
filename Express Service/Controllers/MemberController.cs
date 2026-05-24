@@ -1,5 +1,6 @@
 ﻿using Application.Extensions;
 using Application.Service.Member;
+using Application.Service.Reminder;
 using Microsoft.AspNetCore.Mvc;
 using static Application.Service.Member.IMemberService;
 
@@ -8,10 +9,30 @@ namespace Express_Service.Controllers;
 [Route("api/[controller]")]
 [ApiController]
 //[ResponseCache(Duration = 300)]
-public class MemberController(IMemberService housingService) : ControllerBase
+public class MemberController(IMemberService housingService, IReminderService reminderService) : ControllerBase
 {
     private readonly IMemberService housingService = housingService;
+    private readonly IReminderService reminderService = reminderService;
 
+
+
+    #region Maintenance Reminders
+
+    /// <summary>
+    /// Get all vehicles and riders in this housing that need maintenance
+    /// on the given date.  Omit checkDate (or pass today's date) for today's list.
+    /// Pass tomorrow's date to preview what comes due tomorrow, etc.
+    /// </summary>
+    [HttpGet("maintenance/reminders")]
+    public async Task<IActionResult> GetMaintenanceReminders(
+        [FromQuery] DateOnly? checkDate = null)
+    {
+        var iqamaNo = User.GetUserIqamaNo()!;
+        var result = await reminderService.GetHousingDueMaintenanceAsync(iqamaNo, checkDate);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    #endregion
 
     /// <summary>
     /// Get detailed spending breakdown for spare parts (per vehicle) and
