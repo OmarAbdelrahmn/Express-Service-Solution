@@ -325,8 +325,8 @@ public class ReminderService(ApplicationDbcontext context) : IReminderService
     // (already done), but also pre-filter by usage location
 
     public async Task<Result<MaintenanceReminderReport>> GetHousingDueMaintenanceAsync(
-     long managerIqamaNo,
-     DateOnly? checkDate = null)
+      long managerIqamaNo,
+      DateOnly? checkDate = null)
     {
         var date = checkDate ?? Today;
 
@@ -347,55 +347,31 @@ public class ReminderService(ApplicationDbcontext context) : IReminderService
         if (!intervals.Any())
             return Result.Success(EmptyReport(date));
 
-        // ── Vehicles: by rider assignment OR by vehicle.Location ──────────────
-        var riderVehicleNumbers = await _ctx.RiderDetails
-            .Where(r => employeeIqamas.Contains(r.EmployeeIqamaNo)
-                && r.VehicleNumber != null)
-            .Select(r => r.VehicleNumber!)
-            .Distinct()
-            .ToListAsync();
-
-        var locationVehicleNumbers = await _ctx.Vehicles
-            .Where(v => v.Location == housing.Name)
-            .Select(v => v.VehicleNumber)
-            .ToListAsync();
-
-        var allVehicleNumbers = riderVehicleNumbers
-            .Concat(locationVehicleNumbers)
-            .Distinct()
-            .ToList();
-
-        // ── Only keep vehicles that actually have at least one SparePartUsage ──
         var spIntervalSparePartIds = intervals
             .Where(i => i.ItemType == MaintenanceItemType.SparePart && i.SparePartId.HasValue)
             .Select(i => i.SparePartId!.Value)
             .Distinct()
             .ToList();
 
-        List<string> vehicleNumbersWithUsage;
-        if (spIntervalSparePartIds.Any())
-        {
-            vehicleNumbersWithUsage = await _ctx.SparePartUsages
-                .Where(u => allVehicleNumbers.Contains(u.VehicleNumber)
+        // ── Vehicles come ONLY from SparePartUsage where Location == housing.Name ──
+        var vehicleNumbersFromUsage = spIntervalSparePartIds.Any()
+            ? await _ctx.SparePartUsages
+                .Where(u => u.Location == housing.Name
                     && spIntervalSparePartIds.Contains(u.SparePartId))
                 .Select(u => u.VehicleNumber)
                 .Distinct()
-                .ToListAsync();
-        }
-        else
-        {
-            vehicleNumbersWithUsage = new List<string>();
-        }
+                .ToListAsync()
+            : new List<string>();
 
-        var housingVehicles = vehicleNumbersWithUsage.Any()
+        var housingVehicles = vehicleNumbersFromUsage.Any()
             ? await _ctx.Vehicles
                 .Include(v => v.RiderDetails).ThenInclude(r => r!.Employee)
-                .Where(v => vehicleNumbersWithUsage.Contains(v.VehicleNumber))
+                .Where(v => vehicleNumbersFromUsage.Contains(v.VehicleNumber))
                 .AsNoTracking()
                 .ToListAsync()
             : new List<Vehicle>();
 
-        // ── Riders: in this housing, non-employee, with at least one accessory usage ──
+        // ── Riders: from housing employees with accessory usage ───────────────
         var accIntervalAccessoryIds = intervals
             .Where(i => i.ItemType == MaintenanceItemType.Accessory && i.AccessoryId.HasValue)
             .Select(i => i.AccessoryId!.Value)
@@ -408,20 +384,14 @@ public class ReminderService(ApplicationDbcontext context) : IReminderService
             .Select(r => r.Id)
             .ToListAsync();
 
-        List<int> riderIdsWithUsage;
-        if (accIntervalAccessoryIds.Any() && allRiderIds.Any())
-        {
-            riderIdsWithUsage = await _ctx.RiderAccessoryUsages
+        var riderIdsWithUsage = accIntervalAccessoryIds.Any() && allRiderIds.Any()
+            ? await _ctx.RiderAccessoryUsages
                 .Where(u => allRiderIds.Contains(u.RiderId)
                     && accIntervalAccessoryIds.Contains(u.RiderAccessoryId))
                 .Select(u => u.RiderId)
                 .Distinct()
-                .ToListAsync();
-        }
-        else
-        {
-            riderIdsWithUsage = new List<int>();
-        }
+                .ToListAsync()
+            : new List<int>();
 
         var housingRiders = riderIdsWithUsage.Any()
             ? await _ctx.RiderDetails
@@ -436,15 +406,12 @@ public class ReminderService(ApplicationDbcontext context) : IReminderService
 
         return Result.Success(report);
     }
-    // ══════════════════════════════════════════════════════════════════════
-    //  CORE CALCULATION ENGINE
-    // ══════════════════════════════════════════════════════════════════════
     private async Task<MaintenanceReminderReport> BuildReportAsync(
-        DateOnly checkDate,
-        List<MaintenanceInterval> intervals,
-        List<Vehicle> vehicles,
-        List<RiderDetails> riders,
-        string? housingName = null)
+      DateOnly checkDate,
+      List<MaintenanceInterval> intervals,
+      List<Vehicle> vehicles,
+      List<RiderDetails> riders,
+      string? housingName = null)
     {
         var vehicleReminders = new List<VehicleMaintenanceReminder>();
         var riderReminders = new List<RiderMaintenanceReminder>();
@@ -453,12 +420,12 @@ public class ReminderService(ApplicationDbcontext context) : IReminderService
             .Where(i => i.ItemType == MaintenanceItemType.SparePart)
             .ToList();
 
-        if (spIntervals.Any())
+        if (spIntervals.Any() && vehicles.Any())
         {
             var spIds = spIntervals.Select(i => i.SparePartId!.Value).Distinct().ToList();
             var vehicleNumbers = vehicles.Select(v => v.VehicleNumber).ToList();
 
-            // ── KEY CHANGE: filter by Location when housingName is known ──
+            // Filter by Location when available so LastUsedAt is from THIS housing's stock
             var usageQuery = _ctx.SparePartUsages
                 .Where(u => spIds.Contains(u.SparePartId)
                     && vehicleNumbers.Contains(u.VehicleNumber));
@@ -477,11 +444,6 @@ public class ReminderService(ApplicationDbcontext context) : IReminderService
                 .AsNoTracking()
                 .ToListAsync();
 
-            // ── Vehicles that actually have at least one usage record ──────
-            var vehiclesWithUsage = vehicles
-                .Where(v => usages.Any(u => u.VehicleNumber == v.VehicleNumber))
-                .ToList();
-
             var intervalIds = spIntervals.Select(i => i.Id).ToList();
             var baselines = await _ctx.VehicleMaintenanceBaselines
                 .Where(b => intervalIds.Contains(b.MaintenanceIntervalId)
@@ -490,8 +452,7 @@ public class ReminderService(ApplicationDbcontext context) : IReminderService
                 .AsNoTracking()
                 .ToListAsync();
 
-            // ── Only iterate vehicles that HAVE usage records ──────────────
-            foreach (var vehicle in vehiclesWithUsage)
+            foreach (var vehicle in vehicles)
             {
                 var dueItems = new List<MaintenanceItem>();
 
@@ -501,19 +462,18 @@ public class ReminderService(ApplicationDbcontext context) : IReminderService
                         u.SparePartId == interval.SparePartId!.Value &&
                         u.VehicleNumber == vehicle.VehicleNumber);
 
-                    // Skip this interval for this vehicle if no usage record exists
-                    // (NeverDone items are excluded — we only show items with history)
-                    if (usageEntry == null) continue;
-
                     var baselineEntry = baselines.FirstOrDefault(b =>
                         b.MaintenanceIntervalId == interval.Id &&
                         b.VehicleNumber == vehicle.VehicleNumber);
 
-                    DateTime? usageDate = usageEntry.LastUsedAt;
+                    if (usageEntry == null && baselineEntry == null)
+                        continue;
+
+                    DateTime? usageDate = usageEntry?.LastUsedAt;
                     DateTime? baselineDate = baselineEntry?.LastDoneAt;
                     string recordSource = "None";
-
                     DateTime? effectiveLastDone = null;
+
                     if (usageDate.HasValue && baselineDate.HasValue)
                     {
                         effectiveLastDone = usageDate > baselineDate ? usageDate : baselineDate;
@@ -530,8 +490,7 @@ public class ReminderService(ApplicationDbcontext context) : IReminderService
                         recordSource = "Baseline";
                     }
 
-                    var item = ComputeMaintenanceItem(
-                        interval, checkDate, effectiveLastDone, recordSource);
+                    var item = ComputeMaintenanceItem(interval, checkDate, effectiveLastDone, recordSource);
 
                     if (item.Status != MaintenanceStatus.OK)
                         dueItems.Add(item);
@@ -551,12 +510,11 @@ public class ReminderService(ApplicationDbcontext context) : IReminderService
             }
         }
 
-        // ── Accessory intervals (per rider) — unchanged ───────────────────
         var accIntervals = intervals
             .Where(i => i.ItemType == MaintenanceItemType.Accessory)
             .ToList();
 
-        if (accIntervals.Any())
+        if (accIntervals.Any() && riders.Any())
         {
             var accIds = accIntervals.Select(i => i.AccessoryId!.Value).Distinct().ToList();
             var riderIds = riders.Select(r => r.Id).ToList();
@@ -592,18 +550,18 @@ public class ReminderService(ApplicationDbcontext context) : IReminderService
                         u.RiderAccessoryId == interval.AccessoryId!.Value &&
                         u.RiderId == rider.Id);
 
-                    // Same rule: skip if no usage record exists for this rider
-                    if (usageEntry == null) continue;
-
                     var baselineEntry = baselines.FirstOrDefault(b =>
                         b.MaintenanceIntervalId == interval.Id &&
                         b.RiderId == rider.Id);
 
-                    DateTime? usageDate = usageEntry.LastIssuedAt;
+                    if (usageEntry == null && baselineEntry == null)
+                        continue;
+
+                    DateTime? usageDate = usageEntry?.LastIssuedAt;
                     DateTime? baselineDate = baselineEntry?.LastDoneAt;
                     string recordSource = "None";
-
                     DateTime? effectiveLastDone = null;
+
                     if (usageDate.HasValue && baselineDate.HasValue)
                     {
                         effectiveLastDone = usageDate > baselineDate ? usageDate : baselineDate;
@@ -620,8 +578,7 @@ public class ReminderService(ApplicationDbcontext context) : IReminderService
                         recordSource = "Baseline";
                     }
 
-                    var item = ComputeMaintenanceItem(
-                        interval, checkDate, effectiveLastDone, recordSource);
+                    var item = ComputeMaintenanceItem(interval, checkDate, effectiveLastDone, recordSource);
 
                     if (item.Status != MaintenanceStatus.OK)
                         dueItems.Add(item);
@@ -645,7 +602,6 @@ public class ReminderService(ApplicationDbcontext context) : IReminderService
             }
         }
 
-        // ── Aggregate ─────────────────────────────────────────────────────
         var allItems = vehicleReminders.SelectMany(v => v.DueItems)
             .Concat(riderReminders.SelectMany(r => r.DueItems))
             .ToList();
@@ -657,17 +613,11 @@ public class ReminderService(ApplicationDbcontext context) : IReminderService
             TotalOverdueItems: allItems.Count(i => i.Status == MaintenanceStatus.Overdue),
             TotalDueTodayItems: allItems.Count(i => i.Status == MaintenanceStatus.DueToday),
             TotalUpcomingItems: allItems.Count(i => i.Status == MaintenanceStatus.Upcoming),
-            TotalNeverDoneItems: 0,   // NeverDone items are now excluded by design
-            VehicleReminders: vehicleReminders
-                .OrderBy(v => v.DueItems.Min(i => i.DaysUntilDue))
-                .ToList(),
-            RiderReminders: riderReminders
-                .OrderBy(r => r.DueItems.Min(i => i.DaysUntilDue))
-                .ToList()
+            TotalNeverDoneItems: 0,
+            VehicleReminders: vehicleReminders.OrderBy(v => v.DueItems.Min(i => i.DaysUntilDue)).ToList(),
+            RiderReminders: riderReminders.OrderBy(r => r.DueItems.Min(i => i.DaysUntilDue)).ToList()
         );
     }
-    // ── Single item calculation ───────────────────────────────────────────
-
     private static MaintenanceItem ComputeMaintenanceItem(
         MaintenanceInterval interval,
         DateOnly checkDate,
