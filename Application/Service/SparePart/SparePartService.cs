@@ -14,37 +14,99 @@ public class SparePartService(ApplicationDbcontext dbcontext) : ISparePartServic
     private const string COMPANY_STOCK = "الشركة";
 
     public async Task<Result<ComprehensiveHousingCostReport>> GetAllHousingsCostReportAsync(
-        DateTime fromDate,
-        DateTime toDate)
+    DateTime fromDate,
+    DateTime toDate)
     {
         try
         {
-            var housingDetails = new List<HousingCostDetail>();
-
-            // Get all housings
-            var housings = await _dbcontext.Housings
-                .Include(h => h.Employees)
-                .Where(h => h.Employees.Any(e => !e.IsDeleted))
+            // ── 1. Load all usages in range (location-driven, no housing join needed) ──
+            var sparePartUsages = await _dbcontext.SparePartUsages
+                .Include(u => u.SparePart)
+                .Include(u => u.Vehicle)
+                .Where(u => u.UsedAt >= fromDate &&
+                            u.UsedAt <= toDate &&
+                            u.Location != null)
+                .OrderByDescending(u => u.UsedAt)
                 .ToListAsync();
 
-            // Process each housing
-            foreach (var housing in housings)
+            var accessoryUsages = await _dbcontext.RiderAccessoryUsages
+                .Include(u => u.RiderAccessory)
+                .Include(u => u.Rider)
+                    .ThenInclude(r => r.Employee)
+                .Where(u => u.IssuedAt >= fromDate &&
+                            u.IssuedAt <= toDate &&
+                            u.Location != null)
+                .OrderByDescending(u => u.IssuedAt)
+                .ToListAsync();
+
+            // ── 2. Pre-load housings for Id look-up (single query, no N+1) ──────────
+            var housings = await _dbcontext.Housings
+                .AsNoTracking()
+                .ToListAsync();
+
+            var housingIdByName = housings.ToDictionary(h => h.Name, h => h.Id);
+
+            // ── 3. Collect every distinct location across both usage tables ──────────
+            var allLocations = sparePartUsages.Select(u => u.Location!)
+                .Concat(accessoryUsages.Select(u => u.Location!))
+                .Distinct()
+                .ToList();
+
+            // ── 4. Build per-location detail objects ──────────────────────────────────
+            var housingDetails = new List<HousingCostDetail>();
+            CompanyStockDetail? companyStockDetail = null;
+
+            foreach (var location in allLocations)
             {
-                var housingDetail = await GetHousingDetailAsync(housing, fromDate, toDate);
-                if (housingDetail != null)
+                var locationSpareParts = sparePartUsages
+                    .Where(u => u.Location == location)
+                    .ToList();
+
+                var locationAccessories = accessoryUsages
+                    .Where(u => u.Location == location)
+                    .ToList();
+
+                var vehicleUsages = BuildVehicleSparePartUsagesFromList(locationSpareParts);
+                var riderUsages = BuildRiderAccessoryUsagesFromList(locationAccessories);
+
+                var totalSparePartsCost = vehicleUsages.Sum(v => v.TotalVehicleCost);
+                var totalAccessoriesCost = riderUsages.Sum(r => r.TotalRiderCost);
+                var totalHousingCost = totalSparePartsCost + totalAccessoriesCost;
+
+                if (location == COMPANY_STOCK)
                 {
-                    housingDetails.Add(housingDetail);
+                    companyStockDetail = new CompanyStockDetail(
+                        totalHousingCost,
+                        totalSparePartsCost,
+                        totalAccessoriesCost,
+                        vehicleUsages,
+                        riderUsages
+                    );
+                }
+                else
+                {
+                    housingIdByName.TryGetValue(location, out var housingId);
+
+                    housingDetails.Add(new HousingCostDetail(
+                        housingId,
+                        location,
+                        totalHousingCost,
+                        totalSparePartsCost,
+                        totalAccessoriesCost,
+                        vehicleUsages,
+                        riderUsages
+                    ));
                 }
             }
 
-            // Get company stock details
-            var companyStockDetail = await GetCompanyStockDetailAsync(fromDate, toDate);
+            // ── 5. Fall-back: empty company-stock block if no usages found for it ─────
+            companyStockDetail ??= new CompanyStockDetail(0, 0, 0, [], []);
 
-            // Calculate company totals
-            var totalCompanySparePartsCost = housingDetails.Sum(h => h.TotalSparePartsCost) +
-                                            companyStockDetail.TotalSparePartsCost;
-            var totalCompanyAccessoriesCost = housingDetails.Sum(h => h.TotalAccessoriesCost) +
-                                             companyStockDetail.TotalAccessoriesCost;
+            // ── 6. Roll up company-wide totals ────────────────────────────────────────
+            var totalCompanySparePartsCost = housingDetails.Sum(h => h.TotalSparePartsCost)
+                                            + companyStockDetail.TotalSparePartsCost;
+            var totalCompanyAccessoriesCost = housingDetails.Sum(h => h.TotalAccessoriesCost)
+                                            + companyStockDetail.TotalAccessoriesCost;
             var totalCompanyCost = totalCompanySparePartsCost + totalCompanyAccessoriesCost;
 
             var report = new ComprehensiveHousingCostReport(
@@ -66,6 +128,79 @@ public class SparePartService(ApplicationDbcontext dbcontext) : ISparePartServic
         }
     }
 
+    /// <summary>
+    /// Builds vehicle spare-part usage groups from a pre-filtered, pre-loaded list.
+    /// Replaces the async DB version for the location-driven report path.
+    /// </summary>
+    private static List<VehicleSparePartUsage> BuildVehicleSparePartUsagesFromList(
+        List<Domain.Entities.Spare.SparePartUsage> usages)
+    {
+        if (!usages.Any())
+            return [];
+
+        return usages
+            .GroupBy(u => u.VehicleNumber)
+            .Select(g =>
+            {
+                var vehicle = g.First().Vehicle;
+
+                var sparePartsUsed = g.Select(u => new SparePartUsageItem(
+                    u.Id,
+                    u.SparePart.Name,
+                    u.QuantityUsed,
+                    u.SparePart.Price,
+                    u.QuantityUsed * u.SparePart.Price,
+                    u.UsedAt
+                )).ToList();
+
+                return new VehicleSparePartUsage(
+                    vehicle.VehicleNumber,
+                    vehicle.PlateNumberA,
+                    vehicle.Location,
+                    sparePartsUsed,
+                    sparePartsUsed.Sum(s => s.TotalCost)
+                );
+            })
+            .OrderByDescending(v => v.TotalVehicleCost)
+            .ToList();
+    }
+
+    /// <summary>
+    /// Builds rider accessory usage groups from a pre-filtered, pre-loaded list.
+    /// Replaces the async DB version for the location-driven report path.
+    /// </summary>
+    private static List<Contracts.SparePartCo.RiderAccessoryUsage> BuildRiderAccessoryUsagesFromList(
+        List<Domain.Entities.Spare.RiderAccessoryUsage> usages)
+    {
+        if (!usages.Any())
+            return [];
+
+        return usages
+            .GroupBy(u => u.RiderId)
+            .Select(g =>
+            {
+                var rider = g.First().Rider;
+
+                var accessories = g.Select(u => new AccessoryUsageItem(
+                    u.Id,
+                    u.RiderAccessory.Name,
+                    u.RiderAccessory.Price,
+                    u.IssuedAt
+                )).ToList();
+
+                return new Contracts.SparePartCo.RiderAccessoryUsage(
+                    rider.Id,
+                    rider.WorkingId ?? "N/A",
+                    rider.Employee.NameEN,
+                    rider.Employee.NameAR,
+                    rider.EmployeeIqamaNo,
+                    accessories,
+                    accessories.Sum(a => a.Price)
+                );
+            })
+            .OrderByDescending(r => r.TotalRiderCost)
+            .ToList();
+    }
     private async Task<HousingCostDetail?> GetHousingDetailAsync(
         Domain.Entities.Housing housing,
         DateTime fromDate,
