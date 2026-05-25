@@ -17,6 +17,6 @@ public interface IRiderAccessoryService
     Task<Result<IEnumerable<RiderAccessoryUsageResponse>>> GetRiderAccessoriesAsync(int riderId);
     Task<Result<IEnumerable<RiderAccessoryUsageResponse>>> GetAccessoryHistoryAsync(int accessoryId);
 
-    Task<Result<BatchUsageResponse>> RecordBatchRiderAccessoryUsageAsync(BatchRiderAccessoryUsageRequest request);
+    Task<Result<BatchUsageResponse>> RecordBatchRiderAccessoryUsageAsync(DateTime Date, BatchRiderAccessoryUsageRequest request);
 
 }

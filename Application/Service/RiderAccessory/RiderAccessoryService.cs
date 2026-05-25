@@ -10,7 +10,7 @@ public class RiderAccessoryService(ApplicationDbcontext dbcontext) : IRiderAcces
 {
     private readonly ApplicationDbcontext _dbcontext = dbcontext;
 
-    public async Task<Result<Contracts.SparePartCo.BatchUsageResponse>> RecordBatchRiderAccessoryUsageAsync(
+    public async Task<Result<Contracts.SparePartCo.BatchUsageResponse>> RecordBatchRiderAccessoryUsageAsync(DateTime Date,
        Contracts.SparePartCo.BatchRiderAccessoryUsageRequest request)
     {
         var details = new List<Contracts.SparePartCo.UsageResultDetail>();
@@ -89,7 +89,7 @@ public class RiderAccessoryService(ApplicationDbcontext dbcontext) : IRiderAcces
                     {
                         RiderAccessoryId = usage.AccessoryId,
                         RiderId = usage.RiderId,
-                        IssuedAt = DateTime.UtcNow.AddHours(3),
+                        IssuedAt = Date,
                         Cost = accessory.Price,
                         Location = "الشركة"
                     };

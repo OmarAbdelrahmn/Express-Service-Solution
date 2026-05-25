@@ -89,12 +89,12 @@ public class RiderAccessoryController(IRiderAccessoryService service) : Controll
     }
 
     [HttpPost("accessories")]
-    public async Task<IActionResult> RecordBatchAccessoryUsage([FromBody] BatchRiderAccessoryUsageRequest request)
+    public async Task<IActionResult> RecordBatchAccessoryUsage([FromQuery] DateTime Date, [FromBody] BatchRiderAccessoryUsageRequest request)
     {
         if (request.Usages == null || !request.Usages.Any())
             return BadRequest("At least one usage record is required");
 
-        var response = await service.RecordBatchRiderAccessoryUsageAsync(request);
+        var response = await service.RecordBatchRiderAccessoryUsageAsync(Date, request);
         return response.IsSuccess ? Ok(response.Value) : response.ToProblem();
     }
 }
