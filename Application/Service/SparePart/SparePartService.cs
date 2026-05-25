@@ -821,7 +821,7 @@ public class SparePartService(ApplicationDbcontext dbcontext) : ISparePartServic
         );
     }
 
-    public async Task<Result<BatchUsageResponse>> RecordBatchSparePartUsageAsync(
+    public async Task<Result<BatchUsageResponse>> RecordBatchSparePartUsageAsync(DateTime Date,
         BatchSparePartUsageRequest request)
     {
         var details = new List<UsageResultDetail>();
@@ -883,7 +883,7 @@ public class SparePartService(ApplicationDbcontext dbcontext) : ISparePartServic
                         SparePartId = usage.SparePartId,
                         VehicleNumber = usage.VehicleNumber,
                         QuantityUsed = usage.QuantityUsed,
-                        UsedAt = DateTime.UtcNow.AddHours(3),
+                        UsedAt = Date,
                         Location = "الشركة",
                         Cost = sparePart.Price * usage.QuantityUsed
                     };

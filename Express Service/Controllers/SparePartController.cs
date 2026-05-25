@@ -151,12 +151,12 @@ public class SparePartController(ISparePartService service , IHousingInventorySy
     }
 
     [HttpPost("spare-parts")]
-    public async Task<IActionResult> RecordBatchSparePartUsage([FromBody] BatchSparePartUsageRequest request)
+    public async Task<IActionResult> RecordBatchSparePartUsage([FromQuery] DateTime date, [FromBody] BatchSparePartUsageRequest request)
     {
         if (request.Usages == null || !request.Usages.Any())
             return BadRequest("At least one usage record is required");
 
-        var response = await service.RecordBatchSparePartUsageAsync(request);
+        var response = await service.RecordBatchSparePartUsageAsync(date,request);
         return response.IsSuccess ? Ok(response.Value) : response.ToProblem();
     }
 
