@@ -221,4 +221,22 @@ public class SparePartController(ISparePartService service , IHousingInventorySy
 
         return Ok(result.Value);
     }
+
+    [HttpPost("sync-price")]
+    [Consumes("multipart/form-data")]
+    public async Task<IActionResult> SyncPricesFromExcel(
+        int housingId,
+        IFormFile file,
+        [FromQuery] string syncedBy = "system")
+    {
+        if (file is null || file.Length == 0)
+            return BadRequest(new { message = "No file uploaded." });
+
+        var result = await importService.SyncPricesFromExcelAsync(file, syncedBy);
+
+        if (result.IsFailure)
+            return result.ToProblem();
+
+        return Ok(result.Value);
+    }
 }

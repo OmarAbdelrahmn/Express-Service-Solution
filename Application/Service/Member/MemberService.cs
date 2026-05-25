@@ -3784,6 +3784,7 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
     #region Spare Parts Usage
 
     public async Task<Result<BatchUsageResponse>> RecordBatchSparePartUsageAsync(
+        DateTime Date,
         long managerIqamaNo,
         MemberBatchSparePartUsageRequest request)
     {
@@ -3868,7 +3869,7 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
                         SparePartId = usage.SparePartId,
                         VehicleNumber = usage.VehicleNumber,
                         QuantityUsed = usage.QuantityUsed,
-                        UsedAt = DateTime.UtcNow.AddHours(3),
+                        UsedAt = Date,
                         Cost = sparePart.Price * usage.QuantityUsed,
                         Location = housing.Name   // ← save the manager's housing
                     };
@@ -4089,6 +4090,7 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
     #region Rider Accessories Usage
 
     public async Task<Result<BatchUsageResponse>> RecordBatchAccessoryUsageAsync(
+        DateTime Date,
         long managerIqamaNo,
         MemberBatchAccessoryUsageRequest request)
     {
@@ -4160,7 +4162,7 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
                     {
                         RiderAccessoryId = usage.AccessoryId,
                         RiderId = usage.RiderId,
-                        IssuedAt = DateTime.UtcNow.AddHours(3),
+                        IssuedAt = Date,
                         Cost = accessory.Price,
                         Location = housing.Name   // ← save the manager's housing
                     };

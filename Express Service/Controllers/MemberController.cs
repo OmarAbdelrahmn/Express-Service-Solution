@@ -128,10 +128,11 @@ public class MemberController(IMemberService housingService, IReminderService re
     /// </summary>
     [HttpPost("spare-parts/usage/batch")]
     public async Task<IActionResult> RecordBatchSparePartUsage(
+        [FromQuery] DateTime Date,
         [FromBody] MemberBatchSparePartUsageRequest request)
     {
         var managerIqamaNo = User.GetUserIqamaNo()!;
-        var result = await housingService.RecordBatchSparePartUsageAsync(
+        var result = await housingService.RecordBatchSparePartUsageAsync(Date,
             managerIqamaNo, request);
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
@@ -202,10 +203,11 @@ public class MemberController(IMemberService housingService, IReminderService re
     /// </summary>
     [HttpPost("accessories/usage/batch")]
     public async Task<IActionResult> RecordBatchAccessoryUsage(
+        [FromQuery] DateTime Date,
         [FromBody] MemberBatchAccessoryUsageRequest request)
     {
         var managerIqamaNo = User.GetUserIqamaNo()!;
-        var result = await housingService.RecordBatchAccessoryUsageAsync(
+        var result = await housingService.RecordBatchAccessoryUsageAsync(Date,
             managerIqamaNo, request);
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }

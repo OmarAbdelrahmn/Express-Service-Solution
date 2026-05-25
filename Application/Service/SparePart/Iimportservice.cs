@@ -30,6 +30,55 @@ public interface IHousingInventorySyncService
         int housingId,
         string syncedBy);
 
+    // ─────────────────────────────────────────────────────────────────────
+    // Endpoint 3 – SYNC PRICES FROM EXCEL (writes)
+    // Reads each row (Name, Price, optional Type) and updates the Price on
+    // every matching record across ALL locations in the database.
+    //   • SparePart and RiderAccessory are both handled.
+    //   • When Type column is absent the service auto-detects (SP preferred).
+    //   • Rows whose name is not found anywhere are reported as NotFound.
+    // ─────────────────────────────────────────────────────────────────────
+    Task<Result<SyncPriceFromExcelResponse>> SyncPricesFromExcelAsync(
+        IFormFile file,
+        string syncedBy);
+
+    public record SyncPriceFromExcelResponse(
+        int TotalRowsInExcel,
+        int SparePartRowsSynced,
+        int AccessoryRowsSynced,
+        int TotalRecordsUpdated,   // individual DB rows touched (one name = many locations)
+        int NotFound,
+        int ValidationErrors,
+        List<SyncPriceRowResult> Results,
+        List<string> ProcessingErrors,
+        DateTime ProcessedAt
+    );
+
+    public record SyncPriceRowResult(
+        int RowNumber,
+        string ItemName,
+        InventoryItemType? ItemType,
+        decimal? NewPrice,
+        SyncPriceAction Action,
+        List<SyncPriceDetail> UpdatedRecords,  // one entry per DB row touched
+        string? ErrorMessage
+    );
+
+    public record SyncPriceDetail(
+        int Id,
+        string Location,
+        decimal OldPrice,
+        decimal NewPrice
+    );
+
+    public enum SyncPriceAction
+    {
+        Updated = 1,       // at least one record had its price changed
+        NoChange = 2,      // all matching records already had this price
+        NotFound = 3,      // name not in DB at all
+        ValidationError = 4
+    }
+
     // ── Response records ──────────────────────────────────────────────────
 
     public record HousingInventoryCheckResponse(

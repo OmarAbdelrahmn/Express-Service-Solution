@@ -205,7 +205,7 @@ public interface IMemberService
     Task<Result<IEnumerable<SparePartResponse>>> SearchSparePartsAsync(long managerIqamaNo, string keyword);
 
     // Spare Parts Usage
-    Task<Result<BatchUsageResponse>> RecordBatchSparePartUsageAsync(
+    Task<Result<BatchUsageResponse>> RecordBatchSparePartUsageAsync(DateTime Date,
         long managerIqamaNo,
         MemberBatchSparePartUsageRequest request);
 
@@ -224,6 +224,7 @@ public interface IMemberService
 
     // Rider Accessories Usage
     Task<Result<BatchUsageResponse>> RecordBatchAccessoryUsageAsync(
+        DateTime Date,
         long managerIqamaNo,
         MemberBatchAccessoryUsageRequest request);
 

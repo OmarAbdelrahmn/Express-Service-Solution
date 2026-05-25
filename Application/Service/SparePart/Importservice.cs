@@ -34,6 +34,228 @@ public class HousingInventorySyncService(ApplicationDbcontext dbContext) : IHous
     //  ENDPOINT 1 – CHECK (read-only)
     // ══════════════════════════════════════════════════════════════════════
 
+    // ══════════════════════════════════════════════════════════════════════
+    //  ENDPOINT 3 – SYNC PRICES FROM EXCEL (writes)
+    // ══════════════════════════════════════════════════════════════════════
+
+    public async Task<Result<SyncPriceFromExcelResponse>> SyncPricesFromExcelAsync(
+        IFormFile file,
+        string syncedBy)
+    {
+        var validationError = ValidateFile(file);
+        if (validationError != null)
+            return Result.Failure<SyncPriceFromExcelResponse>(validationError);
+
+        var rowResults = new List<SyncPriceRowResult>();
+        var processingErrors = new List<string>();
+
+        int spRowsSynced = 0, acRowsSynced = 0;
+        int totalRecordsUpdated = 0, notFoundCount = 0, validationErrors = 0;
+
+        try
+        {
+            Console.WriteLine($"[SyncPricesFromExcel] Starting for file: {file.FileName}");
+
+            // ── Pre-load entire inventory into memory (same pattern as Endpoint 2) ──
+            var allSpareParts = await _db.SpareParts.ToListAsync();
+            var allAccessories = await _db.RiderAccessories.ToListAsync();
+
+            var spByName = allSpareParts
+                .GroupBy(sp => sp.Name.Trim().ToLowerInvariant())
+                .ToDictionary(g => g.Key, g => g.ToList());
+
+            var acByName = allAccessories
+                .GroupBy(a => a.Name.Trim().ToLowerInvariant())
+                .ToDictionary(g => g.Key, g => g.ToList());
+
+            Console.WriteLine(
+                $"[SyncPricesFromExcel] Loaded {allSpareParts.Count} spare part records " +
+                $"({spByName.Count} unique names) and " +
+                $"{allAccessories.Count} accessory records ({acByName.Count} unique names).");
+
+            using var stream = file.OpenReadStream();
+            using var workbook = new XLWorkbook(stream);
+            var ws = workbook.Worksheet(1);
+            if (ws == null)
+                return Result.Failure<SyncPriceFromExcelResponse>(
+                    new Error("InvalidWorksheet", "Could not read worksheet", 400));
+
+            var headerRow = FindPriceHeaderRow(ws);
+            if (headerRow == null)
+                return Result.Failure<SyncPriceFromExcelResponse>(
+                    new Error("EmptyFile", "No header row found", 400));
+
+            var colMap = BuildPriceColumnMapping(headerRow);
+            if (!colMap.IsValid)
+                return Result.Failure<SyncPriceFromExcelResponse>(
+                    new Error("InvalidColumns", colMap.ErrorMessage!, 400));
+
+            var dataRows = ws.RowsUsed()
+                .Where(r => r.RowNumber() > headerRow.RowNumber())
+                .ToList();
+
+            int totalRows = dataRows.Count;
+            Console.WriteLine($"[SyncPricesFromExcel] Data rows: {totalRows}");
+
+            if (totalRows == 0)
+                return Result.Failure<SyncPriceFromExcelResponse>(
+                    new Error("EmptyFile", "No data rows found in Excel file", 400));
+
+            int rowNumber = headerRow.RowNumber();
+
+            foreach (var row in dataRows)
+            {
+                rowNumber++;
+
+                using var transaction = await _db.Database.BeginTransactionAsync();
+                try
+                {
+                    var parsed = ParsePriceRow(row, colMap, rowNumber);
+
+                    if (!parsed.IsValid)
+                    {
+                        validationErrors++;
+                        rowResults.Add(new SyncPriceRowResult(
+                            rowNumber, parsed.Name ?? "N/A",
+                            null, parsed.Price,
+                            SyncPriceAction.ValidationError, [],
+                            parsed.ErrorMessage));
+                        await transaction.RollbackAsync();
+                        continue;
+                    }
+
+                    var nameKey = parsed.Name!.Trim().ToLowerInvariant();
+                    decimal newPrice = parsed.Price!.Value;
+
+                    // ── Resolve type (honours explicit column-C hint) ──────────────
+                    InventoryItemType? itemType = ResolveType(parsed.TypeHint, nameKey, spByName, acByName);
+
+                    if (itemType == null)
+                    {
+                        notFoundCount++;
+                        rowResults.Add(new SyncPriceRowResult(
+                            rowNumber, parsed.Name!, null, newPrice,
+                            SyncPriceAction.NotFound, [],
+                            "Item name not found in spare parts or accessories"));
+                        await transaction.RollbackAsync();
+                        continue;
+                    }
+
+                    var updatedDetails = new List<SyncPriceDetail>();
+
+                    // ── SPARE PART branch ─────────────────────────────────────────
+                    if (itemType == InventoryItemType.SparePart)
+                    {
+                        if (!spByName.TryGetValue(nameKey, out var spRecords))
+                        {
+                            notFoundCount++;
+                            rowResults.Add(new SyncPriceRowResult(
+                                rowNumber, parsed.Name!, itemType, newPrice,
+                                SyncPriceAction.NotFound, [],
+                                "Spare part name not found"));
+                            await transaction.RollbackAsync();
+                            continue;
+                        }
+
+                        foreach (var record in spRecords)
+                        {
+                            updatedDetails.Add(new SyncPriceDetail(
+                                record.Id, record.Location, record.Price, newPrice));
+                            record.Price = newPrice;
+                        }
+
+                        await _db.SaveChangesAsync();
+                        await transaction.CommitAsync();
+
+                        int changed = updatedDetails.Count(d => d.OldPrice != d.NewPrice);
+                        totalRecordsUpdated += changed;
+                        spRowsSynced++;
+
+                        var action = changed > 0 ? SyncPriceAction.Updated : SyncPriceAction.NoChange;
+
+                        rowResults.Add(new SyncPriceRowResult(
+                            rowNumber, parsed.Name!, itemType, newPrice,
+                            action, updatedDetails, null));
+
+                        Console.WriteLine(
+                            $"[SyncPricesFromExcel] SparePart '{parsed.Name}' → {newPrice} " +
+                            $"({spRecords.Count} records, {changed} changed)");
+                    }
+                    // ── ACCESSORY branch ──────────────────────────────────────────
+                    else
+                    {
+                        if (!acByName.TryGetValue(nameKey, out var acRecords))
+                        {
+                            notFoundCount++;
+                            rowResults.Add(new SyncPriceRowResult(
+                                rowNumber, parsed.Name!, itemType, newPrice,
+                                SyncPriceAction.NotFound, [],
+                                "Accessory name not found"));
+                            await transaction.RollbackAsync();
+                            continue;
+                        }
+
+                        foreach (var record in acRecords)
+                        {
+                            updatedDetails.Add(new SyncPriceDetail(
+                                record.Id, record.Location, record.Price, newPrice));
+                            record.Price = newPrice;
+                        }
+
+                        await _db.SaveChangesAsync();
+                        await transaction.CommitAsync();
+
+                        int changed = updatedDetails.Count(d => d.OldPrice != d.NewPrice);
+                        totalRecordsUpdated += changed;
+                        acRowsSynced++;
+
+                        var action = changed > 0 ? SyncPriceAction.Updated : SyncPriceAction.NoChange;
+
+                        rowResults.Add(new SyncPriceRowResult(
+                            rowNumber, parsed.Name!, itemType, newPrice,
+                            action, updatedDetails, null));
+
+                        Console.WriteLine(
+                            $"[SyncPricesFromExcel] Accessory '{parsed.Name}' → {newPrice} " +
+                            $"({acRecords.Count} records, {changed} changed)");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    await transaction.RollbackAsync();
+                    validationErrors++;
+                    processingErrors.Add($"Row {rowNumber}: {ex.Message}");
+                    rowResults.Add(new SyncPriceRowResult(
+                        rowNumber, "N/A", null, null,
+                        SyncPriceAction.ValidationError, [],
+                        $"Exception: {ex.Message}"));
+                    Console.WriteLine($"[SyncPricesFromExcel] ERROR row {rowNumber}: {ex.Message}");
+                }
+            }
+
+            Console.WriteLine($"[SyncPricesFromExcel] Complete:");
+            Console.WriteLine($"  SparePartRows:    {spRowsSynced}");
+            Console.WriteLine($"  AccessoryRows:    {acRowsSynced}");
+            Console.WriteLine($"  RecordsUpdated:   {totalRecordsUpdated}");
+            Console.WriteLine($"  NotFound:         {notFoundCount}");
+            Console.WriteLine($"  Errors:           {validationErrors}");
+
+            return Result.Success(new SyncPriceFromExcelResponse(
+                totalRows,
+                spRowsSynced, acRowsSynced,
+                totalRecordsUpdated,
+                notFoundCount, validationErrors,
+                rowResults, processingErrors,
+                DateTime.UtcNow.AddHours(3)));
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[SyncPricesFromExcel] FATAL: {ex}");
+            return Result.Failure<SyncPriceFromExcelResponse>(
+                new Error("ProcessingError", $"Failed to process file: {ex.Message}", 500));
+        }
+    }
+
     public async Task<Result<HousingInventoryCheckResponse>> CheckInventoryFromExcelAsync(
         IFormFile file,
         string checkedBy)
@@ -189,6 +411,155 @@ public class HousingInventorySyncService(ApplicationDbcontext dbContext) : IHous
             return Result.Failure<HousingInventoryCheckResponse>(
                 new Error("ProcessingError", $"Failed to process file: {ex.Message}", 500));
         }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Price-specific header detection
+    // Name column  → same variants as inventory check
+    // Price column → "Price" / "السعر" / "Unit Price" / "سعر الوحدة" / "p"
+    // Type column  → same optional variants as inventory sync
+    // ─────────────────────────────────────────────────────────────────────
+    private static IXLRow? FindPriceHeaderRow(IXLWorksheet ws)
+    {
+        var nameVariants = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "name", "الاسم", "اسم القطعة", "اسم العنصر", "اسم المنتج",
+        "part name", "item name", "a"
+    };
+
+        var priceVariants = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "price", "السعر", "unit price", "سعر الوحدة", "سعر", "p"
+    };
+
+        for (int i = 1; i <= Math.Min(10, ws.RowsUsed().Count()); i++)
+        {
+            var row = ws.Row(i);
+            var values = row.CellsUsed()
+                .Select(c => c.IsMerged()
+                    ? c.MergedRange().FirstCell().GetString().Trim()
+                    : c.GetString().Trim())
+                .Where(v => !string.IsNullOrWhiteSpace(v))
+                .ToList();
+
+            bool hasName = values.Any(v => nameVariants.Contains(v));
+            bool hasPrice = values.Any(v => priceVariants.Contains(v));
+
+            if (hasName || hasPrice)
+                return row;
+        }
+
+        return ws.Row(1);
+    }
+
+    private static PriceColumnMapping BuildPriceColumnMapping(IXLRow headerRow)
+    {
+        var mapping = new PriceColumnMapping();
+        var cells = headerRow.CellsUsed().ToList();
+
+        mapping.NameCol = FindCol(cells,
+            "name", "الاسم", "اسم القطعة", "اسم العنصر", "اسم المنتج",
+            "part name", "item name", "a");
+
+        mapping.PriceCol = FindCol(cells,
+            "price", "السعر", "unit price", "سعر الوحدة", "سعر", "p");
+
+        mapping.TypeCol = FindCol(cells,
+            "type", "النوع", "item type", "نوع العنصر", "c");
+
+        var missing = new List<string>();
+        if (mapping.NameCol == 0) missing.Add("Name / الاسم");
+        if (mapping.PriceCol == 0) missing.Add("Price / السعر");
+
+        mapping.IsValid = !missing.Any();
+        mapping.ErrorMessage = missing.Any()
+            ? $"Required columns not found: {string.Join(", ", missing)}"
+            : null;
+
+        return mapping;
+    }
+
+    private static PriceRowData ParsePriceRow(
+        IXLRow row,
+        PriceColumnMapping map,
+        int rowNumber)
+    {
+        var data = new PriceRowData { RowNumber = rowNumber };
+
+        try
+        {
+            data.Name = GetCell(row, map.NameCol)?.Trim();
+            if (string.IsNullOrWhiteSpace(data.Name))
+            {
+                data.IsValid = false;
+                data.ErrorMessage = "Item name is required";
+                return data;
+            }
+
+            var priceStr = GetCell(row, map.PriceCol);
+            if (string.IsNullOrWhiteSpace(priceStr))
+            {
+                data.IsValid = false;
+                data.ErrorMessage = "Price is required";
+                return data;
+            }
+
+            var clean = priceStr.Trim().Replace(",", "").Replace(" ", "");
+            if (!decimal.TryParse(clean, out decimal price))
+            {
+                data.IsValid = false;
+                data.ErrorMessage = $"Invalid price value: '{priceStr}'";
+                return data;
+            }
+
+            if (price < 0)
+            {
+                data.IsValid = false;
+                data.ErrorMessage = "Price cannot be negative";
+                return data;
+            }
+
+            data.Price = price;
+
+            // Optional type hint (column C) — reuses the same token logic
+            var typeStr = GetCell(row, map.TypeCol)?.Trim().ToLowerInvariant();
+            if (!string.IsNullOrWhiteSpace(typeStr))
+            {
+                if (typeStr.Contains("spare") || typeStr.Contains("قطعة") || typeStr == "1")
+                    data.TypeHint = InventoryItemType.SparePart;
+                else if (typeStr.Contains("access") || typeStr.Contains("اكسسوار") ||
+                         typeStr.Contains("ملحق") || typeStr == "2")
+                    data.TypeHint = InventoryItemType.Accessory;
+            }
+
+            data.IsValid = true;
+        }
+        catch (Exception ex)
+        {
+            data.IsValid = false;
+            data.ErrorMessage = $"Error parsing row: {ex.Message}";
+        }
+
+        return data;
+    }
+
+    internal class PriceColumnMapping
+    {
+        public bool IsValid { get; set; }
+        public string? ErrorMessage { get; set; }
+        public int NameCol { get; set; }
+        public int PriceCol { get; set; }
+        public int TypeCol { get; set; } // 0 = absent
+    }
+
+    internal class PriceRowData
+    {
+        public int RowNumber { get; set; }
+        public bool IsValid { get; set; }
+        public string? ErrorMessage { get; set; }
+        public string? Name { get; set; }
+        public decimal? Price { get; set; }
+        public InventoryItemType? TypeHint { get; set; }
     }
 
     // ══════════════════════════════════════════════════════════════════════
