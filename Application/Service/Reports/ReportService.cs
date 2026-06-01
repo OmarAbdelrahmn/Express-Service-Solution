@@ -3102,6 +3102,16 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                     new Error("No shifts found for the specified period", "no_data", 404));
             }
 
+            var allShiftRiderIds = shifts.Select(s => s.RiderId).Distinct().ToList();
+
+            var walletByRider = await _dbcontext.Wallets
+                    .Where(w => allShiftRiderIds.Contains(w.WorkedRiderId)
+                             && w.Date >= startDate
+                             && w.Date <= endDate)
+                    .ToDictionaryAsync(
+                        w => w.WorkedRiderId,
+                        w => w.Amount);
+
             // Group by housing
             var housingGroups = shifts
                 .GroupBy(s => new
@@ -3161,7 +3171,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                             workingDays++;
                             totalHours += shift.WorkingHours;
                             totalOrders += shift.AcceptedDailyOrders;
-                            totalRejected += shift.RejectedDailyOrders;
+                            totalRejected += shift.RealRejectedDailyOrders;
 
                             var hoursDiff = shift.WorkingHours - TARGET_HOURS_PER_DAY;
                             var ordersDiff = shift.AcceptedDailyOrders - TARGET_ORDERS_PER_DAY;
@@ -3212,6 +3222,10 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                     var ordersCompletionRate = targetOrders > 0 ? (decimal)totalOrders / targetOrders * 100 : 0;
                     var overallScore = (attendanceRate + hoursCompletionRate + ordersCompletionRate) / 3;
 
+                    var riderWalletAmount = walletByRider.TryGetValue(rider.Id, out var walletAmt)
+                            ? walletAmt
+                            : 0m;
+
                     var periodSummary = new RiderPeriodSummary(
                         TotalWorkingDays: workingDays,
                         TotalAbsentDays: absentDays,
@@ -3227,7 +3241,8 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                         AttendanceRate: attendanceRate,
                         HoursCompletionRate: hoursCompletionRate,
                         OrdersCompletionRate: ordersCompletionRate,
-                        OverallPerformanceScore: overallScore
+                        OverallPerformanceScore: overallScore,
+                        riderWalletAmount
                     );
 
                     riderDetails.Add(new RiderDailyPerformanceDetail(

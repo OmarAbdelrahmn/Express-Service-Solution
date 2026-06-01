@@ -339,7 +339,8 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
                 AttendanceRate: attendanceRate,
                 HoursCompletionRate: hoursCompletionRate,
                 OrdersCompletionRate: ordersCompletionRate,
-                OverallPerformanceScore: overallScore
+                OverallPerformanceScore: overallScore,
+                0
             );
 
             riderDetails.Add(new RiderDailyPerformanceDetail(

@@ -20,6 +20,12 @@ public class AbsentReportJob(
 {
     private readonly DailyReportSettings _settings = options.Value;
 
+
+    private static readonly HashSet<long> Company2Exclusions =
+    [
+
+    ];
+
     public async Task RunAsync(int companyId, DateOnly? targetDate = null)
     {
         // ── Master on/off switch ─────────────────────────────────────────────
@@ -81,6 +87,10 @@ public class AbsentReportJob(
 
             foreach (var rider in riders)
             {
+                if (companyId == 2 && Company2Exclusions.Contains(rider.EmployeeIqamaNo))
+                    continue;
+
+
                 if (shiftByRiderId.TryGetValue(rider.Id, out var shift))
                 {
                     // Rider has a shift but worked less than 8 hours

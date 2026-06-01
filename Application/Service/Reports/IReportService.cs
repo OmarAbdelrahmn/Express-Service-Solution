@@ -568,7 +568,8 @@ public record RiderPeriodSummary(
     decimal AttendanceRate,
     decimal HoursCompletionRate,
     decimal OrdersCompletionRate,
-    decimal OverallPerformanceScore
+    decimal OverallPerformanceScore,
+    decimal TotalWalletAmount   // ★ NEW
 );
 
 public record HousingSummaryMetrics(
