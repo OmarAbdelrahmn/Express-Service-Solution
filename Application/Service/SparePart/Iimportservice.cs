@@ -42,6 +42,40 @@ public interface IHousingInventorySyncService
         IFormFile file,
         string syncedBy);
 
+
+    /// <summary>
+    /// Copies prices from the main company stock (الشركة) to every housing
+    /// location that holds the same item BUT at a different price.
+    /// Only records whose price differs from the الشركة master are updated.
+    /// Items that exist only in housings (not in الشركة) are skipped and reported.
+    /// </summary>
+    Task<Result<SyncPricesFromCompanyStockResponse>> SyncPricesFromCompanyStockAsync(string syncedBy);
+
+    public record SyncPricesFromCompanyStockResponse(
+        int TotalCompanyStockItems,           // distinct names in الشركة
+        int SparePartsUpdated,                // housing spare part records changed
+        int AccessoriesUpdated,               // housing accessory records changed
+        int AlreadyInSync,                    // records that already matched
+        int NotFoundInHousings,               // company items with no housing copies
+        List<CompanyStockSyncDetail> Details,
+        DateTime ProcessedAt
+    );
+
+    public record CompanyStockSyncDetail(
+        string ItemName,
+        InventoryItemType ItemType,
+        decimal CompanyStockPrice,            // the master price from الشركة
+        List<HousingPriceUpdate> HousingUpdates
+    );
+
+    public record HousingPriceUpdate(
+        int ItemId,
+        string Location,
+        decimal OldPrice,
+        decimal NewPrice,
+        bool WasUpdated                       // false when price already matched
+    );
+
     public record SyncPriceFromExcelResponse(
         int TotalRowsInExcel,
         int SparePartRowsSynced,

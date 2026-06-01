@@ -103,6 +103,8 @@ public static class ApplicationDependencies
         Services.AddScoped<IAiToolDispatcher, AiToolDispatcher>();
         Services.AddScoped<IHousingInventorySyncService, HousingInventorySyncService>();
         Services.AddScoped<IReminderService, ReminderService>();
+        Services.AddScoped<IAbsentReportEmailSender, AbsentReportEmailSender>();
+        Services.AddScoped<IAbsentReportJob, AbsentReportJob>();
 
         #region Hnagfire + Daily Report Job
         // ── Hangfire ────────────────────────────────────────────────────────────────

@@ -86,6 +86,17 @@ RecurringJob.AddOrUpdate<IEmailWarmupJob>(
         TimeZone = TimeZoneInfo.FindSystemTimeZoneById("Arab Standard Time")
     });
 
+// 3 PM KSA = 12:00 UTC
+RecurringJob.AddOrUpdate<IAbsentReportJob>(
+    "absent-report-company-1",
+    job => job.RunAsync(1, null),
+    "0 12 * * *");
+
+RecurringJob.AddOrUpdate<IAbsentReportJob>(
+    "absent-report-company-2",
+    job => job.RunAsync(2, null),
+    "0 12 * * *");
+
 
 app.UseStaticFiles();
 

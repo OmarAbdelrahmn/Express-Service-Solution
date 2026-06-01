@@ -28,6 +28,12 @@ public class SparePartController(ISparePartService service , IHousingInventorySy
         return response.IsSuccess ? Ok(response.Value) : response.ToProblem();
     }
 
+    [HttpPost("sync-prices-from-company-stock")]
+    public async Task<IActionResult> SyncPricesFromCompanyStock([FromQuery] string syncedBy)
+    {
+        var result = await importService.SyncPricesFromCompanyStockAsync(syncedBy);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
 
     [HttpGet("all-housings/details")]
     public async Task<IActionResult> GetAllHousingsCostReport(

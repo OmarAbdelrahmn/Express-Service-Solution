@@ -34,6 +34,196 @@ public class HousingInventorySyncService(ApplicationDbcontext dbContext) : IHous
     //  ENDPOINT 1 – CHECK (read-only)
     // ══════════════════════════════════════════════════════════════════════
 
+    private const string COMPANY_STOCK = "الشركة";
+
+    public async Task<Result<SyncPricesFromCompanyStockResponse>> SyncPricesFromCompanyStockAsync(
+        string syncedBy)
+    {
+        try
+        {
+            Console.WriteLine($"[SyncPricesFromCompanyStock] Started by: {syncedBy}");
+
+            // ── 1. Load ALL spare parts and accessories in one shot ────────────
+            var allSpareParts = await _db.SpareParts.ToListAsync();
+            var allAccessories = await _db.RiderAccessories.ToListAsync();
+
+            // ── 2. Separate company-stock master records from housing records ──
+            var companySpParts = allSpareParts
+                .Where(sp => sp.Location == COMPANY_STOCK)
+                .ToList();
+
+            var companyAccessories = allAccessories
+                .Where(a => a.Location == COMPANY_STOCK)
+                .ToList();
+
+            Console.WriteLine(
+                $"[SyncPricesFromCompanyStock] Company stock: " +
+                $"{companySpParts.Count} spare parts, {companyAccessories.Count} accessories.");
+
+            if (!companySpParts.Any() && !companyAccessories.Any())
+                return Result.Success(new SyncPricesFromCompanyStockResponse(
+                    0, 0, 0, 0, 0, [], DateTime.UtcNow.AddHours(3)));
+
+            // ── 3. Build name → company price lookups ──────────────────────────
+            // When الشركة has multiple records for the same name (shouldn't happen
+            // but defensive), use the first one found.
+            var companySpPriceByName = companySpParts
+                .GroupBy(sp => sp.Name.Trim().ToLowerInvariant())
+                .ToDictionary(g => g.Key, g => g.First().Price);
+
+            var companyAcPriceByName = companyAccessories
+                .GroupBy(a => a.Name.Trim().ToLowerInvariant())
+                .ToDictionary(g => g.Key, g => g.First().Price);
+
+            // ── 4. Separate housing records (everything that is NOT الشركة) ────
+            var housingSpParts = allSpareParts
+                .Where(sp => sp.Location != COMPANY_STOCK)
+                .ToList();
+
+            var housingAccessories = allAccessories
+                .Where(a => a.Location != COMPANY_STOCK)
+                .ToList();
+
+            // ── 5. Group housing records by name for easy lookup ───────────────
+            var housingSpByName = housingSpParts
+                .GroupBy(sp => sp.Name.Trim().ToLowerInvariant())
+                .ToDictionary(g => g.Key, g => g.ToList());
+
+            var housingAcByName = housingAccessories
+                .GroupBy(a => a.Name.Trim().ToLowerInvariant())
+                .ToDictionary(g => g.Key, g => g.ToList());
+
+            var details = new List<CompanyStockSyncDetail>();
+            int spUpdated = 0, acUpdated = 0, alreadyInSync = 0, notFoundInHousings = 0;
+
+            // ── 6. Process spare parts ─────────────────────────────────────────
+            foreach (var (nameKey, companyPrice) in companySpPriceByName)
+            {
+                if (!housingSpByName.TryGetValue(nameKey, out var housingRecords))
+                {
+                    // This item exists in الشركة but has no housing copies at all.
+                    notFoundInHousings++;
+                    details.Add(new CompanyStockSyncDetail(
+                        companySpParts.First(sp => sp.Name.Trim().ToLowerInvariant() == nameKey).Name,
+                        InventoryItemType.SparePart,
+                        companyPrice,
+                        []
+                    ));
+                    continue;
+                }
+
+                var housingUpdates = new List<HousingPriceUpdate>();
+
+                foreach (var record in housingRecords)
+                {
+                    bool pricesDiffer = record.Price != companyPrice;
+
+                    housingUpdates.Add(new HousingPriceUpdate(
+                        record.Id,
+                        record.Location,
+                        record.Price,
+                        companyPrice,
+                        pricesDiffer
+                    ));
+
+                    if (pricesDiffer)
+                    {
+                        record.Price = companyPrice;
+                        spUpdated++;
+                    }
+                    else
+                    {
+                        alreadyInSync++;
+                    }
+                }
+
+                details.Add(new CompanyStockSyncDetail(
+                    housingRecords.First().Name,
+                    InventoryItemType.SparePart,
+                    companyPrice,
+                    housingUpdates
+                ));
+            }
+
+            // ── 7. Process accessories ─────────────────────────────────────────
+            foreach (var (nameKey, companyPrice) in companyAcPriceByName)
+            {
+                if (!housingAcByName.TryGetValue(nameKey, out var housingRecords))
+                {
+                    notFoundInHousings++;
+                    details.Add(new CompanyStockSyncDetail(
+                        companyAccessories.First(a => a.Name.Trim().ToLowerInvariant() == nameKey).Name,
+                        InventoryItemType.Accessory,
+                        companyPrice,
+                        []
+                    ));
+                    continue;
+                }
+
+                var housingUpdates = new List<HousingPriceUpdate>();
+
+                foreach (var record in housingRecords)
+                {
+                    bool pricesDiffer = record.Price != companyPrice;
+
+                    housingUpdates.Add(new HousingPriceUpdate(
+                        record.Id,
+                        record.Location,
+                        record.Price,
+                        companyPrice,
+                        pricesDiffer
+                    ));
+
+                    if (pricesDiffer)
+                    {
+                        record.Price = companyPrice;
+                        acUpdated++;
+                    }
+                    else
+                    {
+                        alreadyInSync++;
+                    }
+                }
+
+                details.Add(new CompanyStockSyncDetail(
+                    housingRecords.First().Name,
+                    InventoryItemType.Accessory,
+                    companyPrice,
+                    housingUpdates
+                ));
+            }
+
+            // ── 8. Persist all changes in a single SaveChanges call ────────────
+            await _db.SaveChangesAsync();
+
+            int totalCompanyItems = companySpPriceByName.Count + companyAcPriceByName.Count;
+
+            Console.WriteLine($"[SyncPricesFromCompanyStock] Complete:");
+            Console.WriteLine($"  CompanyStockItems : {totalCompanyItems}");
+            Console.WriteLine($"  SparePartsUpdated : {spUpdated}");
+            Console.WriteLine($"  AccessoriesUpdated: {acUpdated}");
+            Console.WriteLine($"  AlreadyInSync     : {alreadyInSync}");
+            Console.WriteLine($"  NotFoundInHousings: {notFoundInHousings}");
+
+            return Result.Success(new SyncPricesFromCompanyStockResponse(
+                totalCompanyItems,
+                spUpdated,
+                acUpdated,
+                alreadyInSync,
+                notFoundInHousings,
+                details.OrderBy(d => d.ItemName).ToList(),
+                DateTime.UtcNow.AddHours(3)
+            ));
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[SyncPricesFromCompanyStock] FATAL: {ex}");
+            return Result.Failure<SyncPricesFromCompanyStockResponse>(
+                new Error("SyncError",
+                    $"Failed to sync prices from company stock: {ex.Message}", 500));
+        }
+    }
+
     // ══════════════════════════════════════════════════════════════════════
     //  ENDPOINT 3 – SYNC PRICES FROM EXCEL (writes)
     // ══════════════════════════════════════════════════════════════════════

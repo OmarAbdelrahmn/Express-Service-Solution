@@ -4,12 +4,13 @@ using Hangfire;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace Application.Service.DailyReport;
 
 public interface IDailyReportJob
 {
-    Task RunAsync(DateOnly? targetDate = null,bool forcedResend = false);
+    Task RunAsync(DateOnly? targetDate = null, bool forcedResend = false);
 }
 
 public class DailyReportJob(
@@ -17,17 +18,29 @@ public class DailyReportJob(
     IDailyReportEmailSender emailSender,
     ILogger<DailyReportJob> logger,
     IBackgroundJobClient hangfire,
-    IWebHostEnvironment env) : IDailyReportJob
+    IWebHostEnvironment env,
+    IOptions<DailyReportSettings> options) : IDailyReportJob
 {
-    private readonly IWebHostEnvironment env = env;
+    private readonly IWebHostEnvironment _env = env;
+    private readonly DailyReportSettings _settings = options.Value;
 
     public async Task RunAsync(DateOnly? targetDate = null, bool forceResend = false)
     {
+        // ── Master on/off switch ─────────────────────────────────────────────
+
+        _settings.IsEnabled = false; // TEMPORARY: disable the job until further notice
+
+        if (!_settings.IsEnabled)
+        {
+            logger.LogInformation("DailyReportJob is disabled via settings. Skipping.");
+            return;
+        }
+
         var reportDate = targetDate ?? DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3).AddDays(-1));
 
         logger.LogInformation("DailyReportJob starting for {Date}", reportDate);
 
-        // ── Fetch log entry if exists (for retry count tracking only) ───────
+        // ── Fetch log entry if exists (for retry count tracking only) ────────
         var log = await db.DailyReportLogs
             .FirstOrDefaultAsync(x => x.ReportDate == reportDate);
 
@@ -36,18 +49,18 @@ public class DailyReportJob(
             .AsNoTracking()
             .Include(s => s.Rider)
                 .ThenInclude(r => r.Employee)
-            .Include(s => s.Company)           // ← company directly from shift
+            .Include(s => s.Company)
             .Include(s => s.Housing)
             .Where(s => s.ShiftDate == reportDate)
             .ToListAsync();
 
-        // ── Load company logo ────────────────────────────────────────────────────────
-        var logoPath = Path.Combine(env.WebRootPath, "images", "company-logo.png");
+        // ── Load company logo ─────────────────────────────────────────────────
+        var logoPath = Path.Combine(_env.WebRootPath, "images", "company-logo.png");
         byte[]? logoBytes = File.Exists(logoPath)
             ? await File.ReadAllBytesAsync(logoPath, cancellationToken: default)
             : null;
 
-        // ── Guard: data must exist for company 1 AND company 2 ───────────────────
+        // ── Guard: data must exist for company 1 AND company 2 ───────────────
         var companyIds = shifts.Select(s => s.CompanyId).ToHashSet();
 
         var missing = new List<string>();
@@ -60,7 +73,7 @@ public class DailyReportJob(
             var retryCount = log?.RetryCount ?? 0;
 
             logger.LogWarning(
-                "No shifts found for {Missing} on {Date}. Retry #{Count} scheduled in 1 hour.",
+                "No shifts found for {Missing} on {Date}. Retry #{Count} scheduled in 5 minutes.",
                 missingNames, reportDate, retryCount + 1);
 
             if (log is null)
@@ -87,7 +100,6 @@ public class DailyReportJob(
 
             return;
         }
-
 
         // ── Build → PDF → Send → Log ──────────────────────────────────────────
         try
