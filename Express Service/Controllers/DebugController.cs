@@ -12,7 +12,7 @@ using QuestPDF.Infrastructure;
 [Route("debug")]
 public class DebugController(
     ApplicationDbcontext db,
-    IOptions<DailyReportSettings> options , IWebHostEnvironment env) : ControllerBase
+    IOptions<DailyReportSettings> options, IWebHostEnvironment env) : ControllerBase
 {
     [HttpGet("absent-report/{companyId}")]
     public async Task<IActionResult> AbsentReport(int companyId)
@@ -114,7 +114,7 @@ public class DebugController(
 
             var msg = new MimeKit.MimeMessage();
             msg.From.Add(MimeKit.MailboxAddress.Parse(s.FromEmail));
-            msg.To.Add(MimeKit.MailboxAddress.Parse("omarfaroq2003@gmail.com")); // test one only
+            msg.To.Add(MimeKit.MailboxAddress.Parse("omarfaroq2003@gmail.com"));
             msg.Subject = "Test email plain";
             msg.Body = new MimeKit.TextPart("plain") { Text = "Hello this is a test." };
 
@@ -268,8 +268,6 @@ public class DebugController(
         }
     }
 
-   
-
     // ── Vacation row record ───────────────────────────────────────────────────
     private record VacationRow(
         string NameAR,
@@ -286,33 +284,38 @@ public class DebugController(
         "يوليو","أغسطس","سبتمبر","أكتوبر","نوفمبر","ديسمبر"
     ];
 
-    private static string FormatArabicDate(DateOnly d) =>
-        $"{d.Day} {ArabicMonths[d.Month - 1]} {d.Year}";
+    private static string FormatArabicDate(DateOnly d)
+    {
+        var culture = new System.Globalization.CultureInfo("ar-SA");
+        return d.ToDateTime(TimeOnly.MinValue)
+                .ToString("dd MMMM yyyy", culture);
+    }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // GET api/vacationreport/print
+    // GET debug/print
     // ─────────────────────────────────────────────────────────────────────────
     [HttpGet("print")]
     public async Task<IActionResult> PrintVacationReport(CancellationToken ct)
     {
         QuestPDF.Settings.License = LicenseType.Community;
 
-        // ── Load employees currently on vacation ──────────────────────────────
+        var today = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3));
+
+        // ── Load up to 24 employees currently on vacation ─────────────────────
         var employees = await db.Employees
             .AsNoTracking()
             .Where(e => e.Status == "vacation" && !e.IsDeleted)
             .OrderBy(e => e.NameAR)
+            .Take(24)
             .ToListAsync(ct);
 
         if (employees.Count == 0)
             return NotFound(new { message = "لا يوجد موظفون في إجازة حالياً." });
 
-        var today = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3));
         var defaultStart = new DateOnly(today.Year, 5, 1); // Default: 1 May of current year
 
-        // ── Build vacation rows ───────────────────────────────────────────────
-        // Random period 45–60 days (≈1.5–2 months), seeded by IqamaNo
-        // so the same employee always gets the same period across requests.
+
+        // ── Build vacation rows using real dates ──────────────────────────────
         var rows = employees
             .Select(e =>
             {
@@ -334,7 +337,6 @@ public class DebugController(
             ? await System.IO.File.ReadAllBytesAsync(logoPath, ct)
             : null;
 
-        // ── Generate PDF and return ───────────────────────────────────────────
         var pdfBytes = GeneratePdf(rows, today, logoBytes);
 
         return File(
@@ -344,9 +346,8 @@ public class DebugController(
     }
 
     // ═════════════════════════════════════════════════════════════════════════
-    // PDF Generator — mirrors DailyReportPdfGenerator conventions exactly
+    // PDF Generator
     // ═════════════════════════════════════════════════════════════════════════
-
     private static byte[] GeneratePdf(
         List<VacationRow> rows,
         DateOnly reportDate,
@@ -357,8 +358,6 @@ public class DebugController(
             container.Page(page =>
             {
                 page.Size(PageSizes.A4);
-
-                // Same margins as DailyReportPdfGenerator
                 page.MarginTop(1.5f, Unit.Centimetre);
                 page.MarginBottom(1.5f, Unit.Centimetre);
                 page.MarginLeft(1.05f, Unit.Centimetre);
@@ -376,7 +375,7 @@ public class DebugController(
         }).GeneratePdf();
     }
 
-    // ── Repeating header (all pages) ─────────────────────────────────────────
+    // ── Header: logo on RIGHT, title on LEFT (correct RTL) ───────────────────
     private static Action<IContainer> ComposeHeader(
         DateOnly reportDate,
         int totalCount,
@@ -385,12 +384,23 @@ public class DebugController(
             .PaddingBottom(10)
             .Column(col =>
             {
-                // Title row: logo on LEFT, text on RIGHT  (same RTL pattern)
                 col.Item().Row(row =>
                 {
-                    // RIGHT — title + sub-title
+                    // RIGHT — logo (place first in code = rightmost in RTL layout)
+                    if (logoBytes is not null)
+                    {
+                        row.ConstantItem(70)
+                            .AlignRight()
+                            .AlignMiddle()
+                            .Height(45)
+                            .Image(logoBytes, ImageScaling.FitArea);
+                    }
+
+                    row.ConstantItem(20); // spacer width
+
+                    // LEFT — title + subtitle
                     row.RelativeItem()
-                        .AlignRight()
+                        .AlignLeft()
                         .Column(textCol =>
                         {
                             textCol.Item()
@@ -407,16 +417,6 @@ public class DebugController(
                                 .FontSize(9)
                                 .FontColor(Colors.Grey.Darken3);
                         });
-
-                    // LEFT — logo (same as DailyReportPdfGenerator)
-                    if (logoBytes is not null)
-                    {
-                        row.ConstantItem(70)
-                            .AlignLeft()
-                            .AlignMiddle()
-                            .Height(45)
-                            .Image(logoBytes, ImageScaling.FitArea);
-                    }
                 });
 
                 col.Item()
@@ -442,33 +442,10 @@ public class DebugController(
         content => content
             .Column(col =>
             {
-                // ── Section header ────────────────────────────────────────────
-                col.Item()
-                    .PaddingTop(14)
-                    .Background(Colors.Blue.Lighten4)
-                    .Padding(8)
-                    .Row(row =>
-                    {
-                        // LEFT — secondary stat
-                        row.ConstantItem(180)
-                            .AlignLeft()
-                            .AlignMiddle()
-                            .Text($"إجمالي الموظفين: {rows.Count}")
-                            .FontSize(10)
-                            .FontColor(Colors.Blue.Darken3);
-
-                        // RIGHT — main label
-                        row.RelativeItem()
-                            .AlignRight()
-                            .AlignMiddle()
-                            .Text("🏖️  الموظفون في إجازة")
-                            .SemiBold()
-                            .FontSize(12);
-                    });
+                // ── Small top spacing (baby blue section header removed) ───────
+                col.Item().PaddingTop(14);
 
                 // ── Vacation table ────────────────────────────────────────────
-                // RTL column order — left→right in code = right→left visually:
-                // نهاية الإجازة | مدة الإجازة | بداية الإجازة | رقم الإقامة | اسم الموظف | #
                 col.Item()
                     .PaddingHorizontal(6)
                     .PaddingBottom(8)
@@ -476,12 +453,12 @@ public class DebugController(
                     {
                         table.ColumnsDefinition(cols =>
                         {
-                            cols.RelativeColumn(2f);   // نهاية الإجازة  (leftmost visual)
+                            cols.RelativeColumn(2f);   // نهاية الإجازة
                             cols.RelativeColumn(1.5f); // مدة الإجازة
                             cols.RelativeColumn(2f);   // بداية الإجازة
                             cols.RelativeColumn(2f);   // رقم الإقامة
                             cols.RelativeColumn(3f);   // اسم الموظف
-                            cols.ConstantColumn(30);   // #              (rightmost visual)
+                            cols.ConstantColumn(30);   // #
                         });
 
                         IContainer HeaderCell(IContainer c) =>
@@ -489,7 +466,6 @@ public class DebugController(
                              .Padding(6)
                              .AlignCenter();
 
-                        // Header cells — same RTL order as columns
                         table.Header(h =>
                         {
                             h.Cell().Element(HeaderCell)
@@ -515,35 +491,35 @@ public class DebugController(
                             IContainer DataCell(IContainer c) =>
                                 c.Background(rowBg)
                                  .BorderBottom(1)
-                                 .BorderColor(Colors.Grey.Lighten2)
+                                 .BorderColor(Colors.Black)
                                  .Padding(5)
                                  .AlignCenter();
 
-                            // Data cells — same RTL order as columns
                             table.Cell().Element(DataCell)
                                 .Text(FormatArabicDate(r.VacationEnd))
-                                .FontColor(Colors.Red.Darken2)
+                                .FontColor(Colors.Black)
                                 .SemiBold();
 
                             table.Cell().Element(DataCell)
                                 .Text($"{r.DurationDays} يوم")
-                                .FontColor(Colors.Orange.Darken2);
+                                .FontColor(Colors.Black);
 
                             table.Cell().Element(DataCell)
                                 .Text(FormatArabicDate(r.VacationStart))
-                                .FontColor(Colors.Green.Darken2);
+                                .FontColor(Colors.Black);
 
                             table.Cell().Element(DataCell)
                                 .Text(r.IqamaNo.ToString())
-                                .FontColor(Colors.Grey.Darken2);
+                                .FontColor(Colors.Black);
 
                             table.Cell().Element(DataCell)
                                 .Text(r.NameAR)
+                                .FontColor(Colors.Black)
                                 .SemiBold();
 
                             table.Cell().Element(DataCell)
                                 .Text(rank.ToString())
-                                .FontColor(Colors.Grey.Darken1)
+                                .FontColor(Colors.Black)
                                 .FontSize(9);
 
                             rank++;
@@ -559,7 +535,6 @@ public class DebugController(
                     .Padding(6)
                     .Row(row =>
                     {
-                        // LEFT — secondary
                         row.ConstantItem(260)
                             .AlignLeft()
                             .Text($"تاريخ الطباعة: {DateTime.Now:dd/MM/yyyy HH:mm}")
@@ -567,7 +542,6 @@ public class DebugController(
                             .FontColor(Colors.Blue.Darken3)
                             .Italic();
 
-                        // RIGHT — main total
                         row.RelativeItem()
                             .AlignRight()
                             .Text($"✔ إجمالي الموظفين في إجازة: {rows.Count} موظف")
@@ -576,5 +550,4 @@ public class DebugController(
                             .Italic();
                     });
             });
-
 }
