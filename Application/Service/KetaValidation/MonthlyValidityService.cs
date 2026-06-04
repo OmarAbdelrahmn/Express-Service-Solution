@@ -700,6 +700,112 @@ public class MonthlyValidityService(ApplicationDbcontext db) : IMonthlyValidityS
         return false;
     }
 
+
+    // ── Add this method to the MonthlyValidityService class ──
+    // ── Also add to IMonthlyValidityService interface ──
+
+    public async Task<Result<AllKeetaShiftsResponse>> GetAllKeetaDriverShiftsAsync(
+        DateOnly? from = null,
+        DateOnly? to = null,
+        string? platformDriverId = null)
+    {
+        try
+        {
+            var query = _db.KeetaDriverShifts
+                .Include(k => k.ShiftSlots)
+                .Include(k => k.Rider)
+                    .ThenInclude(r => r!.Employee)
+                .Include(k => k.Rider)
+                    .ThenInclude(r => r!.Company)
+                .AsNoTracking();
+
+            if (from.HasValue)
+                query = query.Where(k => k.ReportDate >= from.Value);
+            if (to.HasValue)
+                query = query.Where(k => k.ReportDate <= to.Value);
+            if (!string.IsNullOrWhiteSpace(platformDriverId))
+                query = query.Where(k =>
+                    k.PlatformDriverId == platformDriverId ||
+                    k.WorkingId == platformDriverId);
+
+            var allShifts = await query
+                .OrderBy(k => k.PlatformDriverId)
+                .ThenBy(k => k.ReportDate)
+                .ToListAsync();
+
+            if (allShifts.Count == 0)
+                return Result.Success(new AllKeetaShiftsResponse(
+                    TotalRiders: 0,
+                    TotalShiftRecords: 0,
+                    EarliestDate: null,
+                    LatestDate: null,
+                    Riders: [],
+                    RetrievedAt: DateTime.UtcNow.AddHours(3)
+                ));
+
+            // Group by PlatformDriverId — one group = one rider's full timeline
+            var grouped = allShifts
+                .GroupBy(k => k.PlatformDriverId)
+                .Select(g =>
+                {
+                    var first = g.First();
+                    var rider = first.Rider;
+
+                    var days = g
+                        .OrderBy(k => k.ReportDate)
+                        .Select(k => new KeetaRiderDayDetail(
+                            ReportDate: k.ReportDate,
+                            IsInShift: k.IsInShift,
+                            TasksDelivered: k.TasksDelivered,
+                            ConnectionMinutes: k.TotalConnectionMinutes,
+                            ConnectionTimeRaw: k.TotalConnectionTimeRaw,
+                            QualifiedSlotsCount: k.QualifiedSlotsCount,
+                            Slots: k.ShiftSlots
+                                .OrderBy(s => s.StartTime)
+                                .Select(s => new KeetaSlotDetail(
+                                    s.SlotKey,
+                                    s.DurationRaw,
+                                    s.DurationMinutes,
+                                    s.SlotOrder))
+                                .ToList(),
+                            CreatedAt: k.CreatedAt,
+                            UpdatedAt: k.UpdatedAt
+                        ))
+                        .ToList();
+
+                    return new KeetaRiderShiftSummary(
+                        RiderId: first.RiderId,
+                        PlatformDriverId: first.PlatformDriverId,
+                        WorkingId: first.WorkingId,
+                        RiderNameAR: rider?.Employee?.NameAR,
+                        RiderNameEN: rider?.Employee?.NameEN,
+                        CompanyName: rider?.Company?.Name,
+                        Supervisor: first.Supervisor,
+                        TotalDays: days.Count,
+                        TotalInShiftDays: days.Count(d => d.IsInShift),
+                        TotalTasksDelivered: days.Sum(d => d.TasksDelivered),
+                        TotalConnectionMinutes: days.Sum(d => d.ConnectionMinutes),
+                        Days: days
+                    );
+                })
+                .ToList();
+
+            return Result.Success(new AllKeetaShiftsResponse(
+                TotalRiders: grouped.Count,
+                TotalShiftRecords: allShifts.Count,
+                EarliestDate: allShifts.Min(k => k.ReportDate),
+                LatestDate: allShifts.Max(k => k.ReportDate),
+                Riders: grouped,
+                RetrievedAt: DateTime.UtcNow.AddHours(3)
+            ));
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<AllKeetaShiftsResponse>(
+                new Error("RetrievalError",
+                    $"Failed to retrieve Keeta shift data: {ex.Message}", 500));
+        }
+    }
     // ── Arabic duration → minutes ─────────────────────────────────────────────
 
     /// <summary>

@@ -23,12 +23,57 @@ public interface IMonthlyValidityService
     // Place alongside the other Task<Result<...>> method signatures
     // ============================================================
 
+    // ── Add to IMonthlyValidityService interface ──
+
+    Task<Result<AllKeetaShiftsResponse>> GetAllKeetaDriverShiftsAsync(
+        DateOnly? from = null,
+        DateOnly? to = null,
+        string? platformDriverId = null);
+
     // ── Method signature ─────────────────────────────────────────────────────
 
     Task<Result<KeetaShiftImportResponse>> ImportKeetaDriverShiftsAsync(
         IFormFile file,
         string uploadedBy,
         Action<int, int>? progressCallback = null);
+
+    // ── Add these records to IMonthlyValidityService.cs (after the existing records) ──
+
+    public record AllKeetaShiftsResponse(
+        int TotalRiders,
+        int TotalShiftRecords,
+        DateOnly? EarliestDate,
+        DateOnly? LatestDate,
+        List<KeetaRiderShiftSummary> Riders,
+        DateTime RetrievedAt
+    );
+
+    public record KeetaRiderShiftSummary(
+        int? RiderId,
+        string PlatformDriverId,
+        string? WorkingId,
+        string? RiderNameAR,
+        string? RiderNameEN,
+        string? CompanyName,
+        string? Supervisor,
+        int TotalDays,
+        int TotalInShiftDays,
+        int TotalTasksDelivered,
+        int TotalConnectionMinutes,
+        List<KeetaRiderDayDetail> Days
+    );
+
+    public record KeetaRiderDayDetail(
+        DateOnly ReportDate,
+        bool IsInShift,
+        int TasksDelivered,
+        int ConnectionMinutes,
+        string? ConnectionTimeRaw,
+        int QualifiedSlotsCount,
+        List<KeetaSlotDetail> Slots,
+        DateTime CreatedAt,
+        DateTime? UpdatedAt
+    );
 
     // ── Response records ─────────────────────────────────────────────────────
 
