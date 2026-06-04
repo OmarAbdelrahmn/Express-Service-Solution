@@ -1075,6 +1075,323 @@ public class HousingInventorySyncService(ApplicationDbcontext dbContext) : IHous
         }
     }
 
+    public async Task<Result<HousingInventorySyncResponse>> SyncCompanyStockFromExcelAsync(
+    IFormFile file,
+    string syncedBy)
+    {
+        var validationError = ValidateFile(file);
+        if (validationError != null)
+            return Result.Failure<HousingInventorySyncResponse>(validationError);
+
+        // The target is always the company main stock — no housing lookup needed
+        const string targetLocation = COMPANY_STOCK; // "الشركة"
+        const int fakeHousingId = 0; // no real housing row; we use 0 as a sentinel
+
+        Console.WriteLine($"[SyncCompanyStock] Started by: {syncedBy}, target: {targetLocation}");
+
+        var rowResults = new List<HousingInventorySyncRowResult>();
+        var processingErrors = new List<string>();
+
+        int sparePartsSynced = 0, accessoriesSynced = 0;
+        int recordsCreated = 0, recordsUpdated = 0;
+        int zeroedOut = 0, unchangedCount = 0;
+        int notFoundCount = 0, validationErrors = 0;
+
+        try
+        {
+            using var stream = file.OpenReadStream();
+            using var workbook = new XLWorkbook(stream);
+            var ws = workbook.Worksheet(1);
+
+            if (ws == null)
+                return Result.Failure<HousingInventorySyncResponse>(
+                    new Error("InvalidWorksheet", "Could not read worksheet", 400));
+
+            var headerRow = FindInventoryHeaderRow(ws);
+            if (headerRow == null)
+                return Result.Failure<HousingInventorySyncResponse>(
+                    new Error("EmptyFile", "No header row found", 400));
+
+            var colMap = BuildInventoryColumnMapping(headerRow);
+            if (!colMap.IsValid)
+                return Result.Failure<HousingInventorySyncResponse>(
+                    new Error("InvalidColumns", colMap.ErrorMessage!, 400));
+
+            var dataRows = ws.RowsUsed()
+                              .Where(r => r.RowNumber() > headerRow.RowNumber())
+                              .ToList();
+
+            int totalRows = dataRows.Count;
+            Console.WriteLine($"[SyncCompanyStock] Data rows: {totalRows}");
+
+            if (totalRows == 0)
+                return Result.Failure<HousingInventorySyncResponse>(
+                    new Error("EmptyFile", "No data rows found in Excel file", 400));
+
+            // ── Pre-load ALL inventory once (same pattern as SyncHousingInventory) ──
+            var allSpareParts = await _db.SpareParts.ToListAsync();
+
+            var spByNameAndLocation = allSpareParts
+                .GroupBy(sp => (sp.Name.Trim().ToLowerInvariant(), sp.Location.Trim()))
+                .ToDictionary(g => g.Key, g => g.First());
+
+            var spByName = allSpareParts
+                .GroupBy(sp => sp.Name.Trim().ToLowerInvariant())
+                .ToDictionary(g => g.Key, g => g.ToList());
+
+            var allAccessories = await _db.RiderAccessories.ToListAsync();
+
+            var acByNameAndLocation = allAccessories
+                .GroupBy(a => (a.Name.Trim().ToLowerInvariant(), a.Location.Trim()))
+                .ToDictionary(g => g.Key, g => g.First());
+
+            var acByName = allAccessories
+                .GroupBy(a => a.Name.Trim().ToLowerInvariant())
+                .ToDictionary(g => g.Key, g => g.ToList());
+
+            int rowNumber = headerRow.RowNumber();
+
+            foreach (var row in dataRows)
+            {
+                rowNumber++;
+
+                using var transaction = await _db.Database.BeginTransactionAsync();
+                try
+                {
+                    var parsed = ParseInventoryRow(row, colMap, rowNumber);
+
+                    if (!parsed.IsValid)
+                    {
+                        validationErrors++;
+                        rowResults.Add(new HousingInventorySyncRowResult(
+                            rowNumber, parsed.Name ?? "N/A",
+                            null, parsed.Quantity, null, 0,
+                            SyncAction.ValidationError, parsed.ErrorMessage));
+                        await transaction.RollbackAsync();
+                        continue;
+                    }
+
+                    var nameKey = parsed.Name!.Trim().ToLowerInvariant();
+                    int targetQty = parsed.Quantity;
+
+                    InventoryItemType? itemType =
+                        ResolveType(parsed.TypeHint, nameKey, spByName, acByName);
+
+                    if (itemType == null)
+                    {
+                        notFoundCount++;
+                        rowResults.Add(new HousingInventorySyncRowResult(
+                            rowNumber, parsed.Name!,
+                            null, targetQty, null, 0,
+                            SyncAction.NotFound,
+                            "Item name not found in spare parts or accessories"));
+                        await transaction.RollbackAsync();
+                        continue;
+                    }
+
+                    // ── SPARE PART ────────────────────────────────────────────────
+                    if (itemType == InventoryItemType.SparePart)
+                    {
+                        var housingKey = (nameKey, targetLocation.Trim());
+
+                        if (spByNameAndLocation.TryGetValue(housingKey, out var existing))
+                        {
+                            int prev = existing.Quantity;
+
+                            if (prev == targetQty)
+                            {
+                                unchangedCount++;
+                                rowResults.Add(new HousingInventorySyncRowResult(
+                                    rowNumber, parsed.Name!, itemType,
+                                    targetQty, prev, targetQty,
+                                    SyncAction.NoChange, null));
+                                await transaction.CommitAsync();
+                                sparePartsSynced++;
+                                continue;
+                            }
+
+                            existing.Quantity = targetQty;
+                            await _db.SaveChangesAsync();
+                            await transaction.CommitAsync();
+
+                            var action = targetQty == 0
+                                ? SyncAction.ZeroedOut
+                                : SyncAction.Updated;
+
+                            if (action == SyncAction.ZeroedOut) zeroedOut++;
+                            else recordsUpdated++;
+
+                            rowResults.Add(new HousingInventorySyncRowResult(
+                                rowNumber, parsed.Name!, itemType,
+                                targetQty, prev, targetQty, action, null));
+
+                            Console.WriteLine(
+                                $"[SyncCompanyStock] SP '{parsed.Name}': {prev} → {targetQty}");
+                        }
+                        else
+                        {
+                            // No الشركة record yet → create one
+                            decimal price = spByName.TryGetValue(nameKey, out var anyRecords)
+                                ? anyRecords.First().Price
+                                : 0m;
+
+                            var newRecord = new Domain.Entities.Spare.SparePart
+                            {
+                                Name = parsed.Name!,
+                                Quantity = targetQty,
+                                Price = price,
+                                Location = targetLocation,
+                                CreatedAt = DateTime.UtcNow.AddHours(3)
+                            };
+
+                            await _db.SpareParts.AddAsync(newRecord);
+                            await _db.SaveChangesAsync();
+                            await transaction.CommitAsync();
+
+                            // Keep in-memory map current for the rest of this file
+                            spByNameAndLocation[housingKey] = newRecord;
+
+                            var action = targetQty == 0
+                                ? SyncAction.ZeroedOut
+                                : SyncAction.Created;
+
+                            if (action == SyncAction.ZeroedOut) zeroedOut++;
+                            else recordsCreated++;
+
+                            rowResults.Add(new HousingInventorySyncRowResult(
+                                rowNumber, parsed.Name!, itemType,
+                                targetQty, null, targetQty, action, null));
+
+                            Console.WriteLine(
+                                $"[SyncCompanyStock] SP '{parsed.Name}': created qty={targetQty}");
+                        }
+
+                        sparePartsSynced++;
+                    }
+                    // ── ACCESSORY ─────────────────────────────────────────────────
+                    else
+                    {
+                        var housingKey = (nameKey, targetLocation.Trim());
+
+                        if (acByNameAndLocation.TryGetValue(housingKey, out var existing))
+                        {
+                            int prev = existing.Quantity;
+
+                            if (prev == targetQty)
+                            {
+                                unchangedCount++;
+                                rowResults.Add(new HousingInventorySyncRowResult(
+                                    rowNumber, parsed.Name!, itemType,
+                                    targetQty, prev, targetQty,
+                                    SyncAction.NoChange, null));
+                                await transaction.CommitAsync();
+                                accessoriesSynced++;
+                                continue;
+                            }
+
+                            existing.Quantity = targetQty;
+                            await _db.SaveChangesAsync();
+                            await transaction.CommitAsync();
+
+                            var action = targetQty == 0
+                                ? SyncAction.ZeroedOut
+                                : SyncAction.Updated;
+
+                            if (action == SyncAction.ZeroedOut) zeroedOut++;
+                            else recordsUpdated++;
+
+                            rowResults.Add(new HousingInventorySyncRowResult(
+                                rowNumber, parsed.Name!, itemType,
+                                targetQty, prev, targetQty, action, null));
+
+                            Console.WriteLine(
+                                $"[SyncCompanyStock] AC '{parsed.Name}': {prev} → {targetQty}");
+                        }
+                        else
+                        {
+                            decimal price = acByName.TryGetValue(nameKey, out var anyRecords)
+                                ? anyRecords.First().Price
+                                : 0m;
+
+                            var newRecord = new Domain.Entities.Spare.RiderAccessory
+                            {
+                                Name = parsed.Name!,
+                                Quantity = targetQty,
+                                Price = price,
+                                Location = targetLocation,
+                                CreatedAt = DateTime.UtcNow.AddHours(3)
+                            };
+
+                            await _db.RiderAccessories.AddAsync(newRecord);
+                            await _db.SaveChangesAsync();
+                            await transaction.CommitAsync();
+
+                            acByNameAndLocation[housingKey] = newRecord;
+
+                            var action = targetQty == 0
+                                ? SyncAction.ZeroedOut
+                                : SyncAction.Created;
+
+                            if (action == SyncAction.ZeroedOut) zeroedOut++;
+                            else recordsCreated++;
+
+                            rowResults.Add(new HousingInventorySyncRowResult(
+                                rowNumber, parsed.Name!, itemType,
+                                targetQty, null, targetQty, action, null));
+
+                            Console.WriteLine(
+                                $"[SyncCompanyStock] AC '{parsed.Name}': created qty={targetQty}");
+                        }
+
+                        accessoriesSynced++;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    await transaction.RollbackAsync();
+                    validationErrors++;
+                    processingErrors.Add($"Row {rowNumber}: {ex.Message}");
+                    rowResults.Add(new HousingInventorySyncRowResult(
+                        rowNumber, "N/A", null, 0, null, 0,
+                        SyncAction.ValidationError, $"Exception: {ex.Message}"));
+                    Console.WriteLine($"[SyncCompanyStock] ERROR row {rowNumber}: {ex.Message}");
+                }
+            }
+
+            Console.WriteLine($"[SyncCompanyStock] Complete:");
+            Console.WriteLine($"  SparePartsSynced: {sparePartsSynced}");
+            Console.WriteLine($"  AccessoriesSynced: {accessoriesSynced}");
+            Console.WriteLine($"  Created:  {recordsCreated}");
+            Console.WriteLine($"  Updated:  {recordsUpdated}");
+            Console.WriteLine($"  Zeroed:   {zeroedOut}");
+            Console.WriteLine($"  NoChange: {unchangedCount}");
+            Console.WriteLine($"  NotFound: {notFoundCount}");
+            Console.WriteLine($"  Errors:   {validationErrors}");
+
+            return Result.Success(new HousingInventorySyncResponse(
+                fakeHousingId,
+                targetLocation,
+                dataRows.Count,
+                sparePartsSynced,
+                accessoriesSynced,
+                recordsCreated,
+                recordsUpdated,
+                zeroedOut,
+                notFoundCount,
+                validationErrors,
+                rowResults,
+                processingErrors,
+                DateTime.UtcNow.AddHours(3)));
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[SyncCompanyStock] FATAL: {ex}");
+            return Result.Failure<HousingInventorySyncResponse>(
+                new Error("ProcessingError",
+                    $"Failed to process file: {ex.Message}", 500));
+        }
+    }
+
     // ══════════════════════════════════════════════════════════════════════
     //  PRIVATE HELPERS
     // ══════════════════════════════════════════════════════════════════════

@@ -245,4 +245,25 @@ public class SparePartController(ISparePartService service , IHousingInventorySy
 
         return Ok(result.Value);
     }
+
+    /// <summary>
+    /// Syncs inventory quantities from Excel directly into الشركة (company main stock).
+    /// Excel: A = Name, B = Quantity, C = Type hint (optional)
+    /// </summary>
+    [HttpPost("sync-company-stock")]
+    [Consumes("multipart/form-data")]
+    public async Task<IActionResult> SyncCompanyStock(
+        IFormFile file,
+        [FromQuery] string syncedBy = "system")
+    {
+        if (file is null || file.Length == 0)
+            return BadRequest(new { message = "No file uploaded." });
+
+        var result = await importService.SyncCompanyStockFromExcelAsync(file, syncedBy);
+
+        if (result.IsFailure)
+            return result.ToProblem();
+
+        return Ok(result.Value);
+    }
 }

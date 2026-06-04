@@ -42,6 +42,15 @@ public interface IHousingInventorySyncService
         IFormFile file,
         string syncedBy);
 
+    /// <summary>
+    /// Syncs inventory quantities from an Excel file directly into the
+    /// company main stock ("الشركة") location.
+    /// Same Excel format as SyncHousingInventoryFromExcelAsync:
+    ///   A – Item name (required), B – Quantity, C – Type hint (optional)
+    /// </summary>
+    Task<Result<HousingInventorySyncResponse>> SyncCompanyStockFromExcelAsync(
+        IFormFile file,
+        string syncedBy);
 
     /// <summary>
     /// Copies prices from the main company stock (الشركة) to every housing
