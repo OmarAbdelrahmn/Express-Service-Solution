@@ -55,6 +55,8 @@ public class ApplicationDbcontext(DbContextOptions<ApplicationDbcontext> options
 
     public DbSet<TransporterShift> TransporterShifts { get; set; }
     public DbSet<MaintenanceInterval> MaintenanceIntervals { get; set; }
+    public DbSet<KeetaDriverShift> KeetaDriverShifts { get; set; }
+    public DbSet<KeetaShiftSlot> KeetaShiftSlots{ get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
