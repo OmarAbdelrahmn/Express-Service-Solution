@@ -4829,10 +4829,9 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
 
         var housing = housingResult.Value;
 
-        // Get all transfers from this housing
         var transfers = await context.Transfers
             .Include(t => t.TransferItems)
-            .Where(t => t.FromLocation == housing.Name)
+            .Where(t => t.FromLocation == housing.Name || t.ToLocation == housing.Name) // ← was: only FromLocation
             .OrderByDescending(t => t.TransferredAt)
             .AsNoTracking()
             .ToListAsync();
@@ -4841,6 +4840,88 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
         return Result.Success<IEnumerable<TransferResponse>>(response);
     }
 
+    public async Task<Result<HousingUsageHistoryResponse>> GetHousingUsageHistoryAsync(
+    long managerIqamaNo,
+    DateTime? fromDate = null,
+    DateTime? toDate = null)
+    {
+        var housingResult = await GetManagedHousing(managerIqamaNo);
+        if (housingResult.IsFailure)
+            return Result.Failure<HousingUsageHistoryResponse>(housingResult.Error);
+
+        var housing = housingResult.Value;
+
+        // ── Spare part usages ─────────────────────────────────────────────────
+        var spQuery = context.SparePartUsages
+            .Include(u => u.SparePart)
+            .Where(u => u.Location == housing.Name)
+            .AsQueryable();
+
+        if (fromDate.HasValue)
+            spQuery = spQuery.Where(u => u.UsedAt >= fromDate.Value);
+        if (toDate.HasValue)
+            spQuery = spQuery.Where(u => u.UsedAt <= toDate.Value);
+
+        var spUsages = await spQuery
+            .Include(c=>c.Vehicle)
+            .OrderByDescending(u => u.UsedAt)
+            .AsNoTracking()
+            .ToListAsync();
+
+        // ── Accessory usages ──────────────────────────────────────────────────
+        var acQuery = context.RiderAccessoryUsages
+            .Include(u => u.RiderAccessory)
+            .Include(u => u.Rider)
+                .ThenInclude(r => r.Employee)
+            .Where(u => u.Location == housing.Name)
+            .AsQueryable();
+
+        if (fromDate.HasValue)
+            acQuery = acQuery.Where(u => u.IssuedAt >= fromDate.Value);
+        if (toDate.HasValue)
+            acQuery = acQuery.Where(u => u.IssuedAt <= toDate.Value);
+
+        var acUsages = await acQuery
+            .OrderByDescending(u => u.IssuedAt)
+            .AsNoTracking()
+            .ToListAsync();
+
+        // ── Map ───────────────────────────────────────────────────────────────
+        var spResponse = spUsages.Select(u => new SparePartUsageResponse(
+            u.Id,
+            u.SparePartId,
+            u.SparePart.Name,
+            u.Vehicle.PlateNumberA,
+            u.QuantityUsed,
+            u.UsedAt,
+            u.Cost ?? 0m
+        )).ToList();
+
+        var acResponse = acUsages.Select(u => new RiderAccessoryUsageResponse(
+            u.Id,
+            u.RiderAccessoryId,
+            u.RiderAccessory.Name,
+            u.RiderId,
+            u.Rider?.Employee?.NameEN ?? "N/A",
+            u.Rider?.Employee?.NameAR ?? "N/A",
+            u.IssuedAt,
+            u.Cost ?? 0m
+        )).ToList();
+
+        var totalSp = spResponse.Sum(u => u.Cost);
+        var totalAc = acResponse.Sum(u => u.Cost);
+
+        return Result.Success(new HousingUsageHistoryResponse(
+            HousingName: housing.Name,
+            TotalSparePartUsages: spResponse.Count,
+            TotalAccessoryUsages: acResponse.Count,
+            TotalSparePartsCost: totalSp ?? 0,
+            TotalAccessoriesCost: totalAc ?? 0,
+            GrandTotal: (totalSp ?? 0) + (totalAc ?? 0),
+            SparePartUsages: spResponse,
+            AccessoryUsages: acResponse
+        ));
+    }
     private static TransferResponse MapTransferToResponse(Domain.Entities.Spare.Transfer transfer)
     {
         var items = transfer.TransferItems.Select(ti => new TransferItemResponse(

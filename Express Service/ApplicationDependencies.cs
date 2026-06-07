@@ -105,6 +105,7 @@ public static class ApplicationDependencies
         Services.AddScoped<IReminderService, ReminderService>();
         Services.AddScoped<IAbsentReportEmailSender, AbsentReportEmailSender>();
         Services.AddScoped<IAbsentReportJob, AbsentReportJob>();
+        Services.AddScoped<IItemMovementReportService, ItemMovementReportService>();
 
         #region Hnagfire + Daily Report Job
         // ── Hangfire ────────────────────────────────────────────────────────────────

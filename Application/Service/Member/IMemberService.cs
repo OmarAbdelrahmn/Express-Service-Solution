@@ -10,6 +10,13 @@ namespace Application.Service.Member;
 
 public interface IMemberService
 {
+    /// <summary>
+    /// Get all spare-part and accessory usage records whose location is this housing
+    /// </summary>
+    Task<Result<HousingUsageHistoryResponse>> GetHousingUsageHistoryAsync(
+        long managerIqamaNo,
+        DateTime? fromDate = null,
+        DateTime? toDate = null);
 
     Task<Result<HousingDetailedDailyPerformanceReport>> GetHousingDetailedDailyPerformanceForManagerAsync(
     long managerIqamaNo,
@@ -282,6 +289,16 @@ public interface IMemberService
 }
 // Add these records at the end of the IMemberService.cs file
 
+public record HousingUsageHistoryResponse(
+    string HousingName,
+    int TotalSparePartUsages,
+    int TotalAccessoryUsages,
+    decimal TotalSparePartsCost,
+    decimal TotalAccessoriesCost,
+    decimal GrandTotal,
+    List<SparePartUsageResponse> SparePartUsages,
+    List<RiderAccessoryUsageResponse> AccessoryUsages
+);
 
 public record HousingSpendingReportResponse(
     DateOnly StartDate,

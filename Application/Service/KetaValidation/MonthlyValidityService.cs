@@ -22,14 +22,25 @@ public class MonthlyValidityService(ApplicationDbcontext db) : IMonthlyValidityS
         { 10, "أكتوبر" }, { 11, "نوفمبر" }, { 12, "ديسمبر" }
     };
 
-
     // ============================================================
-    // ADD TO: Application/Service/Import/ImportService.cs
-    // Place inside the ImportService class, inside a new region
+    //  KEETA DRIVER SHIFT IMPORT  (optimised for 4 000+ rows)
     // ============================================================
 
     #region Keeta Driver Shift Import
 
+    /// <summary>
+    /// Imports a Keeta driver-shift Excel file in four phases so that the
+    /// number of database round-trips is constant regardless of row count:
+    ///
+    ///   Phase 1 – Parse the entire worksheet in memory   (0 DB calls)
+    ///   Phase 2 – Load the rider lookup                  (2 DB calls)
+    ///   Phase 3 – Pre-load all existing shift records    (1 DB call)
+    ///   Phase 4 – Resolve every row in memory            (0 DB calls)
+    ///   Phase 5 – Bulk write: RemoveRange + AddRange +
+    ///             single SaveChangesAsync                 (1 DB call)
+    ///
+    /// Total DB round-trips: O(1) instead of O(n).
+    /// </summary>
     public async Task<Result<KeetaShiftImportResponse>> ImportKeetaDriverShiftsAsync(
         IFormFile file,
         string uploadedBy,
@@ -45,20 +56,19 @@ public class MonthlyValidityService(ApplicationDbcontext db) : IMonthlyValidityS
 
         var results = new List<KeetaShiftRowResult>();
         var errors = new List<string>();
-
-        int driversFound = 0;
-        int driversNotFound = 0;
-        int shiftsCreated = 0;
-        int shiftsUpdated = 0;
-        int notInShift = 0;
-        int noQualifiedSlots = 0;
-        int errorRows = 0;
-        DateOnly? earliestDate = null;
-        DateOnly? latestDate = null;
+        int driversFound = 0, driversNotFound = 0;
+        int shiftsCreated = 0, shiftsUpdated = 0;
+        int notInShift = 0, noQualifiedSlots = 0, errorRows = 0;
+        DateOnly? earliestDate = null, latestDate = null;
 
         try
         {
             Console.WriteLine($"[KeetaShiftImport] Starting: {file.FileName}");
+
+            // ══════════════════════════════════════════════════════════════
+            //  PHASE 1 — Open & parse the entire worksheet in memory
+            //  No DB access in this phase.
+            // ══════════════════════════════════════════════════════════════
 
             using var stream = file.OpenReadStream();
             using var workbook = new XLWorkbook(stream);
@@ -68,7 +78,6 @@ public class MonthlyValidityService(ApplicationDbcontext db) : IMonthlyValidityS
                 return Result.Failure<KeetaShiftImportResponse>(
                     new Error("InvalidWorksheet", "Could not read worksheet", 400));
 
-            // ── Header row ─────────────────────────────────────────────────────
             var headerRow = FindKeetaShiftHeaderRow(worksheet);
             if (headerRow == null)
                 return Result.Failure<KeetaShiftImportResponse>(
@@ -86,40 +95,6 @@ public class MonthlyValidityService(ApplicationDbcontext db) : IMonthlyValidityS
                 $"Summary={colMap.ShiftSummaryCol} InShift={colMap.IsInShiftCol} " +
                 $"ConnTime={colMap.ConnectionTimeCol} Tasks={colMap.TasksDeliveredCol}");
 
-            // ── Rider lookup (WorkingId → RiderId) ─────────────────────────────
-            // Primary: RiderDetails.WorkingId
-            var riderLookup = new Dictionary<string, (int Id, string WorkingId)>(
-                StringComparer.OrdinalIgnoreCase);
-
-            var riders = await _db.RiderDetails
-                .Where(r => !string.IsNullOrEmpty(r.WorkingId))
-                .Select(r => new { r.Id, r.WorkingId })
-                .AsNoTracking()
-                .ToListAsync();
-
-            foreach (var r in riders)
-                riderLookup[r.WorkingId!.Trim()] = (r.Id, r.WorkingId!);
-
-            // Fallback: WorkingIdHistory (catches transferred / renamed riders)
-            var history = await _db.RiderWorkingIdHistories
-                .Where(h => !string.IsNullOrEmpty(h.WorkingId))
-                .Include(h => h.Employee)
-                    .ThenInclude(e => e.RiderDetails)
-                .Where(h => h.Employee.RiderDetails != null)
-                .Select(h => new { RiderId = h.Employee.RiderDetails!.Id, h.WorkingId })
-                .AsNoTracking()
-                .ToListAsync();
-
-            foreach (var h in history)
-            {
-                var k = h.WorkingId.Trim();
-                if (!riderLookup.ContainsKey(k))
-                    riderLookup[k] = (h.RiderId, h.WorkingId);
-            }
-
-            Console.WriteLine($"[KeetaShiftImport] Rider lookup loaded: {riderLookup.Count} entries");
-
-            // ── Data rows ───────────────────────────────────────────────────────
             var dataRows = worksheet.RowsUsed()
                 .Where(r => r.RowNumber() > headerRow.RowNumber())
                 .ToList();
@@ -130,178 +105,223 @@ public class MonthlyValidityService(ApplicationDbcontext db) : IMonthlyValidityS
                     new Error("EmptyFile", "No data rows found in Excel file", 400));
 
             Console.WriteLine($"[KeetaShiftImport] Data rows: {totalRows}");
-
             progressCallback?.Invoke(0, totalRows);
 
-            int processed = 0;
-            int rowNumber = headerRow.RowNumber();
-
+            // Parse every row into a lightweight struct — purely in memory.
+            var parsedRows = new List<(int RowNum, KeetaShiftRowData Data)>(totalRows);
             foreach (var row in dataRows)
             {
-                rowNumber++;
-                processed++;
-
-                try
-                {
-                    // ── Parse row ───────────────────────────────────────────────
-                    var rd = ParseKeetaShiftRow(row, colMap, rowNumber);
-
-                    if (!rd.IsValid)
-                    {
-                        errorRows++;
-                        errors.Add($"Row {rowNumber}: {rd.ErrorMessage}");
-                        results.Add(new KeetaShiftRowResult(
-                            rowNumber, rd.PlatformDriverId ?? "N/A",
-                            rd.ReportDate ?? DateOnly.MinValue,
-                            false, null, null, false, 0, 0, 0,
-                            [], KeetaImportAction.Error, rd.ErrorMessage));
-                        continue;
-                    }
-
-                    // ── Date range tracking ─────────────────────────────────────
-                    if (!earliestDate.HasValue || rd.ReportDate!.Value < earliestDate.Value)
-                        earliestDate = rd.ReportDate;
-                    if (!latestDate.HasValue || rd.ReportDate!.Value > latestDate.Value)
-                        latestDate = rd.ReportDate;
-
-                    // ── Rider resolution ────────────────────────────────────────
-                    // Try the explicit WorkingId column first; fall back to PlatformDriverId.
-                    var lookupKey = !string.IsNullOrWhiteSpace(rd.WorkingId)
-                        ? rd.WorkingId!.Trim()
-                        : rd.PlatformDriverId!.Trim();
-
-                    int? riderId = null;
-                    string? resolvedWorkingId = null;
-                    KeetaImportAction action;
-
-                    if (riderLookup.TryGetValue(lookupKey, out var riderInfo))
-                    {
-                        riderId = riderInfo.Id;
-                        resolvedWorkingId = riderInfo.WorkingId;
-                        driversFound++;
-                    }
-                    else
-                    {
-                        driversNotFound++;
-                    }
-
-                    // ── Not-in-shift rows ───────────────────────────────────────
-                    if (!rd.IsInShift)
-                    {
-                        notInShift++;
-                        action = KeetaImportAction.NotInShift;
-                        // Still upsert so supervisors / zero-time data is recorded.
-                    }
-
-                    // ── Parse qualified slots (top-3 by duration) ───────────────
-                    var qualifiedSlots = ParseQualifiedKeetaSlots(rd.RawShiftSummary);
-
-                    if (rd.IsInShift && qualifiedSlots.Count == 0)
-                        noQualifiedSlots++;
-
-                    // ── Upsert KeetaDriverShift ─────────────────────────────────
-                    var existing = await _db.KeetaDriverShifts
-                        .Include(k => k.ShiftSlots)
-                        .FirstOrDefaultAsync(k =>
-                            k.PlatformDriverId == rd.PlatformDriverId &&
-                            k.ReportDate == rd.ReportDate!.Value);
-
-                    if (existing == null)
-                    {
-                        var newShift = new KeetaDriverShift
-                        {
-                            ReportDate = rd.ReportDate!.Value,
-                            PlatformDriverId = rd.PlatformDriverId!,
-                            WorkingId = resolvedWorkingId,
-                            RiderId = riderId,
-                            Supervisor = rd.Supervisor,
-                            IsInShift = rd.IsInShift,
-                            TotalConnectionTimeRaw = rd.ConnectionTimeRaw,
-                            TotalConnectionMinutes = rd.ConnectionMinutes,
-                            TasksDelivered = rd.TasksDelivered,
-                            RawShiftSummary = rd.RawShiftSummary,
-                            QualifiedSlotsCount = qualifiedSlots.Count,
-                            ImportedBy = uploadedBy,
-                            CreatedAt = DateTime.UtcNow.AddHours(3)
-                        };
-
-                        foreach (var s in qualifiedSlots)
-                            newShift.ShiftSlots.Add(MapSlot(s));
-
-                        await _db.KeetaDriverShifts.AddAsync(newShift);
-                        shiftsCreated++;
-                        action = riderId.HasValue
-                            ? KeetaImportAction.Created
-                            : (rd.IsInShift ? KeetaImportAction.DriverNotFound : KeetaImportAction.NotInShift);
-                    }
-                    else
-                    {
-                        // Update all scalar fields; replace slots completely.
-                        existing.WorkingId = resolvedWorkingId ?? existing.WorkingId;
-                        existing.RiderId = riderId ?? existing.RiderId;
-                        existing.Supervisor = rd.Supervisor;
-                        existing.IsInShift = rd.IsInShift;
-                        existing.TotalConnectionTimeRaw = rd.ConnectionTimeRaw;
-                        existing.TotalConnectionMinutes = rd.ConnectionMinutes;
-                        existing.TasksDelivered = rd.TasksDelivered;
-                        existing.RawShiftSummary = rd.RawShiftSummary;
-                        existing.QualifiedSlotsCount = qualifiedSlots.Count;
-                        existing.UpdatedAt = DateTime.UtcNow.AddHours(3);
-
-                        // Delete and re-create slots (simplest safe strategy).
-                        _db.KeetaShiftSlots.RemoveRange(existing.ShiftSlots);
-                        existing.ShiftSlots.Clear();
-
-                        foreach (var s in qualifiedSlots)
-                            existing.ShiftSlots.Add(MapSlot(s));
-
-                        shiftsUpdated++;
-                        action = riderId.HasValue
-                            ? KeetaImportAction.Updated
-                            : (rd.IsInShift ? KeetaImportAction.DriverNotFound : KeetaImportAction.NotInShift);
-                    }
-
-                    await _db.SaveChangesAsync();
-
-                    results.Add(new KeetaShiftRowResult(
-                        rowNumber,
-                        rd.PlatformDriverId!,
-                        rd.ReportDate!.Value,
-                        riderId.HasValue,
-                        resolvedWorkingId,
-                        riderId,
-                        rd.IsInShift,
-                        rd.TasksDelivered,
-                        rd.ConnectionMinutes,
-                        qualifiedSlots.Count,
-                        qualifiedSlots.Select(s => new KeetaSlotDetail(
-                            s.SlotKey, s.DurationRaw, s.DurationMinutes, s.SlotOrder)).ToList(),
-                        action,
-                        null));
-
-                    Console.WriteLine(
-                        $"[KeetaShiftImport] ✓ Row {rowNumber} | Driver={rd.PlatformDriverId} | " +
-                        $"Date={rd.ReportDate} | QSlots={qualifiedSlots.Count} | {action}");
-                }
-                catch (Exception ex)
-                {
-                    errorRows++;
-                    errors.Add($"Row {rowNumber}: {ex.Message}");
-                    results.Add(new KeetaShiftRowResult(
-                        rowNumber, "N/A", DateOnly.MinValue,
-                        false, null, null, false, 0, 0, 0,
-                        [], KeetaImportAction.Error, $"Exception: {ex.Message}"));
-                    Console.WriteLine($"[KeetaShiftImport] ERROR Row {rowNumber}: {ex.Message}");
-                }
-
-                if (processed % 50 == 0)
-                {
-                    try { progressCallback?.Invoke(processed, totalRows); } catch { }
-                    Console.WriteLine($"[KeetaShiftImport] Progress: {processed}/{totalRows}");
-                }
+                int rn = row.RowNumber();
+                parsedRows.Add((rn, ParseKeetaShiftRow(row, colMap, rn)));
             }
 
-            try { progressCallback?.Invoke(totalRows, totalRows); } catch { }
+            int validCount = parsedRows.Count(p => p.Data.IsValid);
+            Console.WriteLine($"[KeetaShiftImport] Parsing complete — valid={validCount}/{totalRows}");
+            progressCallback?.Invoke(totalRows / 4, totalRows); // ~25 %
+
+            // ══════════════════════════════════════════════════════════════
+            //  PHASE 2 — Load rider lookup  (2 DB queries total)
+            // ══════════════════════════════════════════════════════════════
+
+            var riderLookup = await BuildRiderLookupAsync();
+            Console.WriteLine($"[KeetaShiftImport] Rider lookup loaded: {riderLookup.Count} entries");
+
+            // ══════════════════════════════════════════════════════════════
+            //  PHASE 3 — Pre-load all existing shift records  (1 DB query)
+            //
+            //  Key: (PlatformDriverId.ToUpperInvariant(), ReportDate)
+            //  We load every record whose ReportDate falls inside the file's
+            //  date range so we can do O(1) create-vs-update decisions.
+            // ══════════════════════════════════════════════════════════════
+
+            var validRows = parsedRows
+                .Where(p => p.Data.IsValid && p.Data.ReportDate.HasValue)
+                .ToList();
+
+            // existingShifts key = (upperDriverId, date)
+            var existingShifts = new Dictionary<(string, DateOnly), KeetaDriverShift>();
+
+            if (validRows.Count > 0)
+            {
+                var minDate = validRows.Min(p => p.Data.ReportDate!.Value);
+                var maxDate = validRows.Max(p => p.Data.ReportDate!.Value);
+
+                Console.WriteLine($"[KeetaShiftImport] Pre-loading existing shifts: {minDate} – {maxDate}");
+
+                // Single query: all shifts in the date window, with their slots.
+                var dbShifts = await _db.KeetaDriverShifts
+                    .Include(k => k.ShiftSlots)
+                    .Where(k => k.ReportDate >= minDate && k.ReportDate <= maxDate)
+                    .ToListAsync();
+
+                foreach (var s in dbShifts)
+                    existingShifts[(s.PlatformDriverId.Trim().ToUpperInvariant(), s.ReportDate)] = s;
+
+                Console.WriteLine($"[KeetaShiftImport] Existing records loaded: {dbShifts.Count}");
+            }
+
+            progressCallback?.Invoke(totalRows / 2, totalRows); // ~50 %
+
+            // ══════════════════════════════════════════════════════════════
+            //  PHASE 4 — Resolve every row in memory
+            //  All decision-making happens here. No DB access.
+            // ══════════════════════════════════════════════════════════════
+
+            var now = DateTime.UtcNow.AddHours(3);
+            var shiftsToAdd = new List<KeetaDriverShift>();
+            var slotsToDelete = new List<KeetaShiftSlot>();
+
+            foreach (var (rowNum, rd) in parsedRows)
+            {
+                // ── Invalid / unparseable row ─────────────────────────────
+                if (!rd.IsValid)
+                {
+                    errorRows++;
+                    errors.Add($"Row {rowNum}: {rd.ErrorMessage}");
+                    results.Add(new KeetaShiftRowResult(
+                        rowNum, rd.PlatformDriverId ?? "N/A",
+                        rd.ReportDate ?? DateOnly.MinValue,
+                        false, null, null, false, 0, 0, 0,
+                        [], KeetaImportAction.Error, rd.ErrorMessage));
+                    continue;
+                }
+
+                // ── Date range tracking ───────────────────────────────────
+                if (!earliestDate.HasValue || rd.ReportDate!.Value < earliestDate.Value)
+                    earliestDate = rd.ReportDate;
+                if (!latestDate.HasValue || rd.ReportDate!.Value > latestDate.Value)
+                    latestDate = rd.ReportDate;
+
+                // ── Rider resolution (dictionary O(1)) ────────────────────
+                var lookupKey = !string.IsNullOrWhiteSpace(rd.WorkingId)
+                    ? rd.WorkingId!.Trim()
+                    : rd.PlatformDriverId!.Trim();
+
+                int? riderId = null;
+                string? resolvedWorkingId = null;
+
+                if (riderLookup.TryGetValue(lookupKey, out var riderInfo))
+                {
+                    riderId = riderInfo.Id;
+                    resolvedWorkingId = riderInfo.WorkingId;
+                    driversFound++;
+                }
+                else
+                {
+                    driversNotFound++;
+                }
+
+                if (!rd.IsInShift) notInShift++;
+
+                var qualifiedSlots = ParseQualifiedKeetaSlots(rd.RawShiftSummary);
+                if (rd.IsInShift && qualifiedSlots.Count == 0) noQualifiedSlots++;
+
+                // ── Create or update (dictionary O(1)) ────────────────────
+                var dictKey = (rd.PlatformDriverId!.Trim().ToUpperInvariant(), rd.ReportDate!.Value);
+                KeetaImportAction action;
+
+                if (existingShifts.TryGetValue(dictKey, out var existing))
+                {
+                    // ── Update existing record ────────────────────────────
+                    existing.WorkingId = resolvedWorkingId ?? existing.WorkingId;
+                    existing.RiderId = riderId ?? existing.RiderId;
+                    existing.Supervisor = rd.Supervisor;
+                    existing.IsInShift = rd.IsInShift;
+                    existing.TotalConnectionTimeRaw = rd.ConnectionTimeRaw;
+                    existing.TotalConnectionMinutes = rd.ConnectionMinutes;
+                    existing.TasksDelivered = rd.TasksDelivered;
+                    existing.RawShiftSummary = rd.RawShiftSummary;
+                    existing.QualifiedSlotsCount = qualifiedSlots.Count;
+                    existing.UpdatedAt = now;
+
+                    // Collect old slots for bulk deletion; replace with new ones.
+                    slotsToDelete.AddRange(existing.ShiftSlots);
+                    existing.ShiftSlots.Clear();
+                    foreach (var s in qualifiedSlots)
+                        existing.ShiftSlots.Add(MapSlot(s));
+
+                    shiftsUpdated++;
+                    action = riderId.HasValue
+                        ? KeetaImportAction.Updated
+                        : (rd.IsInShift ? KeetaImportAction.DriverNotFound : KeetaImportAction.NotInShift);
+                }
+                else
+                {
+                    // ── Create new record ─────────────────────────────────
+                    var newShift = new KeetaDriverShift
+                    {
+                        ReportDate = rd.ReportDate!.Value,
+                        PlatformDriverId = rd.PlatformDriverId!,
+                        WorkingId = resolvedWorkingId,
+                        RiderId = riderId,
+                        Supervisor = rd.Supervisor,
+                        IsInShift = rd.IsInShift,
+                        TotalConnectionTimeRaw = rd.ConnectionTimeRaw,
+                        TotalConnectionMinutes = rd.ConnectionMinutes,
+                        TasksDelivered = rd.TasksDelivered,
+                        RawShiftSummary = rd.RawShiftSummary,
+                        QualifiedSlotsCount = qualifiedSlots.Count,
+                        ImportedBy = uploadedBy,
+                        CreatedAt = now,
+                    };
+
+                    foreach (var s in qualifiedSlots)
+                        newShift.ShiftSlots.Add(MapSlot(s));
+
+                    shiftsToAdd.Add(newShift);
+
+                    // Register immediately so a duplicate row later in the
+                    // same file results in an update, not a second insert.
+                    existingShifts[dictKey] = newShift;
+
+                    shiftsCreated++;
+                    action = riderId.HasValue
+                        ? KeetaImportAction.Created
+                        : (rd.IsInShift ? KeetaImportAction.DriverNotFound : KeetaImportAction.NotInShift);
+                }
+
+                results.Add(new KeetaShiftRowResult(
+                    rowNum,
+                    rd.PlatformDriverId!,
+                    rd.ReportDate!.Value,
+                    riderId.HasValue,
+                    resolvedWorkingId,
+                    riderId,
+                    rd.IsInShift,
+                    rd.TasksDelivered,
+                    rd.ConnectionMinutes,
+                    qualifiedSlots.Count,
+                    qualifiedSlots.Select(s => new KeetaSlotDetail(
+                        s.SlotKey, s.DurationRaw, s.DurationMinutes, s.SlotOrder)).ToList(),
+                    action,
+                    null));
+            }
+
+            Console.WriteLine(
+                $"[KeetaShiftImport] Resolution done — " +
+                $"New={shiftsToAdd.Count} Updated={shiftsUpdated} " +
+                $"SlotsToDelete={slotsToDelete.Count}");
+
+            progressCallback?.Invoke(3 * totalRows / 4, totalRows); // ~75 %
+
+            // ══════════════════════════════════════════════════════════════
+            //  PHASE 5 — Bulk DB write  (1 SaveChangesAsync)
+            //
+            //  - RemoveRange: marks all stale slots deleted in one call.
+            //  - AddRange:    queues all new shifts (EF Core auto-batches
+            //                 the SQL INSERTs, default ~42 rows per batch).
+            //  - SaveChangesAsync: one transaction, one round-trip envelope.
+            // ══════════════════════════════════════════════════════════════
+
+            if (slotsToDelete.Count > 0)
+                _db.KeetaShiftSlots.RemoveRange(slotsToDelete);
+
+            if (shiftsToAdd.Count > 0)
+                _db.KeetaDriverShifts.AddRange(shiftsToAdd);
+
+            await _db.SaveChangesAsync();
+
+            progressCallback?.Invoke(totalRows, totalRows);
 
             Console.WriteLine(
                 $"[KeetaShiftImport] Done — Created={shiftsCreated} Updated={shiftsUpdated} " +
@@ -336,22 +356,61 @@ public class MonthlyValidityService(ApplicationDbcontext db) : IMonthlyValidityS
     //  PRIVATE HELPERS
     // ════════════════════════════════════════════════════════════════════════
 
+    /// <summary>
+    /// Builds the WorkingId → (RiderId, WorkingId) lookup used during import.
+    /// Queries RiderDetails first, then fills gaps from RiderWorkingIdHistory.
+    /// Exactly 2 DB queries total.
+    /// </summary>
+    private async Task<Dictionary<string, (int Id, string WorkingId)>> BuildRiderLookupAsync()
+    {
+        var lookup = new Dictionary<string, (int Id, string WorkingId)>(
+            StringComparer.OrdinalIgnoreCase);
+
+        // Primary: current WorkingId on RiderDetails
+        var riders = await _db.RiderDetails
+            .Where(r => !string.IsNullOrEmpty(r.WorkingId))
+            .Select(r => new { r.Id, r.WorkingId })
+            .AsNoTracking()
+            .ToListAsync();
+
+        foreach (var r in riders)
+            lookup[r.WorkingId!.Trim()] = (r.Id, r.WorkingId!);
+
+        // Fallback: historical WorkingIds (transferred / renamed riders)
+        var history = await _db.RiderWorkingIdHistories
+            .Where(h => !string.IsNullOrEmpty(h.WorkingId))
+            .Include(h => h.Employee)
+                .ThenInclude(e => e.RiderDetails)
+            .Where(h => h.Employee.RiderDetails != null)
+            .Select(h => new { RiderId = h.Employee.RiderDetails!.Id, h.WorkingId })
+            .AsNoTracking()
+            .ToListAsync();
+
+        foreach (var h in history)
+        {
+            var k = h.WorkingId.Trim();
+            if (!lookup.ContainsKey(k))
+                lookup[k] = (h.RiderId, h.WorkingId);
+        }
+
+        return lookup;
+    }
+
     // ── Header row finder ─────────────────────────────────────────────────────
 
     private IXLRow? FindKeetaShiftHeaderRow(IXLWorksheet worksheet)
     {
-        // We recognise the header by finding at least 3 of these known column tokens.
         var known = new[]
         {
-        "التاريخ", "Date",
-        "معرّف السائق", "معرف السائق", "driverId", "Driver ID",
-        "WorkingId", "Working ID", "معرف العمل",
-        "المشرف", "Supervisor",
-        "ملخص الاتصال", "Shift Summary",
-        "هل أنت في الوردية", "IsInShift", "In Shift",
-        "وقت اتصال", "Connection Time",
-        "المهام", "Tasks Delivered", "Tasks"
-    };
+            "التاريخ", "Date",
+            "معرّف السائق", "معرف السائق", "driverId", "Driver ID",
+            "WorkingId", "Working ID", "معرف العمل",
+            "المشرف", "Supervisor",
+            "ملخص الاتصال", "Shift Summary",
+            "هل أنت في الوردية", "IsInShift", "In Shift",
+            "وقت اتصال", "Connection Time",
+            "المهام", "Tasks Delivered", "Tasks"
+        };
 
         for (int i = 1; i <= Math.Min(10, worksheet.RowsUsed().Count()); i++)
         {
@@ -372,7 +431,6 @@ public class MonthlyValidityService(ApplicationDbcontext db) : IMonthlyValidityS
             if (hits >= 3) return row;
         }
 
-        // Last-resort: row with the most non-empty cells in the first 5 rows.
         return worksheet.RowsUsed()
             .Take(5)
             .OrderByDescending(r => r.CellsUsed().Count())
@@ -389,70 +447,37 @@ public class MonthlyValidityService(ApplicationDbcontext db) : IMonthlyValidityS
             {
                 if (cell.IsEmpty()) continue;
 
-                string headerValue = "";
-
-                if (cell.IsMerged())
-                {
-                    headerValue = cell.MergedRange().FirstCell().GetString().Trim();
-                }
-                else
-                {
-                    switch (cell.DataType)
+                string headerValue = cell.IsMerged()
+                    ? cell.MergedRange().FirstCell().GetString().Trim()
+                    : cell.DataType switch
                     {
-                        case XLDataType.Text:
-                            headerValue = cell.GetText().Trim();
-                            break;
-                        case XLDataType.Number:
-                            headerValue = cell.GetDouble().ToString().Trim();
-                            break;
-                        case XLDataType.Boolean:
-                            headerValue = cell.GetBoolean().ToString().Trim();
-                            break;
-                        default:
-                            headerValue = cell.GetString().Trim();
-                            break;
-                    }
-                }
+                        XLDataType.Text => cell.GetText().Trim(),
+                        XLDataType.Number => cell.GetDouble().ToString().Trim(),
+                        XLDataType.Boolean => cell.GetBoolean().ToString().Trim(),
+                        _ => cell.GetString().Trim()
+                    };
 
-                if (string.IsNullOrWhiteSpace(headerValue))
-                    continue;
+                if (string.IsNullOrWhiteSpace(headerValue)) continue;
 
-                // Clean up the header value
-                headerValue = headerValue.Trim();
-
-                // Method 1: Exact match (case-insensitive)
                 foreach (var name in possibleNames)
-                {
                     if (headerValue.Equals(name, StringComparison.OrdinalIgnoreCase))
-                    {
                         return cell.Address.ColumnNumber;
-                    }
-                }
 
-                // Method 2: Match without any spaces (NameAR = Name AR)
-                string headerNoSpaces = headerValue.Replace(" ", "").Replace("\t", "").Replace("\n", "").Replace("\r", "");
+                string headerNoSpaces = headerValue.Replace(" ", "").Replace("\t", "")
+                                                   .Replace("\n", "").Replace("\r", "");
                 foreach (var name in possibleNames)
                 {
-                    string nameNoSpaces = name.Replace(" ", "").Replace("\t", "").Replace("\n", "").Replace("\r", "");
+                    string nameNoSpaces = name.Replace(" ", "").Replace("\t", "")
+                                             .Replace("\n", "").Replace("\r", "");
                     if (headerNoSpaces.Equals(nameNoSpaces, StringComparison.OrdinalIgnoreCase))
-                    {
                         return cell.Address.ColumnNumber;
-                    }
                 }
 
-                // Method 3: Partial match (contains) - as last resort
                 foreach (var name in possibleNames)
-                {
                     if (headerValue.Contains(name, StringComparison.OrdinalIgnoreCase))
-                    {
                         return cell.Address.ColumnNumber;
-                    }
-                }
             }
-            catch
-            {
-                continue;
-            }
+            catch { continue; }
         }
 
         return 0;
@@ -463,24 +488,19 @@ public class MonthlyValidityService(ApplicationDbcontext db) : IMonthlyValidityS
         var m = new KeetaShiftColumnMapping();
         var cells = headerRow.CellsUsed().ToList();
 
-        m.DateCol = FindColumn(cells,
-            "التاريخ", "Date", "تاريخ", "report_date");
+        m.DateCol = FindColumn(cells, "التاريخ", "Date", "تاريخ", "report_date");
 
-        // The driver-id column may be the platform ID OR an explicit WorkingId column.
         m.DriverIdCol = FindColumn(cells,
             "معرّد السائق", "معرّف السائق", "معرف السائق",
             "driverId", "Driver ID", "DriverId",
             "WorkingId", "Working ID", "معرف العمل", "رقم العمل",
             "driver_id", "working_id");
 
-        // A dedicated WorkingId column (optional – overrides DriverId for FK matching).
         m.WorkingIdCol = FindColumn(cells,
             "WorkingId", "Working ID", "معرف العمل", "رقم العمل");
 
-        m.SupervisorCol = FindColumn(cells,
-            "المشرف", "Supervisor", "supervisor");
+        m.SupervisorCol = FindColumn(cells, "المشرف", "Supervisor", "supervisor");
 
-        // The full pipe-separated shift summary.
         m.ShiftSummaryCol = FindColumn(cells,
             "ملخص الاتصال", "Shift Summary", "Shift Period",
             "فترة الوردية_ملخص الاتصال", "shift_summary",
@@ -523,51 +543,26 @@ public class MonthlyValidityService(ApplicationDbcontext db) : IMonthlyValidityS
             var cell = row.Cell(columnIndex);
             if (cell.IsEmpty()) return null;
 
-            if (cell.IsMerged())
-            {
-                cell = cell.MergedRange().FirstCell();
-            }
+            if (cell.IsMerged()) cell = cell.MergedRange().FirstCell();
 
-            // ✅ CRITICAL: Handle numbers FIRST
             if (cell.DataType == XLDataType.Number)
             {
                 var numValue = cell.GetDouble();
-
-                // Return as integer if whole number
-                if (numValue == Math.Floor(numValue))
-                {
-                    return ((long)numValue).ToString();
-                }
-
-                return numValue.ToString();
+                return numValue == Math.Floor(numValue)
+                    ? ((long)numValue).ToString()
+                    : numValue.ToString();
             }
 
             if (cell.DataType == XLDataType.DateTime)
             {
-                try
-                {
-                    var dateTime = cell.GetDateTime();
-                    return dateTime.ToString("yyyy-MM-dd");
-                }
-                catch
-                {
-                    return cell.GetText().Trim();
-                }
+                try { return cell.GetDateTime().ToString("yyyy-MM-dd"); }
+                catch { return cell.GetText().Trim(); }
             }
 
-            if (cell.DataType == XLDataType.Text)
-            {
-                return cell.GetText().Trim();
-            }
+            if (cell.DataType == XLDataType.Text) return cell.GetText().Trim();
+            if (cell.DataType == XLDataType.Boolean) return cell.GetBoolean().ToString();
 
-            if (cell.DataType == XLDataType.Boolean)
-            {
-                return cell.GetBoolean().ToString();
-            }
-
-            var value = cell.Value;
-
-            return value.ToString()?.Trim();
+            return cell.Value.ToString()?.Trim();
         }
         catch (Exception ex)
         {
@@ -587,7 +582,6 @@ public class MonthlyValidityService(ApplicationDbcontext db) : IMonthlyValidityS
 
         try
         {
-            // Date (YYYYMMDD or any standard format)
             var dateStr = GetCellValue(row, map.DateCol);
             if (string.IsNullOrWhiteSpace(dateStr))
             {
@@ -599,32 +593,27 @@ public class MonthlyValidityService(ApplicationDbcontext db) : IMonthlyValidityS
             }
             d.ReportDate = reportDate;
 
-            // Platform Driver ID (always required)
             d.PlatformDriverId = GetCellValue(row, map.DriverIdCol)?.Trim();
             if (string.IsNullOrWhiteSpace(d.PlatformDriverId))
             {
                 d.IsValid = false; d.ErrorMessage = "Driver ID / Working ID cell is empty"; return d;
             }
 
-            // Optional explicit WorkingId column (higher priority for FK matching)
             if (map.WorkingIdCol > 0)
             {
                 var wid = GetCellValue(row, map.WorkingIdCol)?.Trim();
                 if (!string.IsNullOrWhiteSpace(wid)) d.WorkingId = wid;
             }
 
-            // Supervisor
             d.Supervisor = map.SupervisorCol > 0
                 ? GetCellValue(row, map.SupervisorCol)?.Trim()
                 : null;
             if (d.Supervisor is "No Supervisor" or "-") d.Supervisor = null;
 
-            // Shift summary (pipe-separated slot string)
             d.RawShiftSummary = map.ShiftSummaryCol > 0
                 ? GetCellValue(row, map.ShiftSummaryCol)?.Trim()
                 : null;
 
-            // Is in shift (Yes / No)
             var inShiftStr = (map.IsInShiftCol > 0
                 ? GetCellValue(row, map.IsInShiftCol)
                 : null)?.Trim() ?? string.Empty;
@@ -635,13 +624,11 @@ public class MonthlyValidityService(ApplicationDbcontext db) : IMonthlyValidityS
                 inShiftStr == "1" ||
                 inShiftStr.Equals("True", StringComparison.OrdinalIgnoreCase);
 
-            // Connection time
             d.ConnectionTimeRaw = map.ConnectionTimeCol > 0
                 ? GetCellValue(row, map.ConnectionTimeCol)?.Trim()
                 : null;
             d.ConnectionMinutes = ParseArabicDurationToMinutes(d.ConnectionTimeRaw);
 
-            // Tasks delivered
             var tasksStr = map.TasksDeliveredCol > 0
                 ? GetCellValue(row, map.TasksDeliveredCol)
                 : "0";
@@ -661,15 +648,10 @@ public class MonthlyValidityService(ApplicationDbcontext db) : IMonthlyValidityS
 
     // ── Keeta date parser ─────────────────────────────────────────────────────
 
-    /// <summary>
-    /// Handles the Keeta platform's YYYYMMDD integer format as well as
-    /// all standard date string formats.
-    /// </summary>
     private static bool TryParseKeetaDate(string raw, out DateOnly result)
     {
         result = DateOnly.MinValue;
 
-        // YYYYMMDD (e.g. "20260531" — the format in the sample data)
         if (raw.Length == 8 && raw.All(char.IsDigit))
         {
             if (int.TryParse(raw[..4], out int y) &&
@@ -677,14 +659,12 @@ public class MonthlyValidityService(ApplicationDbcontext db) : IMonthlyValidityS
                 int.TryParse(raw[6..8], out int dy))
             {
                 try { result = new DateOnly(y, mo, dy); return true; }
-                catch { /* fall through */ }
+                catch { }
             }
         }
 
-        // Standard DateOnly.TryParse covers ISO8601, common locale formats, etc.
         if (DateOnly.TryParse(raw, out result)) return true;
 
-        // Additional explicit formats for resilience.
         foreach (var fmt in new[]
             { "dd/MM/yyyy", "dd-MM-yyyy", "MM/dd/yyyy", "yyyy-MM-dd", "yyyy/MM/dd" })
         {
@@ -700,9 +680,7 @@ public class MonthlyValidityService(ApplicationDbcontext db) : IMonthlyValidityS
         return false;
     }
 
-
-    // ── Add this method to the MonthlyValidityService class ──
-    // ── Also add to IMonthlyValidityService interface ──
+    // ── GetAll Keeta shifts ───────────────────────────────────────────────────
 
     public async Task<Result<AllKeetaShiftsResponse>> GetAllKeetaDriverShiftsAsync(
         DateOnly? from = null,
@@ -735,15 +713,11 @@ public class MonthlyValidityService(ApplicationDbcontext db) : IMonthlyValidityS
 
             if (allShifts.Count == 0)
                 return Result.Success(new AllKeetaShiftsResponse(
-                    TotalRiders: 0,
-                    TotalShiftRecords: 0,
-                    EarliestDate: null,
-                    LatestDate: null,
+                    TotalRiders: 0, TotalShiftRecords: 0,
+                    EarliestDate: null, LatestDate: null,
                     Riders: [],
-                    RetrievedAt: DateTime.UtcNow.AddHours(3)
-                ));
+                    RetrievedAt: DateTime.UtcNow.AddHours(3)));
 
-            // Group by PlatformDriverId — one group = one rider's full timeline
             var grouped = allShifts
                 .GroupBy(k => k.PlatformDriverId)
                 .Select(g =>
@@ -763,14 +737,10 @@ public class MonthlyValidityService(ApplicationDbcontext db) : IMonthlyValidityS
                             Slots: k.ShiftSlots
                                 .OrderBy(s => s.StartTime)
                                 .Select(s => new KeetaSlotDetail(
-                                    s.SlotKey,
-                                    s.DurationRaw,
-                                    s.DurationMinutes,
-                                    s.SlotOrder))
+                                    s.SlotKey, s.DurationRaw, s.DurationMinutes, s.SlotOrder))
                                 .ToList(),
                             CreatedAt: k.CreatedAt,
-                            UpdatedAt: k.UpdatedAt
-                        ))
+                            UpdatedAt: k.UpdatedAt))
                         .ToList();
 
                     return new KeetaRiderShiftSummary(
@@ -785,8 +755,7 @@ public class MonthlyValidityService(ApplicationDbcontext db) : IMonthlyValidityS
                         TotalInShiftDays: days.Count(d => d.IsInShift),
                         TotalTasksDelivered: days.Sum(d => d.TasksDelivered),
                         TotalConnectionMinutes: days.Sum(d => d.ConnectionMinutes),
-                        Days: days
-                    );
+                        Days: days);
                 })
                 .ToList();
 
@@ -796,8 +765,7 @@ public class MonthlyValidityService(ApplicationDbcontext db) : IMonthlyValidityS
                 EarliestDate: allShifts.Min(k => k.ReportDate),
                 LatestDate: allShifts.Max(k => k.ReportDate),
                 Riders: grouped,
-                RetrievedAt: DateTime.UtcNow.AddHours(3)
-            ));
+                RetrievedAt: DateTime.UtcNow.AddHours(3)));
         }
         catch (Exception ex)
         {
@@ -806,25 +774,15 @@ public class MonthlyValidityService(ApplicationDbcontext db) : IMonthlyValidityS
                     $"Failed to retrieve Keeta shift data: {ex.Message}", 500));
         }
     }
+
     // ── Arabic duration → minutes ─────────────────────────────────────────────
 
-    /// <summary>
-    /// Converts Arabic time-unit strings to total minutes (seconds are dropped).
-    /// 
-    /// Examples
-    ///   "3 س 52 د"    →  3×60 + 52  = 232
-    ///   "4 س"         →  4×60       = 240
-    ///   "8 د 24 ث"    →  8          (seconds ignored)
-    ///   "1 س 3 د 5 ث" →  63
-    ///   "0 ث"         →  0
-    /// </summary>
     private static int ParseArabicDurationToMinutes(string? raw)
     {
         if (string.IsNullOrWhiteSpace(raw)) return 0;
 
         int minutes = 0;
-        var tokens = raw.Trim()
-            .Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var tokens = raw.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
 
         for (int i = 0; i < tokens.Length - 1; i++)
         {
@@ -832,11 +790,11 @@ public class MonthlyValidityService(ApplicationDbcontext db) : IMonthlyValidityS
 
             switch (tokens[i + 1])
             {
-                case "س": minutes += value * 60; break; // ساعة = hour
-                case "د": minutes += value; break; // دقيقة = minute
-                                                   // "ث" (ثانية = second) intentionally skipped
+                case "س": minutes += value * 60; break;
+                case "د": minutes += value; break;
+                    // "ث" (seconds) intentionally skipped
             }
-            i++; // consume the unit token
+            i++;
         }
 
         return minutes;
@@ -844,17 +802,6 @@ public class MonthlyValidityService(ApplicationDbcontext db) : IMonthlyValidityS
 
     // ── Qualified slot parser ─────────────────────────────────────────────────
 
-    /// <summary>
-    /// Parses the raw pipe-separated shift summary, extracts every slot that is
-    /// both "On-Shift" and "qualified", then returns the top-3 by duration
-    /// (most minutes worked). Ties are broken by earlier start time.
-    /// The returned list is re-ordered chronologically.
-    ///
-    /// Input example:
-    ///   "00:00-03:00,Off-Shift,3 س|03:00-08:00,Off-Shift,3 س|
-    ///    08:00-12:00,Off-Shift,3 د|12:00-16:00,On-Shift,4 س,qualified|
-    ///    16:00-20:00,On-Shift,4 س,qualified|20:00-24:00,On-Shift,4 س,qualified"
-    /// </summary>
     private static List<KeetaSlotData> ParseQualifiedKeetaSlots(string? rawSummary)
     {
         if (string.IsNullOrWhiteSpace(rawSummary)) return [];
@@ -867,22 +814,18 @@ public class MonthlyValidityService(ApplicationDbcontext db) : IMonthlyValidityS
         {
             slotOrder++;
             var parts = seg.Trim().Split(',');
-
-            // Minimum: timeRange, shiftType, duration
             if (parts.Length < 3) continue;
 
-            string timeRange = parts[0].Trim();         // "08:00-12:00"
-            string shiftType = parts[1].Trim();          // "On-Shift"
-            string durationRaw = parts[2].Trim();        // "3 س 52 د"
+            string timeRange = parts[0].Trim();
+            string shiftType = parts[1].Trim();
+            string durationRaw = parts[2].Trim();
 
             bool isOnShift = shiftType.Equals("On-Shift", StringComparison.OrdinalIgnoreCase);
             bool isQualified = parts.Length >= 4 &&
-                parts[3].Trim().Equals("qualified", StringComparison.OrdinalIgnoreCase);
+                               parts[3].Trim().Equals("qualified", StringComparison.OrdinalIgnoreCase);
 
-            // We only store On-Shift + qualified slots
             if (!isOnShift || !isQualified) continue;
 
-            // Parse time range "08:00-12:00"
             var dash = timeRange.IndexOf('-');
             if (dash < 0) continue;
 
@@ -893,8 +836,6 @@ public class MonthlyValidityService(ApplicationDbcontext db) : IMonthlyValidityS
                 !TimeOnly.TryParse(endStr, out TimeOnly endTime))
                 continue;
 
-            int durationMinutes = ParseArabicDurationToMinutes(durationRaw);
-
             qualified.Add(new KeetaSlotData
             {
                 SlotKey = timeRange,
@@ -903,17 +844,17 @@ public class MonthlyValidityService(ApplicationDbcontext db) : IMonthlyValidityS
                 IsOnShift = true,
                 IsQualified = true,
                 DurationRaw = durationRaw,
-                DurationMinutes = durationMinutes,
+                DurationMinutes = ParseArabicDurationToMinutes(durationRaw),
                 SlotOrder = slotOrder
             });
         }
 
-        // ── Selection: top-3 by duration (tie-break: earlier slot wins) ────────
+        // Top-3 by duration, tie-break: earlier start; re-sort chronologically.
         return qualified
             .OrderByDescending(s => s.DurationMinutes)
             .ThenBy(s => s.StartTime)
             .Take(3)
-            .OrderBy(s => s.StartTime)   // re-sort chronologically for storage
+            .OrderBy(s => s.StartTime)
             .ToList();
     }
 
@@ -939,14 +880,13 @@ public class MonthlyValidityService(ApplicationDbcontext db) : IMonthlyValidityS
     {
         public bool IsValid { get; set; }
         public string? ErrorMessage { get; set; }
-
         public int DateCol { get; set; }
-        public int DriverIdCol { get; set; }        // معرّف السائق (platform or working ID)
-        public int WorkingIdCol { get; set; }       // explicit WorkingId column (optional)
+        public int DriverIdCol { get; set; }
+        public int WorkingIdCol { get; set; }
         public int SupervisorCol { get; set; }
-        public int ShiftSummaryCol { get; set; }    // pipe-separated slot string
-        public int IsInShiftCol { get; set; }       // "Yes" / "No"
-        public int ConnectionTimeCol { get; set; }  // "18 س 3 د"
+        public int ShiftSummaryCol { get; set; }
+        public int IsInShiftCol { get; set; }
+        public int ConnectionTimeCol { get; set; }
         public int TasksDeliveredCol { get; set; }
     }
 
@@ -955,10 +895,9 @@ public class MonthlyValidityService(ApplicationDbcontext db) : IMonthlyValidityS
         public int RowNumber { get; set; }
         public bool IsValid { get; set; }
         public string? ErrorMessage { get; set; }
-
         public DateOnly? ReportDate { get; set; }
         public string? PlatformDriverId { get; set; }
-        public string? WorkingId { get; set; }      // from explicit WorkingId column if present
+        public string? WorkingId { get; set; }
         public string? Supervisor { get; set; }
         public bool IsInShift { get; set; }
         public string? ConnectionTimeRaw { get; set; }
@@ -982,32 +921,22 @@ public class MonthlyValidityService(ApplicationDbcontext db) : IMonthlyValidityS
     #endregion
 
     // ─────────────────────────────────────────────────────────────
-    //  GET ALL
+    //  GET ALL RIDERS VALIDITY
     // ─────────────────────────────────────────────────────────────
 
-    public async Task<Result<AllRidersValidityResponse>> GetAllRidersValidityAsync(
-        int? year = null)
+    public async Task<Result<AllRidersValidityResponse>> GetAllRidersValidityAsync(int? year = null)
     {
         try
         {
-            // ── 1. Load validity records (all years OR filtered year) ─────
             var validityQuery = _db.RiderMonthlyValidities.AsNoTracking();
-
             if (year.HasValue)
                 validityQuery = validityQuery.Where(v => v.Year == year.Value);
 
             var validityRecords = await validityQuery.ToListAsync();
 
-            // ── 2. Determine available years and build (year, month) ranges ─
             var today = DateTime.Now;
+            var availableYears = validityRecords.Select(v => v.Year).Distinct().OrderBy(y => y).ToList();
 
-            var availableYears = validityRecords
-                .Select(v => v.Year)
-                .Distinct()
-                .OrderBy(y => y)
-                .ToList();
-
-            // For each year: start = earliest month in DB, end = today's month if current year else 12
             var yearRanges = availableYears.ToDictionary(
                 y => y,
                 y =>
@@ -1017,11 +946,7 @@ public class MonthlyValidityService(ApplicationDbcontext db) : IMonthlyValidityS
                     return (Start: start, End: end);
                 });
 
-            // ── 3. Load only riders who have validity records ─────────────
-            var iqamasWithRecords = validityRecords
-                .Select(v => v.EmployeeIqamaNo)
-                .Distinct()
-                .ToHashSet();
+            var iqamasWithRecords = validityRecords.Select(v => v.EmployeeIqamaNo).Distinct().ToHashSet();
 
             var riders = await _db.RiderDetails
                 .Include(r => r.Employee)
@@ -1030,11 +955,9 @@ public class MonthlyValidityService(ApplicationDbcontext db) : IMonthlyValidityS
                 .AsNoTracking()
                 .ToListAsync();
 
-            // Build validity lookup: (iqamaNo, year, month) → record
             var validityMap = validityRecords
                 .ToDictionary(v => (v.EmployeeIqamaNo, v.Year, v.Month), v => v);
 
-            // ── 4. Build month details for every rider ────────────────────
             var riderSummaries = riders.Select(rider =>
             {
                 var monthDetails = new List<MonthValidityDetail>();
@@ -1042,7 +965,6 @@ public class MonthlyValidityService(ApplicationDbcontext db) : IMonthlyValidityS
                 foreach (var y in availableYears)
                 {
                     var (start, end) = yearRanges[y];
-
                     for (int m = start; m <= end; m++)
                     {
                         validityMap.TryGetValue((rider.EmployeeIqamaNo, y, m), out var validity);
@@ -1056,11 +978,9 @@ public class MonthlyValidityService(ApplicationDbcontext db) : IMonthlyValidityS
                     NameEN: rider.Employee.NameEN,
                     WorkingId: rider.WorkingId,
                     CompanyName: rider.Company?.Name,
-                    Months: monthDetails
-                );
+                    Months: monthDetails);
             }).ToList();
 
-            // ── 5. Aggregate counters ─────────────────────────────────────
             int totalValid = validityRecords.Count(v => v.Status == ValidityStatus.Valid);
             int totalInvalid = validityRecords.Count(v => v.Status == ValidityStatus.Invalid);
             int totalFreelancer = validityRecords.Count(v => v.Status == ValidityStatus.Freelancer);
@@ -1075,14 +995,12 @@ public class MonthlyValidityService(ApplicationDbcontext db) : IMonthlyValidityS
                 TotalUnclassifiedRiders: unclassified,
                 AvailableYears: availableYears,
                 Riders: riderSummaries,
-                RetrievedAt: DateTime.UtcNow.AddHours(3)
-            ));
+                RetrievedAt: DateTime.UtcNow.AddHours(3)));
         }
         catch (Exception ex)
         {
             return Result.Failure<AllRidersValidityResponse>(
-                new Error("RetrievalError",
-                    $"Failed to retrieve validity data: {ex.Message}", 500));
+                new Error("RetrievalError", $"Failed to retrieve validity data: {ex.Message}", 500));
         }
     }
 
@@ -1091,12 +1009,10 @@ public class MonthlyValidityService(ApplicationDbcontext db) : IMonthlyValidityS
     // ─────────────────────────────────────────────────────────────
 
     public async Task<Result<RiderValidityResponse>> GetRiderValidityByIqamaAsync(
-        long iqamaNo,
-        int? year = null)
+        long iqamaNo, int? year = null)
     {
         try
         {
-            // ── 1. Find rider ─────────────────────────────────────────────
             var rider = await _db.RiderDetails
                 .Include(r => r.Employee)
                 .Include(r => r.Company)
@@ -1115,24 +1031,16 @@ public class MonthlyValidityService(ApplicationDbcontext db) : IMonthlyValidityS
                         404));
             }
 
-            // ── 2. Load validity records (all years OR filtered year) ─────
             var validityQuery = _db.RiderMonthlyValidities
                 .Where(v => v.EmployeeIqamaNo == iqamaNo)
                 .AsNoTracking();
-
             if (year.HasValue)
                 validityQuery = validityQuery.Where(v => v.Year == year.Value);
 
             var validityRecords = await validityQuery.ToListAsync();
 
-            // ── 3. Determine available years and month ranges ─────────────
             var today = DateTime.Now;
-
-            var availableYears = validityRecords
-                .Select(v => v.Year)
-                .Distinct()
-                .OrderBy(y => y)
-                .ToList();
+            var availableYears = validityRecords.Select(v => v.Year).Distinct().OrderBy(y => y).ToList();
 
             var yearRanges = availableYears.ToDictionary(
                 y => y,
@@ -1143,10 +1051,7 @@ public class MonthlyValidityService(ApplicationDbcontext db) : IMonthlyValidityS
                     return (Start: start, End: end);
                 });
 
-            var validityMap = validityRecords
-                .ToDictionary(v => (v.Year, v.Month), v => v);
-
-            // ── 4. Build month details ────────────────────────────────────
+            var validityMap = validityRecords.ToDictionary(v => (v.Year, v.Month), v => v);
             var monthDetails = new List<MonthValidityDetail>();
 
             foreach (var y in availableYears)
@@ -1167,19 +1072,17 @@ public class MonthlyValidityService(ApplicationDbcontext db) : IMonthlyValidityS
                 CompanyName: rider.Company?.Name,
                 AvailableYears: availableYears,
                 Months: monthDetails,
-                RetrievedAt: DateTime.UtcNow.AddHours(3)
-            ));
+                RetrievedAt: DateTime.UtcNow.AddHours(3)));
         }
         catch (Exception ex)
         {
             return Result.Failure<RiderValidityResponse>(
-                new Error("RetrievalError",
-                    $"Failed to retrieve validity data: {ex.Message}", 500));
+                new Error("RetrievalError", $"Failed to retrieve validity data: {ex.Message}", 500));
         }
     }
 
     // ─────────────────────────────────────────────────────────────
-    //  HELPERS
+    //  SHARED HELPER
     // ─────────────────────────────────────────────────────────────
 
     private static MonthValidityDetail BuildMonthDetail(
@@ -1199,7 +1102,6 @@ public class MonthlyValidityService(ApplicationDbcontext db) : IMonthlyValidityS
             MonthName: MonthNames.GetValueOrDefault(month, month.ToString()),
             Status: validity?.Status,
             StatusLabel: statusLabel,
-            RecordedOrders: validity?.TotalOrders ?? 0
-        );
+            RecordedOrders: validity?.TotalOrders ?? 0);
     }
 }

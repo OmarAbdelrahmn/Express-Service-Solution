@@ -257,7 +257,7 @@ public class ItemMovementReportService(ApplicationDbcontext db) : IItemMovementR
                         u.Id,
                         u.SparePartId,
                         u.Location,
-                        u.VehicleNumber,
+                        u.Vehicle?.PlateNumberA!,
                         u.Vehicle?.PlateNumberA ?? "N/A",
                         u.Vehicle?.PlateNumberE ?? "N/A",
                         u.Vehicle?.Location ?? "N/A",
@@ -412,7 +412,7 @@ public class ItemMovementReportService(ApplicationDbcontext db) : IItemMovementR
 
         foreach (var name in activeNames.OrderBy(n => n))
         {
-            var acRecords = acByName.TryGetValue(name, out var recs) ? recs : new List<RiderAccessory>();
+            var acRecords = acByName.TryGetValue(name, out var recs) ? recs : new List<Domain.Entities.Spare.RiderAccessory>();
             var nameUsages = usagesByName.TryGetValue(name, out var ul) ? ul : new List<RiderAccessoryUsage>();
             var nameTransfers = transfersByName.TryGetValue(name, out var tl)
                 ? tl

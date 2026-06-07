@@ -15,6 +15,21 @@ public class MemberController(IMemberService housingService, IReminderService re
     private readonly IReminderService reminderService = reminderService;
 
 
+    /// <summary>
+    /// Get all spare-part and accessory usage history for this housing,
+    /// optionally filtered by date range
+    /// </summary>
+    [HttpGet("usage-history")]
+    public async Task<IActionResult> GetUsageHistory(
+        [FromQuery] DateTime? fromDate,
+        [FromQuery] DateTime? toDate)
+    {
+        var iqamaNo = User.GetUserIqamaNo()!;
+        var result = await housingService.GetHousingUsageHistoryAsync(iqamaNo, fromDate, toDate);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+
 
     #region Maintenance Reminders
 
