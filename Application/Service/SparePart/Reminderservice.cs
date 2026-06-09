@@ -511,6 +511,10 @@ public class ReminderService(ApplicationDbcontext context) : IReminderService
             if (!dueItems.Any()) continue;
 
             var assignedRider = vehicle.RiderDetails;
+
+            if(assignedRider == null)
+                continue;
+
             vehicleReminders.Add(new VehicleMaintenanceReminder(
                 vehicle.VehicleNumber,
                 vehicle.PlateNumberA,
@@ -619,6 +623,10 @@ public class ReminderService(ApplicationDbcontext context) : IReminderService
             if (!dueItems.Any()) continue;
 
             var assignedRider = vehicle.RiderDetails;
+
+            if (assignedRider == null)
+                continue;
+
             vehicleReminders.Add(new VehicleMaintenanceReminder(
                 vehicle.VehicleNumber,
                 vehicle.PlateNumberA,
