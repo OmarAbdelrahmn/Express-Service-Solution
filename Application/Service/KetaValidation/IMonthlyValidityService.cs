@@ -48,6 +48,51 @@ public interface IMonthlyValidityService
         DateTime RetrievedAt
     );
 
+
+        Task<Result<KeetaAttendanceImportResponse>> ImportAttendanceAsync(
+            IFormFile file,
+            string uploadedBy,
+            Action<int, int>? progressCallback = null);
+    
+
+
+    public record KeetaAttendanceImportResponse(
+        int TotalRows,
+        int UniqueDrivers,
+        int UniqueDays,
+        int WorkDays,
+        int NonWorkDays,
+        int UnmatchedRows,          // rows whose driver ID was not resolved
+        List<KeetaDriverDaySummary> Summaries,
+        List<string> ProcessingErrors,
+        DateTime ProcessedAt
+    );
+
+    public record KeetaDriverDaySummary(
+        // ── Identity ────────────────────────────────────────────────────────────
+        string PlatformDriverId,     // raw معرّف السائق from Excel
+        string DriverFullName,       // اسم سائق التوصيل الكامل
+        string DriverSurname,        // لقب سائق التوصيل
+        DateOnly ShiftDate,
+
+        // ── Order counts ────────────────────────────────────────────────────────
+        int TotalOrdersOnDay,        // all rows for this driver+day
+        int AcceptedOrders,          // "تم التسليم"
+        int CancelledOrders,         // "ملغى"
+
+        // ── Time analysis ────────────────────────────────────────────────────────
+        TimeOnly? FirstOrderTime,    // earliest timestamp for the day (null = no valid ts)
+        TimeOnly? LastOrderTime,     // latest timestamp for the day
+        double WorkingHours,         // span first→last, or 8.0 fallback
+
+        // ── Shift period(s) ──────────────────────────────────────────────────────
+        string ShiftPeriod,          // e.g. "08:00-12:00 | 16:00-20:00"
+
+        // ── Status ───────────────────────────────────────────────────────────────
+        bool IsWorkDay               // AcceptedOrders > 0
+    );
+
+
     public record KeetaRiderShiftSummary(
         int? RiderId,
         string PlatformDriverId,
@@ -56,6 +101,7 @@ public interface IMonthlyValidityService
         string? RiderNameEN,
         string? CompanyName,
         string? Supervisor,
+        long IqamaNo,
         int TotalDays,
         int TotalInShiftDays,
         int TotalTasksDelivered,

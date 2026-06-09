@@ -6,6 +6,7 @@ using Domain.Entities;
 using Domain.Entities.Keeta;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
+using System.Globalization;
 using static Application.Service.KetaValidation.IMonthlyValidityService;
 
 namespace Application.Service.MonthlyValidity;
@@ -750,6 +751,7 @@ public class MonthlyValidityService(ApplicationDbcontext db) : IMonthlyValidityS
                         RiderNameAR: rider?.Employee?.NameAR,
                         RiderNameEN: rider?.Employee?.NameEN,
                         CompanyName: rider?.Company?.Name,
+                        IqamaNo: rider?.EmployeeIqamaNo ?? 0,
                         Supervisor: first.Supervisor,
                         TotalDays: days.Count,
                         TotalInShiftDays: days.Count(d => d.IsInShift),
@@ -775,6 +777,504 @@ public class MonthlyValidityService(ApplicationDbcontext db) : IMonthlyValidityS
         }
     }
 
+
+    // Arabic status values
+    private const string STATUS_DELIVERED = "تم التسليم";
+    private const string STATUS_CANCELLED = "ملغى";
+
+    // Shift slot definitions (label, start hour inclusive, end hour exclusive)
+    // The platform shows 3 blocks in the report header image:
+    //   08:00-12:00  |  16:00-20:00  |  20:00-24:00
+    // We derive which block(s) the driver was active in from the first-order time.
+    private static readonly (string Label, int StartH, int EndH)[] ShiftBlocks =
+    [
+        ("08:00-12:00", 8,  12),
+        ("16:00-20:00", 16, 20),
+        ("20:00-24:00", 20, 24),
+    ];
+
+    public async Task<Result<KeetaAttendanceImportResponse>> ImportAttendanceAsync(
+        IFormFile file,
+        string uploadedBy,
+        Action<int, int>? progressCallback = null)
+    {
+        // ── Basic validation ─────────────────────────────────────────────────
+        if (file == null || file.Length == 0)
+            return Result.Failure<KeetaAttendanceImportResponse>(
+                new Error("InvalidFile", "File is empty or null", 400));
+
+        if (!file.FileName.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase) &&
+            !file.FileName.EndsWith(".xls", StringComparison.OrdinalIgnoreCase))
+            return Result.Failure<KeetaAttendanceImportResponse>(
+                new Error("InvalidFormat", "File must be Excel format (.xlsx or .xls)", 400));
+
+        var globalErrors = new List<string>();
+
+        try
+        {
+            Console.WriteLine($"[KeetaAttendance] Starting import: {file.FileName}");
+
+            using var stream = file.OpenReadStream();
+            using var workbook = new XLWorkbook(stream);
+            var worksheet = workbook.Worksheet(1);
+
+            if (worksheet == null)
+                return Result.Failure<KeetaAttendanceImportResponse>(
+                    new Error("InvalidWorksheet", "Could not read worksheet", 400));
+
+            // ── Locate header row ────────────────────────────────────────────
+            var headerRow = FindHeaderRow(worksheet);
+            if (headerRow == null)
+                return Result.Failure<KeetaAttendanceImportResponse>(
+                    new Error("EmptyFile", "No recognisable header row found", 400));
+
+            Console.WriteLine($"[KeetaAttendance] Header at row {headerRow.RowNumber()}");
+
+            // ── Map columns ──────────────────────────────────────────────────
+            var col = BuildColumnMap(headerRow);
+            if (!col.IsValid)
+                return Result.Failure<KeetaAttendanceImportResponse>(
+                    new Error("InvalidColumns", col.ErrorMessage!, 400));
+
+            Console.WriteLine($"[KeetaAttendance] Columns: DriverId={col.DriverIdCol} " +
+                              $"Status={col.StatusCol} Timestamp={col.TimestampCol} " +
+                              $"Name={col.NameCol} Surname={col.SurnameCol}");
+
+            // ── Collect data rows ────────────────────────────────────────────
+            var dataRows = worksheet.RowsUsed()
+                .Where(r => r.RowNumber() > headerRow.RowNumber())
+                .ToList();
+
+            int totalRows = dataRows.Count;
+            if (totalRows == 0)
+                return Result.Failure<KeetaAttendanceImportResponse>(
+                    new Error("EmptyFile", "No data rows found", 400));
+
+            Console.WriteLine($"[KeetaAttendance] Data rows: {totalRows}");
+            progressCallback?.Invoke(0, totalRows);
+
+            // ── Raw order records ────────────────────────────────────────────
+            var orders = new List<RawOrder>(totalRows);
+            int unmatchedRows = 0;
+
+            foreach (var row in dataRows)
+            {
+                var raw = ParseRow(row, col);
+                if (raw == null)
+                {
+                    unmatchedRows++;
+                    globalErrors.Add($"Row {row.RowNumber()}: could not parse driver-id or date");
+                    continue;
+                }
+                orders.Add(raw);
+            }
+
+            progressCallback?.Invoke(totalRows, totalRows);
+
+            // ── Group by driver + day ────────────────────────────────────────
+            var grouped = orders
+                .GroupBy(o => (o.PlatformDriverId, o.ShiftDate))
+                .ToList();
+
+            var summaries = new List<KeetaDriverDaySummary>(grouped.Count);
+
+            foreach (var g in grouped)
+            {
+                var all = g.ToList();
+                var sample = all[0];
+
+                int accepted = all.Count(o => o.Status == STATUS_DELIVERED);
+                int cancelled = all.Count(o => o.Status == STATUS_CANCELLED);
+
+                // Valid timestamps (only delivered rows usually have timestamps,
+                // but we parse all non-null timestamps to be safe)
+                var validTimes = all
+                    .Where(o => o.OrderTime.HasValue)
+                    .Select(o => o.OrderTime!.Value)
+                    .OrderBy(t => t)
+                    .ToList();
+
+                TimeOnly? firstTime = validTimes.Count > 0 ? validTimes[0] : null;
+                TimeOnly? lastTime = validTimes.Count > 0 ? validTimes[^1] : null;
+
+                double workingHours = 8.0; // fallback
+                if (firstTime.HasValue && lastTime.HasValue && lastTime > firstTime)
+                {
+                    workingHours = (lastTime.Value.ToTimeSpan() - firstTime.Value.ToTimeSpan())
+                                   .TotalHours;
+
+                    // Clamp: at least 0.5 h, at most 13 h
+                    workingHours = Math.Max(0.5, Math.Min(13.0, workingHours));
+
+                    // Round to 2 decimal places
+                    workingHours = Math.Round(workingHours, 2);
+                }
+
+                string shiftPeriod = DetermineShiftPeriod(firstTime, lastTime);
+                bool isWorkDay = accepted > 0;
+
+                summaries.Add(new KeetaDriverDaySummary(
+                    PlatformDriverId: sample.PlatformDriverId,
+                    DriverFullName: sample.FullName,
+                    DriverSurname: sample.Surname,
+                    ShiftDate: sample.ShiftDate,
+                    TotalOrdersOnDay: all.Count,
+                    AcceptedOrders: accepted,
+                    CancelledOrders: cancelled,
+                    FirstOrderTime: firstTime,
+                    LastOrderTime: lastTime,
+                    WorkingHours: workingHours,
+                    ShiftPeriod: shiftPeriod,
+                    IsWorkDay: isWorkDay
+                ));
+            }
+
+            // Sort by driver, then date
+            summaries = summaries
+                .OrderBy(s => s.PlatformDriverId)
+                .ThenBy(s => s.ShiftDate)
+                .ToList();
+
+            int uniqueDrivers = summaries.Select(s => s.PlatformDriverId).Distinct().Count();
+            int uniqueDays = summaries.Select(s => s.ShiftDate).Distinct().Count();
+            int workDays = summaries.Count(s => s.IsWorkDay);
+            int nonWorkDays = summaries.Count(s => !s.IsWorkDay);
+
+            Console.WriteLine($"[KeetaAttendance] Done. Drivers={uniqueDrivers} Days={uniqueDays} " +
+                              $"WorkDays={workDays} NonWorkDays={nonWorkDays} Unmatched={unmatchedRows}");
+
+            return Result.Success(new KeetaAttendanceImportResponse(
+                TotalRows: totalRows,
+                UniqueDrivers: uniqueDrivers,
+                UniqueDays: uniqueDays,
+                WorkDays: workDays,
+                NonWorkDays: nonWorkDays,
+                UnmatchedRows: unmatchedRows,
+                Summaries: summaries,
+                ProcessingErrors: globalErrors,
+                ProcessedAt: DateTime.UtcNow.AddHours(3)
+            ));
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[KeetaAttendance] FATAL: {ex}");
+            return Result.Failure<KeetaAttendanceImportResponse>(
+                new Error("ProcessingError", $"Failed to process file: {ex.Message}", 500));
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  SHIFT PERIOD LOGIC
+    // ════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Given the hour of the first order of the day, decide which shift period(s)
+    /// the driver was active in.
+    ///
+    /// The report image shows three period columns:
+    ///   08:00-12:00  |  16:00-20:00  |  20:00-24:00
+    ///
+    /// Each block is ~8 h wide when combined with the next:
+    ///   Day   shift  = 08:00-16:00  → report blocks 08:00-12:00 | 16:00-20:00
+    ///   Evening shift = 16:00-20:00  → report blocks 16:00-20:00 | 20:00-24:00
+    ///   Night  shift  = 20:00-24:00  → report block  20:00-24:00
+    ///   Late-night    = 00:00-08:00  → treat as night bleed      20:00-24:00
+    ///
+    /// When no timestamp is available we return "غير محدد".
+    /// </summary>
+    private static string DetermineShiftPeriod(TimeOnly? firstOrderTime, TimeOnly? lastOrderTime)
+    {
+        if (!firstOrderTime.HasValue)
+            return "غير محدد";
+
+        // The 6 defined 4-hour blocks
+        var blocks = new[]
+        {
+        ("00:00-04:00",  0,  4),
+        ("04:00-08:00",  4,  8),
+        ("08:00-12:00",  8, 12),
+        ("12:00-16:00", 12, 16),
+        ("16:00-20:00", 16, 20),
+        ("20:00-24:00", 20, 24),
+    };
+
+        int startH = firstOrderTime.Value.Hour;
+        int endH = lastOrderTime.HasValue ? lastOrderTime.Value.Hour : startH;
+
+        // Collect every block that overlaps the working window [startH, endH]
+        var activeBlocks = blocks
+            .Where(b => b.Item2 < endH + 1 && b.Item3 > startH)
+            .Select(b => b.Item1)
+            .ToList();
+
+        // Always return at least 2 consecutive blocks (~8 h) even if all orders
+        // fell inside one block (single-order days, cancelled-only days, etc.)
+        if (activeBlocks.Count < 2)
+        {
+            // Find the block containing startH and add the next one
+            for (int i = 0; i < blocks.Length; i++)
+            {
+                if (startH >= blocks[i].Item2 && startH < blocks[i].Item3)
+                {
+                    activeBlocks.Clear();
+                    activeBlocks.Add(blocks[i].Item1);
+                    // Add next block (wrap to first if at end)
+                    int next = (i + 1) % blocks.Length;
+                    activeBlocks.Add(blocks[next].Item1);
+                    break;
+                }
+            }
+        }
+
+        return string.Join(" | ", activeBlocks);
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  HEADER & COLUMN DISCOVERY
+    // ════════════════════════════════════════════════════════════════════════
+
+    private static IXLRow? FindHeaderRow(IXLWorksheet worksheet)
+    {
+        // We look for a row that contains both "معرّف السائق" and "الحالة"
+        var driverIdVariants = new[] { "معرّف السائق", "معرف السائق", "Driver ID", "DriverId" };
+        var statusVariants = new[] { "الحالة", "Status" };
+
+        for (int i = 1; i <= Math.Min(10, worksheet.RowsUsed().Count()); i++)
+        {
+            var row = worksheet.Row(i);
+            var cells = row.CellsUsed()
+                .Select(c => c.IsMerged()
+                    ? c.MergedRange().FirstCell().GetString().Trim()
+                    : c.GetString().Trim())
+                .Where(v => !string.IsNullOrWhiteSpace(v))
+                .ToList();
+
+            bool hasDriver = cells.Any(cv =>
+                driverIdVariants.Any(d => cv.Equals(d, StringComparison.OrdinalIgnoreCase)));
+            bool hasStatus = cells.Any(cv =>
+                statusVariants.Any(s => cv.Equals(s, StringComparison.OrdinalIgnoreCase)));
+
+            if (hasDriver && hasStatus)
+                return row;
+        }
+
+        return null;
+    }
+
+    private static KeetaAttendanceColumnMap BuildColumnMap(IXLRow headerRow)
+    {
+        var map = new KeetaAttendanceColumnMap();
+        var cells = headerRow.CellsUsed().ToList();
+
+        map.DriverIdCol = FindCol(cells, "معرّف السائق", "معرف السائق", "Driver ID", "DriverId");
+        map.StatusCol = FindCol(cells, "الحالة", "Status");
+        map.TimestampCol = FindCol(cells, "وقت التقييم", "Timestamp", "Order Time", "وقت الطلب");
+        map.NameCol = FindCol(cells, "اسم سائق التوصيل الكامل", "FullName", "Driver Name");
+        map.SurnameCol = FindCol(cells, "لقب سائق التوصيل", "Surname", "Last Name");
+
+        var missing = new List<string>();
+        if (map.DriverIdCol == 0) missing.Add("معرّف السائق");
+        if (map.StatusCol == 0) missing.Add("الحالة");
+        if (map.TimestampCol == 0) missing.Add("وقت التقييم");
+
+        map.IsValid = !missing.Any();
+        map.ErrorMessage = missing.Any()
+            ? $"Required columns not found: {string.Join(", ", missing)}"
+            : null;
+
+        return map;
+    }
+
+    private static int FindCol(List<IXLCell> cells, params string[] names)
+    {
+        foreach (var cell in cells)
+        {
+            try
+            {
+                string val = cell.IsMerged()
+                    ? cell.MergedRange().FirstCell().GetString().Trim()
+                    : cell.GetString().Trim();
+
+                if (string.IsNullOrWhiteSpace(val)) continue;
+
+                foreach (var name in names)
+                    if (val.Equals(name, StringComparison.OrdinalIgnoreCase))
+                        return cell.Address.ColumnNumber;
+
+                // No-space comparison
+                string valNoSpace = val.Replace(" ", "");
+                foreach (var name in names)
+                    if (valNoSpace.Equals(name.Replace(" ", ""), StringComparison.OrdinalIgnoreCase))
+                        return cell.Address.ColumnNumber;
+            }
+            catch { /* skip */ }
+        }
+        return 0;
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  ROW PARSING
+    // ════════════════════════════════════════════════════════════════════════
+
+    private static RawOrder? ParseRow(IXLRow row, KeetaAttendanceColumnMap col)
+    {
+        try
+        {
+            string? driverId = GetCellStr(row, col.DriverIdCol)?.Trim();
+            if (string.IsNullOrWhiteSpace(driverId)) return null;
+
+            string? timestampRaw = GetCellStr(row, col.TimestampCol)?.Trim();
+            string? status = GetCellStr(row, col.StatusCol)?.Trim() ?? "";
+            string? fullName = GetCellStr(row, col.NameCol)?.Trim() ?? "";
+            string? surname = GetCellStr(row, col.SurnameCol)?.Trim() ?? "";
+
+            // Parse Arabic datetime: "28/09/2025، 11:09:04 م"  or  "28/09/2025 11:09:04 PM"
+            DateOnly? date = null;
+            TimeOnly? time = null;
+
+            if (!string.IsNullOrWhiteSpace(timestampRaw) && timestampRaw != "--")
+            {
+                (date, time) = ParseArabicTimestamp(timestampRaw);
+            }
+
+            if (date == null) return null;   // cannot place this row on a day
+
+            return new RawOrder(
+                PlatformDriverId: driverId,
+                FullName: fullName,
+                Surname: surname,
+                ShiftDate: date.Value,
+                Status: status,
+                OrderTime: time
+            );
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    // ── Arabic timestamp parser ──────────────────────────────────────────────
+    //
+    //  Keeta Arabic format: "28/09/2025، 11:09:04 م"
+    //    • "،" = Arabic comma (U+060C)
+    //    • "م" = Arabic "م" for PM (مساءً)  /  "ص" for AM (صباحًا)
+    //
+    private static (DateOnly? date, TimeOnly? time) ParseArabicTimestamp(string raw)
+    {
+        // Normalise separators
+        raw = raw
+            .Replace("،", " ")      // Arabic comma → space
+            .Replace(",", " ")
+            .Replace("\u200f", "")  // RLM
+            .Replace("\u200e", "")  // LRM
+            .Trim();
+
+        // Split on whitespace tokens
+        var parts = raw.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+
+        // We expect at least: date-part  time-part  [am/pm-part]
+        if (parts.Length < 2) return (null, null);
+
+        // Date part
+        DateOnly? date = null;
+        string[] dateFmts = { "dd/MM/yyyy", "d/M/yyyy", "yyyy-MM-dd" };
+        foreach (var fmt in dateFmts)
+        {
+            if (DateTime.TryParseExact(parts[0], fmt,
+                    CultureInfo.InvariantCulture, DateTimeStyles.None, out var d))
+            {
+                date = DateOnly.FromDateTime(d);
+                break;
+            }
+        }
+        if (date == null) return (null, null);
+
+        // Time + optional Arabic AM/PM suffix
+        TimeOnly? time = null;
+        if (parts.Length >= 2)
+        {
+            // Collect time token and optional AM/PM token
+            string timePart = parts[1];
+            string? ampmToken = parts.Length >= 3 ? parts[2] : null;
+
+            // Normalise Arabic AM/PM to English
+            bool isPm = ampmToken != null &&
+                        (ampmToken == "م" || ampmToken.StartsWith("م") ||
+                         ampmToken.Equals("pm", StringComparison.OrdinalIgnoreCase));
+            bool isAm = ampmToken != null &&
+                        (ampmToken == "ص" || ampmToken.StartsWith("ص") ||
+                         ampmToken.Equals("am", StringComparison.OrdinalIgnoreCase));
+
+            string[] timeFmts = { "HH:mm:ss", "H:mm:ss", "HH:mm", "H:mm",
+                                   "hh:mm:ss", "h:mm:ss", "hh:mm", "h:mm" };
+            foreach (var fmt in timeFmts)
+            {
+                TimeOnly parsed;
+                if (TimeOnly.TryParseExact(timePart, fmt,
+                        CultureInfo.InvariantCulture, DateTimeStyles.None, out parsed))
+                {
+                    // Apply Arabic AM/PM correction by rebuilding with corrected hour
+                    int hour = parsed.Hour;
+                    if (isPm && hour < 12) hour += 12;
+                    else if (isAm && hour == 12) hour = 0;
+
+                    time = new TimeOnly(hour, parsed.Minute, parsed.Second);
+                    break;
+                }
+            }
+
+            // Fallback: try parsing with DateTime
+            if (time == null)
+            {
+                string combined = ampmToken != null
+                    ? $"{timePart} {ampmToken}"
+                    : timePart;
+                if (DateTime.TryParse(combined, out var dt))
+                    time = TimeOnly.FromDateTime(dt);
+            }
+        }
+
+        return (date, time);
+    }
+
+
+    private static string? GetCellStr(IXLRow row, int col)
+    {
+        if (col == 0) return null;
+        try
+        {
+            var cell = row.Cell(col);
+            if (cell.IsEmpty()) return null;
+            if (cell.DataType == XLDataType.Number) return ((long)cell.GetDouble()).ToString();
+            return cell.GetString()?.Trim();
+        }
+        catch { return null; }
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  INTERNAL TYPES
+    // ════════════════════════════════════════════════════════════════════════
+
+    private sealed record RawOrder(
+        string PlatformDriverId,
+        string FullName,
+        string Surname,
+        DateOnly ShiftDate,
+        string Status,
+        TimeOnly? OrderTime
+    );
+
+    private sealed class KeetaAttendanceColumnMap
+    {
+        public bool IsValid { get; set; }
+        public string? ErrorMessage { get; set; }
+        public int DriverIdCol { get; set; }
+        public int StatusCol { get; set; }
+        public int TimestampCol { get; set; }
+        public int NameCol { get; set; }
+        public int SurnameCol { get; set; }
+    }
     // ── Arabic duration → minutes ─────────────────────────────────────────────
 
     private static int ParseArabicDurationToMinutes(string? raw)
@@ -831,6 +1331,9 @@ public class MonthlyValidityService(ApplicationDbcontext db) : IMonthlyValidityS
 
             var startStr = timeRange[..dash].Trim();
             var endStr = timeRange[(dash + 1)..].Trim();
+
+            if (endStr == "24:00") endStr = "23:59";
+            if (startStr == "24:00") startStr = "23:59";
 
             if (!TimeOnly.TryParse(startStr, out TimeOnly startTime) ||
                 !TimeOnly.TryParse(endStr, out TimeOnly endTime))

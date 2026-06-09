@@ -305,6 +305,42 @@ public class ReminderService(ApplicationDbcontext context) : IReminderService
                     u.SparePartId = remapped;
             }
 
+            // Get usages from other housings for the same vehicles/parts
+            var vehicleNumbersInUsage = rawUsages
+                .Select(u => u.VehicleNumber)
+                .Distinct()
+                .ToList();
+
+            var otherHousingUsages = await _ctx.SparePartUsages
+                .Where(u =>
+                    u.Location != housing.Name &&
+                    vehicleNumbersInUsage.Contains(u.VehicleNumber) &&
+                    allRelevantIds.Contains(u.SparePartId))
+                .ToListAsync();
+
+            // Remap IDs to canonical IDs
+            foreach (var u in otherHousingUsages)
+            {
+                if (idRemap.TryGetValue(u.SparePartId, out var remapped))
+                    u.SparePartId = remapped;
+            }
+
+            // Latest date recorded outside this housing
+            var latestOtherHousingDate = otherHousingUsages
+                .GroupBy(u => new { u.VehicleNumber, u.SparePartId })
+                .ToDictionary(
+                    g => (g.Key.VehicleNumber, g.Key.SparePartId),
+                    g => g.Max(x => x.UsedAt));
+
+            // Keep only usages whose latest occurrence is still in this housing
+            rawUsages = rawUsages
+                .Where(u =>
+                    !latestOtherHousingDate.TryGetValue(
+                        (u.VehicleNumber, u.SparePartId),
+                        out var otherDate)
+                    || u.UsedAt >= otherDate)
+                .ToList();
+
             allSparePartUsages = rawUsages;
         }
 

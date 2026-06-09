@@ -78,4 +78,40 @@ public class KetaValidation(IMonthlyValidityService service) : ControllerBase
         var result = await service.GetAllKeetaDriverShiftsAsync(from, to, driverId);
         return result.IsFailure ? result.ToProblem() : Ok(result.Value);
     }
+
+    //
+    [HttpPost("keeta-attendance")]
+    public async Task<IActionResult> ImportKeetaAttendance(IFormFile file)
+    {
+        if (file == null || file.Length == 0)
+            return BadRequest(new { error = "No file uploaded or file is empty" });
+
+        if (!file.FileName.EndsWith(".xlsx") && !file.FileName.EndsWith(".xls"))
+            return BadRequest(new { error = "File must be Excel format" });
+
+        var uploadedBy = User?.Identity?.Name ?? "System";
+        var result = await service.ImportAttendanceAsync(file, uploadedBy);
+
+        if (result.IsSuccess)
+        {
+            return Ok(new
+            {
+                success = true,
+                data = result.Value,
+                summary = new
+                {
+                    totalRows = result.Value.TotalRows,
+                    uniqueDrivers = result.Value.UniqueDrivers,
+                    uniqueDays = result.Value.UniqueDays,
+                    workDays = result.Value.WorkDays,
+                    nonWorkDays = result.Value.NonWorkDays,
+                    unmatchedRows = result.Value.UnmatchedRows,
+                }
+            });
+        }
+
+        return result.ToProblem();
+    }
+
+    // ════════════════════════════════════════════════════════════════════════════
 }
