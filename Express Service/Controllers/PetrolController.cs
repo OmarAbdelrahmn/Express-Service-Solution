@@ -12,6 +12,22 @@ public class PetrolController(IPetrolService service) : ControllerBase
     private readonly IPetrolService _service = service;
 
 
+    /// <summary>
+    /// Shifts the PermissionStartDate of the rider's latest RiderVehicleStatus back by 1 day.
+    /// </summary>
+    [HttpPatch("rider/{iqamaNo:long}/shift-permission-start")]
+    [Authorize(Roles = "Master,Admin")]
+    public async Task<IActionResult> ShiftPermissionStartDate(
+        long iqamaNo,
+        CancellationToken ct)
+    {
+        var response = await _service.ShiftPermissionStartDateAsync(iqamaNo, ct);
+
+        return response.IsSuccess
+            ? Ok(new { message = $"PermissionStartDate shifted back by 1 day for iqama {iqamaNo}." })
+            : response.ToProblem();
+    }
+
 
     /// <summary>
     /// Full petrol picture for a given date:

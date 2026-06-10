@@ -11,6 +11,9 @@ public interface IPetrolService
     DateOnly date,
     CancellationToken ct = default);
 
+    Task<Result> ShiftPermissionStartDateAsync(
+    long iqamaNo,
+    CancellationToken ct = default);
     Task<Result<DailyPetrolReport>> GetDailyReportAsync(
     DateOnly date,
     CancellationToken ct = default);

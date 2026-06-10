@@ -23,6 +23,30 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
          "5577LGA",
     ];
 
+    public async Task<Result> ShiftPermissionStartDateAsync(
+    long iqamaNo,
+    CancellationToken ct = default)
+    {
+        var record = await _db.RiderVehicleStatus
+            .Where(s => s.EmployeeIqamaNo == iqamaNo)
+            .OrderByDescending(s => s.Timestamp)
+            .FirstOrDefaultAsync(ct);
+
+        if (record is null)
+            return Result.Failure(
+                new Error("NotFound",
+                    $"No RiderVehicleStatus found for IqamaNo {iqamaNo}", 404));
+
+        if (record.PermissionStartDate is null)
+            return Result.Failure(
+                new Error("InvalidOperation",
+                    $"Latest record (Id {record.Id}) has no PermissionStartDate to shift", 400));
+
+        record.PermissionStartDate = record.PermissionStartDate.Value.AddDays(-1);
+
+        await _db.SaveChangesAsync(ct);
+        return Result.Success();
+    }
     // ═══════════════════════════════════════════════════════════════════════
     // DAILY REPORT
     // ═══════════════════════════════════════════════════════════════════════
