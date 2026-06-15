@@ -19,6 +19,9 @@ public class EmailWarmupJob : IEmailWarmupJob
 
     public async Task RunAsync(CancellationToken cancellationToken)
     {
+
+        return;
+
         var toEmail = FakeEmailData.FakeEmails[_rng.Next(FakeEmailData.FakeEmails.Count)];
         var (subject, body) = EmailTemplates.Templates[_rng.Next(EmailTemplates.Templates.Count)];
 

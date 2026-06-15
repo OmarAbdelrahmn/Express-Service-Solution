@@ -27,129 +27,133 @@ public class AbsentReportEmailSender(IOptions<DailyReportSettings> options) : IA
     private static string FormatArabicDate(DateOnly d) =>
         $"{d.Day} {ArabicMonths[d.Month - 1]} {d.Year}";
 
-    // ── CSS ───────────────────────────────────────────────────────────────────
+    // ── Mobile-first CSS ──────────────────────────────────────────────────────
     private const string EmailCss = """
         <style>
-        * { box-sizing: border-box; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
         body {
             font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
-            font-size: 13px;
-            color: #333;
-            background: #f9f9f9;
+            font-size: 14px;
+            color: #222;
+            background: #f3f4f6;
             direction: rtl;
             text-align: right;
-            margin: 0;
-            padding: 0;
         }
+
+        /* ── Wrapper: fluid, max 600 px ── */
         .wrap {
-            max-width: 860px;
-            margin: 20px auto;
+            max-width: 600px;
+            width: 100%;
+            margin: 12px auto;
             background: #fff;
-            border-radius: 8px;
+            border-radius: 10px;
             overflow: hidden;
-            box-shadow: 0 2px 8px rgba(0,0,0,.1);
+            box-shadow: 0 2px 10px rgba(0,0,0,.08);
             direction: rtl;
         }
+
         /* ── Top bar ── */
         .topbar {
             background: #7b1a1a;
+            padding: 16px 18px 12px;
+            direction: rtl;
+        }
+        .topbar h1 {
             color: #fff;
-            padding: 0;
-            direction: rtl;
-        }
-        .topbar table {
-            margin: 0;
-            border-collapse: collapse;
-            direction: rtl;
-        }
-        .topbar-logo {
-            width: 52px;
-            height: 52px;
-            border-radius: 8px;
-            display: block;
-        }
-        /* ── Body ── */
-        .body {
-            padding: 20px 24px;
-            direction: rtl;
-            text-align: right;
-        }
-        .body p {
-            direction: rtl;
-            text-align: right;
-            margin: 0 0 12px 0;
-            line-height: 1.7;
-        }
-        /* ── Summary box ── */
-        .summary-box {
-            background: #fff3e0;
-            border: 1px solid #ffb74d;
-            border-radius: 6px;
-            padding: 12px 16px;
-            margin-bottom: 18px;
-            direction: rtl;
-        }
-        .summary-box table {
-            margin: 0;
-        }
-        .summary-num {
-            font-size: 22px;
+            font-size: 16px;
             font-weight: bold;
-            color: #e65100;
+            margin-bottom: 4px;
         }
-        .summary-label {
-            font-size: 11px;
-            color: #777;
-            margin-top: 2px;
-        }
-        /* ── Data table ── */
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-bottom: 6px;
+        .topbar p  { color: #fca5a5; font-size: 12px; line-height: 1.6; }
+
+        /* ── Summary box ── */
+        .summary {
+            background: #fff7f7;
+            border-bottom: 2px solid #dc2626;
+            padding: 14px 18px;
             direction: rtl;
         }
-        th {
-            padding: 9px 10px;
-            text-align: right;
-            font-size: 12px;
+        .summary table { margin: 0; direction: rtl; }
+
+        .stat-num   { font-size: 28px; font-weight: bold; line-height: 1.1; }
+        .stat-label { font-size: 11px; color: #6b7280; margin-top: 3px; }
+        .num-total  { color: #7b1a1a; }
+        .num-absent { color: #b91c1c; }
+        .num-low    { color: #d97706; }
+
+        /* ── Section heading ── */
+        .section-head {
             background: #7b1a1a;
             color: #fff;
-        }
-        th.th-num { text-align: center; }
-        td {
-            padding: 8px 10px;
-            text-align: right;
-            border-bottom: 1px solid #eee;
-            font-size: 12px;
-        }
-        td.num { text-align: center; }
-        tr:nth-child(even) td { background: #fafafa; }
-        .badge-absent {
-            background: #ffebee;
-            color: #c62828;
+            font-size: 13px;
             font-weight: bold;
-            border-radius: 3px;
-            padding: 2px 8px;
-            font-size: 11px;
+            padding: 9px 18px;
+            direction: rtl;
+        }
+
+        /* ── Rider cards — one per row, no wide table ── */
+        .cards { padding: 8px 12px 16px; }
+
+        .rider-card {
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            margin-bottom: 8px;
+            overflow: hidden;
+            direction: rtl;
+        }
+        .card-header {
+            padding: 9px 12px;
+            display: block;
+            direction: rtl;
+        }
+        .card-header-absent { background: #fff1f2; border-bottom: 1px solid #fecaca; }
+        .card-header-low    { background: #fffbeb; border-bottom: 1px solid #fde68a; }
+
+        .card-rank   { font-size: 11px; color: #9ca3af; float: left; }
+        .card-name   { font-size: 14px; font-weight: bold; color: #111; }
+        .card-body   { padding: 8px 12px 10px; display: block; direction: rtl; }
+
+        .card-meta {
+            font-size: 12px;
+            color: #555;
+            line-height: 1.8;
+            direction: rtl;
+        }
+        .card-meta span { white-space: nowrap; }
+
+        /* Status badges */
+        .badge-absent {
+            display: inline-block;
+            background: #fee2e2;
+            color: #991b1b;
+            font-weight: bold;
+            font-size: 12px;
+            padding: 3px 10px;
+            border-radius: 20px;
             white-space: nowrap;
         }
         .badge-low {
-            background: #fff3e0;
-            color: #e65100;
+            display: inline-block;
+            background: #fef3c7;
+            color: #92400e;
             font-weight: bold;
-            border-radius: 3px;
-            padding: 2px 8px;
-            font-size: 11px;
+            font-size: 12px;
+            padding: 3px 10px;
+            border-radius: 20px;
             white-space: nowrap;
         }
+
+        /* clear floats */
+        .cf::after { content:""; display:table; clear:both; }
+
         /* ── Footer ── */
         .footer {
-            background: #f0f0f0;
+            background: #f1f5f9;
             text-align: center;
-            padding: 12px;
+            padding: 12px 16px;
             font-size: 11px;
-            color: #888;
+            color: #94a3b8;
             direction: rtl;
         }
         </style>
@@ -171,7 +175,8 @@ public class AbsentReportEmailSender(IOptions<DailyReportSettings> options) : IA
         var absentCount = payload.Riders.Count(r => !r.HadShiftButLowHours);
         var lowHoursCount = payload.Riders.Count(r => r.HadShiftButLowHours);
 
-        message.Subject = $"⚠️ تقرير الغياب والساعات المنخفضة — {payload.CompanyName} — {FormatArabicDate(payload.ReportDate)}";
+        message.Subject =
+            $"⚠️ تقرير الغياب والساعات المنخفضة — {payload.CompanyName} — {FormatArabicDate(payload.ReportDate)}";
         message.Headers.Add("Content-Language", "ar");
 
         var body = new BodyBuilder();
@@ -180,17 +185,14 @@ public class AbsentReportEmailSender(IOptions<DailyReportSettings> options) : IA
         string? logoCid = null;
         if (logoBytes is not null)
         {
-            var logoResource = body.LinkedResources.Add(
-                "company-logo.png",
-                logoBytes,
-                new ContentType("image", "png"));
-            logoResource.ContentId = MimeUtils.GenerateMessageId();
-            logoCid = logoResource.ContentId;
+            var res = body.LinkedResources.Add(
+                "company-logo.png", logoBytes, new ContentType("image", "png"));
+            res.ContentId = MimeUtils.GenerateMessageId();
+            logoCid = res.ContentId;
         }
 
         body.HtmlBody = BuildHtmlBody(payload, logoCid);
         body.TextBody = BuildTextBody(payload);
-
         message.Body = body.ToMessageBody();
 
         using var smtp = new SmtpClient();
@@ -199,7 +201,6 @@ public class AbsentReportEmailSender(IOptions<DailyReportSettings> options) : IA
             _settings.SmtpPort,
             _settings.UseSsl ? SecureSocketOptions.StartTls : SecureSocketOptions.None,
             ct);
-
         await smtp.AuthenticateAsync(_settings.SmtpUser, _settings.SmtpPassword, ct);
         await smtp.SendAsync(message, ct);
         await smtp.DisconnectAsync(true, ct);
@@ -214,20 +215,16 @@ public class AbsentReportEmailSender(IOptions<DailyReportSettings> options) : IA
         var lowHoursCount = payload.Riders.Count(r => r.HadShiftButLowHours);
 
         sb.AppendLine($"تقرير الغياب والساعات المنخفضة — {payload.CompanyName} — {FormatArabicDate(payload.ReportDate)}");
-        sb.AppendLine($"لم يعملوا: {absentCount} مندوب | ساعات منخفضة: {lowHoursCount} مندوب | الإجمالي: {payload.Riders.Count}");
+        sb.AppendLine($"لم يعملوا: {absentCount} | ساعات منخفضة: {lowHoursCount} | الإجمالي: {payload.Riders.Count}");
         sb.AppendLine(new string('─', 70));
-
-        sb.AppendLine();
-        sb.AppendLine($"  {"#",-4} {"الاسم",-25} {"السكن",-20} {"رقم العمل",-15} {"الحالة"}");
-        sb.AppendLine($"  {new string('-', 75)}");
 
         int rank = 1;
         foreach (var r in payload.Riders)
         {
             var status = r.HadShiftButLowHours
-                ? $"ساعات منخفضة: {r.WorkingHours:F1} ساعة"
+                ? $"ساعات منخفضة: {r.WorkingHours:F1}ساعة"
                 : "لم يعمل";
-            sb.AppendLine($"  {rank,-4} {r.RiderNameAR,-25} {r.HousingName,-20} {r.WorkingId,-15} {status}");
+            sb.AppendLine($"{rank}. {r.RiderNameAR} | {r.HousingName} | {r.WorkingId} | {status}");
             rank++;
         }
 
@@ -244,120 +241,115 @@ public class AbsentReportEmailSender(IOptions<DailyReportSettings> options) : IA
         var absentCount = payload.Riders.Count(r => !r.HadShiftButLowHours);
         var lowHoursCount = payload.Riders.Count(r => r.HadShiftButLowHours);
 
+        sb.Append("<!DOCTYPE html>");
         sb.Append("<html lang=\"ar\" dir=\"rtl\">");
-        sb.Append("<head><meta charset=\"UTF-8\"/>");
+        sb.Append("<head>");
+        sb.Append("<meta charset=\"UTF-8\"/>");
+        sb.Append("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"/>");
         sb.Append(EmailCss);
         sb.Append("</head>");
-        sb.Append("<body dir=\"rtl\" style=\"direction:rtl;text-align:right;margin:0;padding:0\">");
+        sb.Append("<body style=\"direction:rtl;margin:0;padding:8px\">");
         sb.Append("<div class=\"wrap\">");
 
         // ── Top bar ───────────────────────────────────────────────────────────
         sb.Append("<div class=\"topbar\">");
-        sb.Append("<table width=\"100%\" cellpadding=\"18\" cellspacing=\"0\" border=\"0\" style=\"direction:rtl\">");
+        sb.Append("<table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\">");
         sb.Append("<tr>");
 
-        // RIGHT cell — main title
-        sb.Append("<td align=\"right\" valign=\"middle\" style=\"padding:18px 24px\">");
-        sb.Append("<h1 style=\"margin:0 0 5px 0;font-size:19px;color:#fff;font-weight:bold\">⚠️ تقرير الغياب والساعات المنخفضة</h1>");
-        sb.Append($"<p style=\"margin:0;font-size:12px;color:#fff;opacity:.85\">");
-        sb.Append($"الشركة: {payload.CompanyName} &nbsp;|&nbsp; التاريخ: {FormatArabicDate(payload.ReportDate)}");
-        sb.Append("</p>");
+        // Right: title
+        sb.Append("<td valign=\"middle\">");
+        sb.Append("<h1>⚠️ تقرير الغياب والساعات المنخفضة</h1>");
+        sb.Append($"<p>الشركة: {payload.CompanyName}<br/>التاريخ: {FormatArabicDate(payload.ReportDate)}</p>");
         sb.Append("</td>");
 
-        // LEFT cell — logo
-        sb.Append("<td width=\"80\" align=\"center\" valign=\"middle\" style=\"padding:12px 16px\">");
+        // Left: logo
+        sb.Append("<td width=\"58\" valign=\"middle\" align=\"center\" style=\"padding-right:12px\">");
         if (logoCid is not null)
-        {
-            sb.Append($"<img src=\"cid:{logoCid}\" class=\"topbar-logo\" width=\"52\" height=\"52\" alt=\"\" style=\"display:block;border-radius:8px;background:#fff\"/>");
-        }
+            sb.Append($"<img src=\"cid:{logoCid}\" width=\"48\" height=\"48\" style=\"display:block;border-radius:8px;background:#fff\" alt=\"\"/>");
         else
-        {
-            sb.Append("<div style=\"width:52px;height:52px;background:#fff;border-radius:8px;text-align:center;line-height:52px;font-size:26px\">⚠️</div>");
-        }
+            sb.Append("<div style=\"width:48px;height:48px;background:#fff3f3;border-radius:8px;line-height:48px;text-align:center;font-size:24px\">⚠️</div>");
         sb.Append("</td>");
 
         sb.Append("</tr>");
         sb.Append("</table>");
         sb.Append("</div>"); // topbar
 
-        // ── Body ──────────────────────────────────────────────────────────────
-        sb.Append("<div class=\"body\">");
-        sb.Append("<p>السادة المسؤولين،<br/>فيما يلي قائمة المناديب الذين لم يعملوا أو سجّلوا ساعات أقل من 8 ساعات أمس.</p>");
-
-        // ── Summary cards ─────────────────────────────────────────────────────
-        sb.Append("<div class=\"summary-box\">");
-        sb.Append("<table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" style=\"direction:rtl\">");
+        // ── Summary ───────────────────────────────────────────────────────────
+        sb.Append("<div class=\"summary\">");
+        sb.Append("<table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\">");
         sb.Append("<tr>");
 
-        // Total
-        sb.Append("<td align=\"center\" style=\"padding:4px 12px;border-left:1px solid #ffb74d\">");
-        sb.Append($"<div class=\"summary-num\" style=\"color:#7b1a1a\">{payload.Riders.Count}</div>");
-        sb.Append("<div class=\"summary-label\">إجمالي المتأثرين</div>");
+        sb.Append("<td align=\"center\" style=\"padding:4px 8px;border-left:1px solid #fecaca\">");
+        sb.Append($"<div class=\"stat-num num-total\">{payload.Riders.Count}</div>");
+        sb.Append("<div class=\"stat-label\">إجمالي المتأثرين</div>");
         sb.Append("</td>");
 
-        // Absent
-        sb.Append("<td align=\"center\" style=\"padding:4px 12px;border-left:1px solid #ffb74d\">");
-        sb.Append($"<div class=\"summary-num\" style=\"color:#c62828\">{absentCount}</div>");
-        sb.Append("<div class=\"summary-label\">لم يعملوا</div>");
+        sb.Append("<td align=\"center\" style=\"padding:4px 8px;border-left:1px solid #fecaca\">");
+        sb.Append($"<div class=\"stat-num num-absent\">{absentCount}</div>");
+        sb.Append("<div class=\"stat-label\">لم يعملوا</div>");
         sb.Append("</td>");
 
-        // Low hours
-        sb.Append("<td align=\"center\" style=\"padding:4px 12px\">");
-        sb.Append($"<div class=\"summary-num\" style=\"color:#e65100\">{lowHoursCount}</div>");
-        sb.Append("<div class=\"summary-label\">ساعات منخفضة (أقل من 8)</div>");
+        sb.Append("<td align=\"center\" style=\"padding:4px 8px\">");
+        sb.Append($"<div class=\"stat-num num-low\">{lowHoursCount}</div>");
+        sb.Append("<div class=\"stat-label\">ساعات منخفضة</div>");
         sb.Append("</td>");
 
         sb.Append("</tr>");
         sb.Append("</table>");
-        sb.Append("</div>"); // summary-box
+        sb.Append("</div>"); // summary
 
-        // ── Riders table ──────────────────────────────────────────────────────
-        sb.Append("<table style=\"direction:rtl\">");
-        sb.Append("<thead><tr>");
-        sb.Append("<th class=\"th-num\">#</th>");
-        sb.Append("<th>اسم المندوب</th>");
-        sb.Append("<th>رقم الإقامة</th>");
-        sb.Append("<th>السكن</th>");
-        sb.Append("<th>رقم العمل</th>");
-        sb.Append("<th class=\"th-num\">الحالة</th>");
-        sb.Append("</tr></thead><tbody>");
+        // ── Riders as cards ───────────────────────────────────────────────────
+        sb.Append($"<div class=\"section-head\">قائمة المناديب ({payload.Riders.Count})</div>");
+        sb.Append("<div class=\"cards\">");
 
         int rank = 1;
         foreach (var r in payload.Riders)
         {
+            var isLow = r.HadShiftButLowHours;
+            var headerClass = isLow ? "card-header card-header-low" : "card-header card-header-absent";
+
+            sb.Append("<div class=\"rider-card\">");
+
+            // card header: rank (left) + name (right)
+            sb.Append($"<div class=\"{headerClass} cf\">");
+            sb.Append($"<span class=\"card-rank\">{rank}</span>");
+            sb.Append($"<span class=\"card-name\">{r.RiderNameAR}</span>");
+            sb.Append("</div>");
+
+            // card body: meta info + badge
+            sb.Append("<div class=\"card-body\">");
+            sb.Append("<table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\">");
             sb.Append("<tr>");
 
-            // rank
-            sb.Append($"<td class=\"num\" style=\"color:#999;font-size:11px\">{rank}</td>");
+            // meta info — right cell
+            sb.Append("<td valign=\"top\" style=\"direction:rtl\">");
+            sb.Append("<div class=\"card-meta\">");
+            sb.Append($"<span>🏠 {r.HousingName}</span><br/>");
+            sb.Append($"<span>🪪 {r.IqamaNo} &nbsp;|&nbsp; 🔖 {r.WorkingId}</span>");
+            sb.Append("</div>");
+            sb.Append("</td>");
 
-            // name
-            sb.Append($"<td style=\"text-align:right\"><strong>{r.RiderNameAR}</strong></td>");
-
-            // iqama
-            sb.Append($"<td class=\"num\" style=\"color:#555;font-size:11px\">{r.IqamaNo}</td>");
-
-            // housing
-            sb.Append($"<td style=\"text-align:right\">{r.HousingName}</td>");
-
-            // working id
-            sb.Append($"<td class=\"num\">{r.WorkingId}</td>");
-
-            // status badge
-            if (r.HadShiftButLowHours)
-                sb.Append($"<td class=\"num\"><span class=\"badge-low\">⏱ {r.WorkingHours:F1} ساعة</span></td>");
+            // badge — left cell
+            sb.Append("<td align=\"left\" valign=\"middle\" style=\"padding-right:8px;white-space:nowrap\">");
+            if (isLow)
+                sb.Append($"<span class=\"badge-low\">⏱ {r.WorkingHours:F1} ساعة</span>");
             else
-                sb.Append("<td class=\"num\"><span class=\"badge-absent\">✗ لم يعمل</span></td>");
+                sb.Append("<span class=\"badge-absent\">✗ لم يعمل</span>");
+            sb.Append("</td>");
 
             sb.Append("</tr>");
+            sb.Append("</table>");
+            sb.Append("</div>"); // card-body
+
+            sb.Append("</div>"); // rider-card
             rank++;
         }
 
-        sb.Append("</tbody></table>");
-        sb.Append("</div>"); // body
+        sb.Append("</div>"); // cards
 
         // ── Footer ────────────────────────────────────────────────────────────
         sb.Append("<div class=\"footer\">");
-        sb.Append($"تم إرسال هذا التقرير تلقائيًا بتاريخ {DateTime.Now:dd/MM/yyyy} الساعة {DateTime.Now:HH:mm}");
+        sb.Append($"أُرسل تلقائيًا بتاريخ {DateTime.Now:dd/MM/yyyy} الساعة {DateTime.Now:HH:mm}");
         sb.Append(" &nbsp;|&nbsp; لا تردَّ على هذا البريد");
         sb.Append("</div>");
 

@@ -27,6 +27,8 @@ builder.Services.AddCors(options =>
         });
 });
 
+
+
 builder.Services.AddDependencies(builder.Configuration);
 
 builder.Services.AddSingleton<IWebHostEnvironment>(builder.Environment);
@@ -52,6 +54,12 @@ app.UseSwaggerUI(c =>
     c.DocExpansion(Swashbuckle.AspNetCore.SwaggerUI.DocExpansion.None);
 });
 //}
+
+using (var scope = app.Services.CreateScope())
+{
+    var scheduler = scope.ServiceProvider.GetRequiredService<ReportScheduler>();
+    scheduler.RegisterAll();
+}
 
 app.UseHangfireDashboard("/job", new DashboardOptions
 {
@@ -90,12 +98,12 @@ RecurringJob.AddOrUpdate<IEmailWarmupJob>(
 RecurringJob.AddOrUpdate<IAbsentReportJob>(
     "absent-report-company-1",
     job => job.RunAsync(1, null),
-    "0 12 * * *");
+    "0 7 * * *");
 
 RecurringJob.AddOrUpdate<IAbsentReportJob>(
     "absent-report-company-2",
     job => job.RunAsync(2, null),
-    "0 12 * * *");
+    "0 7 * * *");
 
 
 app.UseStaticFiles();
