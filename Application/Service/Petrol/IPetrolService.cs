@@ -18,6 +18,10 @@ public interface IPetrolService
     DateOnly date,
     CancellationToken ct = default);
 
+    Task<Result<IReadOnlyList<RiderCompanyHousingReportRow>>> GetRidersCompanyHousingReportAsync(
+    int year,
+    int month,
+    CancellationToken ct = default);
 
     Task<Result<PetrolUploadResult>> ProcessUploadAsync(
         IFormFile file,

@@ -28,6 +28,16 @@ public record PetrolUploadResult(
     IReadOnlyList<PetrolUploadRowDetail> Rows
 );
 
+public record RiderCompanyHousingReportRow(
+    long RiderIqamaNo,
+    string RiderNameEN,
+    string RiderNameAR,
+    string CompanyName,
+    string HousingName,
+    IReadOnlyList<string> VehiclesUsed,
+    decimal TotalCost,
+    int DaysWithCost);
+
 public record PetrolUploadRowDetail(
     string PlateNumberE,
     string? ResolvedVehicleNumber,

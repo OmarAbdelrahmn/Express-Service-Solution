@@ -51,6 +51,113 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
     // DAILY REPORT
     // ═══════════════════════════════════════════════════════════════════════
 
+    public async Task<Result<IReadOnlyList<RiderCompanyHousingReportRow>>> GetRidersCompanyHousingReportAsync(
+    int year,
+    int month,
+    CancellationToken ct = default)
+    {
+        try
+        {
+            // ── Step 1: Load petrol data for the month ────────────────────────
+            var data = await _db.RiderPetrolCosts
+                .AsNoTracking()
+                .Where(r => r.RiderIqamaNo != null
+                         && r.Date.Year == year
+                         && r.Date.Month == month)
+                .Select(r => new
+                {
+                    RiderIqamaNo = r.RiderIqamaNo!.Value,
+                    r.VehicleNumber,
+                    r.Cost,
+                    r.Date
+                })
+                .ToListAsync(ct);
+
+            if (data.Count == 0)
+                return Result.Success<IReadOnlyList<RiderCompanyHousingReportRow>>([]);
+
+            var riderIqamas = data.Select(d => d.RiderIqamaNo).Distinct().ToList();
+
+            // ── Step 2: Employee info + housing ────────────────────────────────
+            var employees = await _db.Employees
+                .AsNoTracking()
+                .Where(e => riderIqamas.Contains(e.IqamaNo))
+                .Select(e => new
+                {
+                    e.IqamaNo,
+                    e.NameEN,
+                    e.NameAR,
+                    HousingName = e.Housing != null ? e.Housing.Name : null
+                })
+                .ToListAsync(ct);
+
+            var employeeMap = employees.ToDictionary(e => e.IqamaNo);
+
+            // ── Step 3: Company via RiderDetails ──────────────────────────────
+            var riderDetails = await _db.RiderDetails
+                .AsNoTracking()
+                .Where(rd => riderIqamas.Contains(rd.EmployeeIqamaNo))
+                .Select(rd => new
+                {
+                    rd.EmployeeIqamaNo,
+                    CompanyName = rd.Company != null ? rd.Company.Name : null
+                })
+                .ToListAsync(ct);
+
+            var companyMap = riderDetails
+                .GroupBy(rd => rd.EmployeeIqamaNo)
+                .ToDictionary(g => g.Key, g => g.First().CompanyName);
+
+            // ── Step 4: Plate numbers for the vehicles used this month ───────
+            var vehicleNumbers = data
+                .Where(d => d.VehicleNumber != null)
+                .Select(d => d.VehicleNumber!)
+                .Distinct()
+                .ToList();
+
+            var plateMap = await _db.Vehicles
+                .AsNoTracking()
+                .Where(v => vehicleNumbers.Contains(v.VehicleNumber))
+                .ToDictionaryAsync(v => v.VehicleNumber, v => v.PlateNumberE, ct);
+
+            // ── Step 5: Build rows ─────────────────────────────────────────────
+            var rows = data
+                .GroupBy(d => d.RiderIqamaNo)
+                .Select(g =>
+                {
+                    employeeMap.TryGetValue(g.Key, out var emp);
+                    companyMap.TryGetValue(g.Key, out var companyName);
+
+                    var vehiclesUsed = g
+                        .Where(x => x.VehicleNumber != null)
+                        .Select(x => x.VehicleNumber!)
+                        .Distinct()
+                        .Select(vn => plateMap.TryGetValue(vn, out var plate) ? plate : vn)
+                        .ToList();
+
+                    return new RiderCompanyHousingReportRow(
+                        RiderIqamaNo: g.Key,
+                        RiderNameEN: emp?.NameEN ?? string.Empty,
+                        RiderNameAR: emp?.NameAR ?? string.Empty,
+                        CompanyName: companyName ?? "Unknown",
+                        HousingName: emp?.HousingName ?? "Unassigned",
+                        VehiclesUsed: vehiclesUsed,
+                        TotalCost: g.Sum(x => x.Cost),
+                        DaysWithCost: g.Select(x => x.Date).Distinct().Count());
+                })
+                .OrderBy(r => r.HousingName)
+                .ThenBy(r => r.CompanyName)
+                .ThenByDescending(r => r.TotalCost)
+                .ToList();
+
+            return Result.Success<IReadOnlyList<RiderCompanyHousingReportRow>>(rows);
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<IReadOnlyList<RiderCompanyHousingReportRow>>(
+                new Error("QueryError", $"Failed to get riders company/housing report: {ex.Message}", 500));
+        }
+    }
     public async Task<Result<DailyPetrolReport>> GetDailyReportAsync(
         DateOnly date,
         CancellationToken ct = default)

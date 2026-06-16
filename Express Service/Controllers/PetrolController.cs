@@ -28,6 +28,25 @@ public class PetrolController(IPetrolService service) : ControllerBase
             : response.ToProblem();
     }
 
+    /// <summary>
+    /// All riders with petrol costs in a given month, enriched with company, housing, and vehicles used.
+    /// </summary>
+    [HttpGet("riders/company-housing-report")]
+    [Authorize(Roles = "Master,Admin,Member")]
+    public async Task<IActionResult> GetRidersCompanyHousingReport(
+        [FromQuery] int year,
+        [FromQuery] int month,
+        CancellationToken ct)
+    {
+        if (month < 1 || month > 12)
+            return BadRequest(new { error = "Month must be between 1 and 12." });
+
+        var response = await _service.GetRidersCompanyHousingReportAsync(year, month, ct);
+
+        return response.IsSuccess
+            ? Ok(response.Value)
+            : response.ToProblem();
+    }
 
     /// <summary>
     /// Full petrol picture for a given date:
