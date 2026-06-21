@@ -5,6 +5,7 @@ using Application.Service.SparePart;
 using k8s.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using static Application.Service.SparePart.ISparePartService;
 
 namespace Express_Service.Controllers;
 
@@ -14,6 +15,26 @@ namespace Express_Service.Controllers;
 public class SparePartController(ISparePartService service , IHousingInventorySyncService importService) : ControllerBase
 {
     private readonly IHousingInventorySyncService importService = importService;
+
+
+    // SparePartController.cs — add to class
+
+    [HttpPut("usage/{usageId}")]
+    [Authorize(Roles = "Master,Admin")]
+    public async Task<IActionResult> UpdateUsage(int usageId, [FromBody] UpdateSparePartUsageRequest request)
+    {
+        var response = await service.UpdateUsageAsync(usageId, request);
+        return response.IsSuccess ? Ok(response.Value) : response.ToProblem();
+    }
+
+    [HttpDelete("usage/{usageId}")]
+    [Authorize(Roles = "Master,Admin")]
+    public async Task<IActionResult> DeleteUsage(int usageId)
+    {
+        var response = await service.DeleteUsageAsync(usageId);
+        return response.IsSuccess ? Ok(new { message = "Deleted successfully" }) : response.ToProblem();
+    }
+
 
     [HttpGet("all-housings")]
     [Authorize(Roles = "Master,Admin,Member")]

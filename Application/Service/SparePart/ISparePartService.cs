@@ -21,7 +21,17 @@ public interface ISparePartService
 
     Task<Result<BatchUsageResponse>> RecordBatchSparePartUsageAsync(DateTime Date, BatchSparePartUsageRequest request);
 
+    // ISparePartService.cs — add to interface
 
+    Task<Result<SparePartUsageResponse>> UpdateUsageAsync(int usageId, UpdateSparePartUsageRequest request);
+    Task<Result> DeleteUsageAsync(int usageId);
+
+    public record UpdateSparePartUsageRequest(
+        string VehicleNumber,
+        int QuantityUsed,
+        DateTime UsedAt,
+        string? Location
+    );
     // <summary>
     /// Get cost summary for company main stock "الشركة"
     /// </summary>

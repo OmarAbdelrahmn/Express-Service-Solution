@@ -13,6 +13,99 @@ public class SparePartService(ApplicationDbcontext dbcontext) : ISparePartServic
 
     private const string COMPANY_STOCK = "الشركة";
 
+
+    // SparePartService.cs — add to class
+
+    public async Task<Result<SparePartUsageResponse>> UpdateUsageAsync(int usageId, UpdateSparePartUsageRequest request)
+    {
+        using var transaction = await _dbcontext.Database.BeginTransactionAsync();
+
+        try
+        {
+            var usage = await _dbcontext.SparePartUsages
+                .Include(u => u.SparePart)
+                .FirstOrDefaultAsync(u => u.Id == usageId);
+
+            if (usage == null)
+                return Result.Failure<SparePartUsageResponse>(
+                    new Error("NotFound", "Usage record not found", 404));
+
+            var vehicle = await _dbcontext.Vehicles
+                .FirstOrDefaultAsync(v => v.VehicleNumber == request.VehicleNumber);
+
+            if (vehicle == null)
+                return Result.Failure<SparePartUsageResponse>(
+                    new Error("VehicleNotFound", "Vehicle not found", 404));
+
+            var sparePart = usage.SparePart;
+
+            // Restore stock from the old usage, then validate against the new quantity
+            var availableAfterRestore = sparePart.Quantity + usage.QuantityUsed;
+
+            if (availableAfterRestore < request.QuantityUsed)
+                return Result.Failure<SparePartUsageResponse>(
+                    new Error("InsufficientQuantity",
+                        $"Only {availableAfterRestore} units available", 400));
+
+            sparePart.Quantity = availableAfterRestore - request.QuantityUsed;
+
+            usage.VehicleNumber = request.VehicleNumber;
+            usage.QuantityUsed = request.QuantityUsed;
+            usage.UsedAt = request.UsedAt;
+            usage.Location = request.Location ?? usage.Location;
+            usage.Cost = sparePart.Price * request.QuantityUsed;
+
+            await _dbcontext.SaveChangesAsync();
+            await transaction.CommitAsync();
+
+            var response = new SparePartUsageResponse(
+                usage.Id,
+                usage.SparePartId,
+                sparePart.Name,
+                usage.VehicleNumber,
+                usage.QuantityUsed,
+                usage.UsedAt,
+                usage.Cost
+            );
+
+            return Result.Success(response);
+        }
+        catch (Exception ex)
+        {
+            await transaction.RollbackAsync();
+            return Result.Failure<SparePartUsageResponse>(
+                new Error("UpdateUsageError", $"Failed to update usage: {ex.Message}", 500));
+        }
+    }
+
+    public async Task<Result> DeleteUsageAsync(int usageId)
+    {
+        using var transaction = await _dbcontext.Database.BeginTransactionAsync();
+
+        try
+        {
+            var usage = await _dbcontext.SparePartUsages
+                .Include(u => u.SparePart)
+                .FirstOrDefaultAsync(u => u.Id == usageId);
+
+            if (usage == null)
+                return Result.Failure(new Error("NotFound", "Usage record not found", 404));
+
+            usage.SparePart.Quantity += usage.QuantityUsed;
+
+            _dbcontext.SparePartUsages.Remove(usage);
+
+            await _dbcontext.SaveChangesAsync();
+            await transaction.CommitAsync();
+
+            return Result.Success();
+        }
+        catch (Exception ex)
+        {
+            await transaction.RollbackAsync();
+            return Result.Failure(new Error("DeleteUsageError", $"Failed to delete usage: {ex.Message}", 500));
+        }
+    }
     public async Task<Result<ComprehensiveHousingCostReport>> GetAllHousingsCostReportAsync(
     DateTime fromDate,
     DateTime toDate)
