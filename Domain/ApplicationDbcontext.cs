@@ -1,4 +1,5 @@
 ﻿using Domain.Entities;
+using Domain.Entities.Accounting;
 using Domain.Entities.Keeta;
 using Domain.Entities.Petrol;
 using Domain.Entities.Spare;
@@ -57,6 +58,50 @@ public class ApplicationDbcontext(DbContextOptions<ApplicationDbcontext> options
     public DbSet<MaintenanceInterval> MaintenanceIntervals { get; set; }
     public DbSet<KeetaDriverShift> KeetaDriverShifts { get; set; }
     public DbSet<KeetaShiftSlot> KeetaShiftSlots{ get; set; }
+    public DbSet<AccountingPeriod> AccountingPeriods { get; set; }
+    public DbSet<CostCenter> CostCenters { get; set; }
+    public DbSet<AccountingAccount> AccountingAccounts { get; set; }
+    public DbSet<JournalEntry> JournalEntries { get; set; }
+    public DbSet<JournalEntryLine> JournalEntryLines { get; set; }
+    public DbSet<AccountingAuditLog> AccountingAuditLogs { get; set; }
+    public DbSet<AccountingNote> AccountingNotes { get; set; }
+    public DbSet<AccountingAttachment> AccountingAttachments { get; set; }
+    public DbSet<CompanyBillImport> CompanyBillImports { get; set; }
+    public DbSet<CompanyBillSheet> CompanyBillSheets { get; set; }
+    public DbSet<CompanyBillRawRow> CompanyBillRawRows { get; set; }
+    public DbSet<CompanyBillRawCell> CompanyBillRawCells { get; set; }
+    public DbSet<CompanyBillRiderSummary> CompanyBillRiderSummaries { get; set; }
+    public DbSet<CompanyBillTransactionLine> CompanyBillTransactionLines { get; set; }
+    public DbSet<CompanyBillDailyMetric> CompanyBillDailyMetrics { get; set; }
+    public DbSet<CompanyBillResolutionIssue> CompanyBillResolutionIssues { get; set; }
+    public DbSet<RiderEarning> RiderEarnings { get; set; }
+    public DbSet<RiderBonusRule> RiderBonusRules { get; set; }
+    public DbSet<RiderBonusAward> RiderBonusAwards { get; set; }
+    public DbSet<RiderFinancialItemType> RiderFinancialItemTypes { get; set; }
+    public DbSet<RiderFinancialItem> RiderFinancialItems { get; set; }
+    public DbSet<RiderLoan> RiderLoans { get; set; }
+    public DbSet<RiderLoanInstallment> RiderLoanInstallments { get; set; }
+    public DbSet<RiderMonthlySalary> RiderMonthlySalaries { get; set; }
+    public DbSet<RiderMonthlySalaryLine> RiderMonthlySalaryLines { get; set; }
+    public DbSet<RiderSalaryPaymentBatch> RiderSalaryPaymentBatches { get; set; }
+    public DbSet<RiderSalaryPayment> RiderSalaryPayments { get; set; }
+    public DbSet<CashSalaryHandoverBatch> CashSalaryHandoverBatches { get; set; }
+    public DbSet<CashSalaryHandoverLine> CashSalaryHandoverLines { get; set; }
+    public DbSet<CompanyReceivable> CompanyReceivables { get; set; }
+    public DbSet<CompanyPaymentReceipt> CompanyPaymentReceipts { get; set; }
+    public DbSet<CompanyExpenseCategory> CompanyExpenseCategories { get; set; }
+    public DbSet<CompanyExpense> CompanyExpenses { get; set; }
+    public DbSet<SupplierPayable> SupplierPayables { get; set; }
+    public DbSet<SupplierPayment> SupplierPayments { get; set; }
+    public DbSet<CompanyProfitSnapshot> CompanyProfitSnapshots { get; set; }
+    public DbSet<FixedAsset> FixedAssets { get; set; }
+    public DbSet<AssetDepreciationEntry> AssetDepreciationEntries { get; set; }
+    public DbSet<BankAccount> BankAccounts { get; set; }
+    public DbSet<TreasuryAccount> TreasuryAccounts { get; set; }
+    public DbSet<BankTransaction> BankTransactions { get; set; }
+    public DbSet<BankReconciliation> BankReconciliations { get; set; }
+    public DbSet<CheckCycle> CheckCycles { get; set; }
+    public DbSet<PurchaseInvoice> PurchaseInvoices { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -278,7 +323,10 @@ public class ApplicationDbcontext(DbContextOptions<ApplicationDbcontext> options
        .SelectMany(t => t.GetProperties())
        .Where(p => p.ClrType == typeof(decimal) || p.ClrType == typeof(decimal?)))
         {
-            property.SetColumnType("decimal(38, 0)");
+            var isAccountingEntity = property.DeclaringEntityType.ClrType.Namespace?
+                .StartsWith("Domain.Entities.Accounting", StringComparison.Ordinal) == true;
+
+            property.SetColumnType(isAccountingEntity ? "decimal(18, 2)" : "decimal(38, 0)");
         }
 
         base.OnModelCreating(modelBuilder);
