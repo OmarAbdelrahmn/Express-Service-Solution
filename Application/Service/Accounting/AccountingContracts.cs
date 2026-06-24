@@ -11,6 +11,16 @@ public interface IAccountingImportService
         string uploadedBy,
         CancellationToken cancellationToken = default);
 
+    Task<Result<CompanyBillImportResponse>> ApproveCompanyBillImportAsync(
+        int importId,
+        string approvedBy,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<CompanyBillImportResponse>> ReverseCompanyBillImportAsync(
+        int importId,
+        string reversedBy,
+        CancellationToken cancellationToken = default);
+
     Task<Result<CompanyBillImportResponse>> GetImportAsync(
         int importId,
         CancellationToken cancellationToken = default);
@@ -30,6 +40,11 @@ public interface IAccountingSalaryService
     Task<Result<SalaryResponse>> ApproveSalaryAsync(
         int salaryId,
         string approvedBy,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<SalaryResponse>> ReverseSalaryAsync(
+        int salaryId,
+        string reversedBy,
         CancellationToken cancellationToken = default);
 
     Task<Result<BonusRuleResponse>> CreateBonusRuleAsync(
@@ -71,6 +86,17 @@ public interface IAccountingPaymentService
         string sentBy,
         CancellationToken cancellationToken = default);
 
+    Task<Result<PaymentBatchResponse>> ConfirmBankPaymentBatchAsync(
+        int batchId,
+        BankPaymentConfirmationRequest request,
+        string confirmedBy,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<PaymentLineResponse>> ReverseSalaryPaymentAsync(
+        int paymentId,
+        string reversedBy,
+        CancellationToken cancellationToken = default);
+
     Task<Result<CashHandoverBatchResponse>> CreateCashHandoverBatchAsync(
         CreateCashHandoverBatchRequest request,
         string createdBy,
@@ -89,12 +115,14 @@ public interface IAccountingPaymentService
     Task<Result<CashHandoverLineResponse>> SubmitCashHandoverLineAsync(
         int lineId,
         CashSalarySubmissionRequest request,
+        long managerIqamaNo,
         string submittedBy,
         CancellationToken cancellationToken = default);
 
     Task<Result<CashHandoverBatchResponse>> SubmitCashHandoverBatchAsync(
         int batchId,
         CashSalarySubmissionRequest request,
+        long managerIqamaNo,
         string submittedBy,
         CancellationToken cancellationToken = default);
 }
@@ -137,6 +165,11 @@ public interface ICompanyFinanceService
     Task<Result<CompanyPaymentReceiptResponse>> CreateReceiptAsync(
         CompanyPaymentReceiptRequest request,
         string receivedBy,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<CompanyPaymentReceiptResponse>> ReverseReceiptAsync(
+        int receiptId,
+        string reversedBy,
         CancellationToken cancellationToken = default);
 
     Task<Result<ProfitLossResponse>> GetProfitLossAsync(
@@ -340,6 +373,20 @@ public record CreatePaymentBatchRequest(
     int Year,
     int Month,
     int? CompanyId,
+    string? Notes);
+
+public record BankPaymentConfirmationRequest(
+    IReadOnlyList<BankPaymentConfirmationLine> ConfirmedPayments,
+    IReadOnlyList<BankPaymentRejectionLine> RejectedPayments,
+    string? Notes);
+
+public record BankPaymentConfirmationLine(
+    int PaymentId,
+    string? ReferenceNumber,
+    string? Notes);
+
+public record BankPaymentRejectionLine(
+    int PaymentId,
     string? Notes);
 
 public record PaymentBatchResponse(

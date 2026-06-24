@@ -41,6 +41,28 @@ public class AccountingController(
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
 
+    [HttpPost("imports/{importId:int}/approve")]
+    public async Task<IActionResult> ApproveImport(int importId, CancellationToken cancellationToken)
+    {
+        var result = await importService.ApproveCompanyBillImportAsync(
+            importId,
+            User.GetUserId() ?? "system",
+            cancellationToken);
+
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    [HttpPost("imports/{importId:int}/reverse")]
+    public async Task<IActionResult> ReverseImport(int importId, CancellationToken cancellationToken)
+    {
+        var result = await importService.ReverseCompanyBillImportAsync(
+            importId,
+            User.GetUserId() ?? "system",
+            cancellationToken);
+
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
     [HttpPost("salaries/generate")]
     public async Task<IActionResult> GenerateSalaries([FromBody] GenerateSalaryRequest request, CancellationToken cancellationToken)
     {
@@ -63,6 +85,17 @@ public class AccountingController(
     public async Task<IActionResult> ApproveSalary(int salaryId, CancellationToken cancellationToken)
     {
         var result = await salaryService.ApproveSalaryAsync(
+            salaryId,
+            User.GetUserId() ?? "system",
+            cancellationToken);
+
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    [HttpPost("salaries/{salaryId:int}/reverse")]
+    public async Task<IActionResult> ReverseSalary(int salaryId, CancellationToken cancellationToken)
+    {
+        var result = await salaryService.ReverseSalaryAsync(
             salaryId,
             User.GetUserId() ?? "system",
             cancellationToken);
@@ -138,6 +171,32 @@ public class AccountingController(
     {
         var result = await paymentService.MarkBankPaymentBatchSentAsync(
             batchId,
+            User.GetUserId() ?? "system",
+            cancellationToken);
+
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    [HttpPost("payments/bank-batches/{batchId:int}/confirm")]
+    public async Task<IActionResult> ConfirmBankBatch(
+        int batchId,
+        [FromBody] BankPaymentConfirmationRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await paymentService.ConfirmBankPaymentBatchAsync(
+            batchId,
+            request,
+            User.GetUserId() ?? "system",
+            cancellationToken);
+
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    [HttpPost("payments/{paymentId:int}/reverse")]
+    public async Task<IActionResult> ReversePayment(int paymentId, CancellationToken cancellationToken)
+    {
+        var result = await paymentService.ReverseSalaryPaymentAsync(
+            paymentId,
             User.GetUserId() ?? "system",
             cancellationToken);
 

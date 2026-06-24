@@ -66,6 +66,17 @@ public class CompanyFinanceController(ICompanyFinanceService financeService) : C
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
 
+    [HttpPost("receipts/{receiptId:int}/reverse")]
+    public async Task<IActionResult> ReverseReceipt(int receiptId, CancellationToken cancellationToken)
+    {
+        var result = await financeService.ReverseReceiptAsync(
+            receiptId,
+            User.GetUserId() ?? "system",
+            cancellationToken);
+
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
     [HttpGet("profit-loss")]
     public async Task<IActionResult> GetProfitLoss(
         [FromQuery] DateOnly from,

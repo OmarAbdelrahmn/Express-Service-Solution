@@ -21,6 +21,16 @@ internal static class AccountingClock
     public static DateTime Now => DateTime.UtcNow.AddHours(3);
 }
 
+internal static class AccountingAccountIds
+{
+    public const int CashAndBank = 1;
+    public const int CompanyReceivables = 2;
+    public const int SupplierPayables = 7;
+    public const int RiderPayables = 8;
+    public const int CompanyRevenue = 9;
+    public const int RiderSalaryExpense = 10;
+}
+
 public abstract class AccountingServiceBase(ApplicationDbcontext db)
 {
     protected readonly ApplicationDbcontext Db = db;
@@ -63,21 +73,32 @@ public abstract class AccountingServiceBase(ApplicationDbcontext db)
         _ => 17
     };
 
-    protected void AddJournalEntry(
+    protected async Task<Result<JournalEntry?>> AddJournalEntryAsync(
         DateOnly entryDate,
         string description,
         string sourceType,
         int sourceId,
         string userId,
+        CancellationToken cancellationToken,
         params JournalEntryLine[] lines)
     {
         var debit = lines.Sum(l => l.Debit);
         var credit = lines.Sum(l => l.Credit);
 
         if (debit <= 0 || credit <= 0 || debit != credit)
-            return;
+            return Result.Failure<JournalEntry?>(AccountingErrors.Invalid("Journal entry must be balanced and greater than zero."));
 
-        Db.JournalEntries.Add(new JournalEntry
+        var exists = await Db.JournalEntries
+            .AnyAsync(j => j.SourceType == sourceType
+                && j.SourceId == sourceId
+                && j.ReversedEntryId == null
+                && j.Status == AccountingRecordStatus.Posted,
+                cancellationToken);
+
+        if (exists)
+            return Result.Success<JournalEntry?>(null);
+
+        var entry = new JournalEntry
         {
             EntryNumber = $"JE-{AccountingClock.Now:yyyyMMddHHmmssfff}-{sourceType}-{sourceId}",
             EntryDate = entryDate,
@@ -89,8 +110,88 @@ public abstract class AccountingServiceBase(ApplicationDbcontext db)
             PostedBy = userId,
             PostedAt = AccountingClock.Now,
             Lines = lines.ToList()
+        };
+
+        Db.JournalEntries.Add(entry);
+        AddAuditLog(sourceType, sourceId, "PostJournal", userId, description);
+        return Result.Success<JournalEntry?>(entry);
+    }
+
+    protected async Task<Result> ReverseJournalEntriesForSourceAsync(
+        string sourceType,
+        int sourceId,
+        DateOnly entryDate,
+        string reversedBy,
+        string? notes,
+        CancellationToken cancellationToken)
+    {
+        var entries = await Db.JournalEntries
+            .Include(j => j.Lines)
+            .Where(j => j.SourceType == sourceType
+                && j.SourceId == sourceId
+                && j.ReversedEntryId == null
+                && j.Status == AccountingRecordStatus.Posted)
+            .ToListAsync(cancellationToken);
+
+        foreach (var entry in entries)
+        {
+            var alreadyReversed = await Db.JournalEntries
+                .AnyAsync(j => j.ReversedEntryId == entry.Id && j.Status == AccountingRecordStatus.Posted, cancellationToken);
+
+            if (alreadyReversed)
+                continue;
+
+            Db.JournalEntries.Add(new JournalEntry
+            {
+                EntryNumber = $"JE-{AccountingClock.Now:yyyyMMddHHmmssfff}-REV-{entry.Id}",
+                EntryDate = entryDate,
+                Description = $"Reversal: {entry.Description}",
+                SourceType = $"{sourceType}:Reversal",
+                SourceId = sourceId,
+                ReversedEntryId = entry.Id,
+                Status = AccountingRecordStatus.Posted,
+                CreatedBy = reversedBy,
+                PostedBy = reversedBy,
+                PostedAt = AccountingClock.Now,
+                Notes = notes,
+                Lines = entry.Lines.Select(l => new JournalEntryLine
+                {
+                    AccountId = l.AccountId,
+                    Debit = l.Credit,
+                    Credit = l.Debit,
+                    CostCenterId = l.CostCenterId,
+                    CompanyId = l.CompanyId,
+                    RiderId = l.RiderId,
+                    EmployeeIqamaNo = l.EmployeeIqamaNo,
+                    HousingId = l.HousingId,
+                    VehicleNumber = l.VehicleNumber,
+                    SupplierId = l.SupplierId,
+                    Notes = $"Reversal of {entry.EntryNumber}"
+                }).ToList()
+            });
+        }
+
+        AddAuditLog(sourceType, sourceId, "ReverseJournal", reversedBy, notes);
+        return Result.Success();
+    }
+
+    protected void AddAuditLog(string entityName, int? entityId, string action, string performedBy, string? notes = null)
+    {
+        Db.AccountingAuditLogs.Add(new AccountingAuditLog
+        {
+            EntityName = entityName,
+            EntityId = entityId,
+            Action = action,
+            PerformedBy = performedBy,
+            PerformedAt = AccountingClock.Now,
+            Notes = notes
         });
     }
+
+    protected static string? AppendNote(string? existing, string? note)
+        => string.IsNullOrWhiteSpace(note)
+            ? existing
+            : string.IsNullOrWhiteSpace(existing) ? note : $"{existing}{Environment.NewLine}{note}";
 }
 
 public class AccountingImportService(ApplicationDbcontext db) : AccountingServiceBase(db), IAccountingImportService
@@ -148,8 +249,135 @@ public class AccountingImportService(ApplicationDbcontext db) : AccountingServic
             ParseWorksheet(worksheet, import, riders, substitutions, request.Year, request.Month);
         }
 
-        PostImportTotals(import, uploadedBy);
+        CalculateImportTotals(import);
 
+        await Db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+
+        return await GetImportAsync(import.Id, cancellationToken);
+    }
+
+    public async Task<Result<CompanyBillImportResponse>> ApproveCompanyBillImportAsync(
+        int importId,
+        string approvedBy,
+        CancellationToken cancellationToken = default)
+    {
+        var import = await Db.CompanyBillImports
+            .Include(i => i.RiderSummaries)
+            .FirstOrDefaultAsync(i => i.Id == importId, cancellationToken);
+
+        if (import is null)
+            return Result.Failure<CompanyBillImportResponse>(AccountingErrors.NotFound("Accounting import"));
+
+        var periodResult = await EnsureOpenPeriodAsync(import.Year, import.Month, cancellationToken);
+        if (periodResult.IsFailure)
+            return Result.Failure<CompanyBillImportResponse>(periodResult.Error);
+
+        if (import.Status == AccountingRecordStatus.Posted)
+            return await GetImportAsync(import.Id, cancellationToken);
+
+        if (import.Status is AccountingRecordStatus.Cancelled or AccountingRecordStatus.Reversed)
+            return Result.Failure<CompanyBillImportResponse>(AccountingErrors.Invalid("Only pending imports can be approved."));
+
+        var unresolvedIssues = await Db.CompanyBillResolutionIssues
+            .AnyAsync(i => i.CompanyBillImportId == import.Id && !i.IsResolved, cancellationToken);
+
+        var unresolvedRows = import.RiderSummaries.Any(s =>
+            s.PaidRiderId == null ||
+            s.ResolutionStatus is ImportResolutionStatus.Pending
+                or ImportResolutionStatus.NeedsAccountantReview
+                or ImportResolutionStatus.Unresolved);
+
+        if (unresolvedIssues || unresolvedRows)
+            return Result.Failure<CompanyBillImportResponse>(AccountingErrors.Invalid("Import has unresolved accounting issues."));
+
+        await using var transaction = await Db.Database.BeginTransactionAsync(cancellationToken);
+
+        CalculateImportTotals(import);
+        import.Status = AccountingRecordStatus.Posted;
+
+        var receivable = await Db.CompanyReceivables
+            .FirstOrDefaultAsync(r => r.CompanyBillImportId == import.Id, cancellationToken);
+
+        if (receivable is null)
+        {
+            receivable = new CompanyReceivable
+            {
+                CompanyId = import.CompanyId,
+                CompanyBillImportId = import.Id,
+                Year = import.Year,
+                Month = import.Month,
+                GrossAmount = import.GrossAmount,
+                VatAmount = import.VatAmount,
+                NetAmount = import.NetAmount,
+                PendingAmount = import.NetAmount,
+                Status = AccountingRecordStatus.Posted,
+                Notes = $"Receivable from import {import.SourceFileName}"
+            };
+
+            Db.CompanyReceivables.Add(receivable);
+        }
+
+        var journalResult = await AddJournalEntryAsync(
+            PeriodEnd(import.Year, import.Month),
+            $"Company bill import {import.SourceFileName}",
+            "CompanyBillImport",
+            import.Id,
+            approvedBy,
+            cancellationToken,
+            new JournalEntryLine { AccountId = AccountingAccountIds.CompanyReceivables, Debit = import.NetAmount, CompanyId = import.CompanyId },
+            new JournalEntryLine { AccountId = AccountingAccountIds.CompanyRevenue, Credit = import.NetAmount - import.VatAmount, CompanyId = import.CompanyId },
+            new JournalEntryLine { AccountId = AccountingAccountIds.SupplierPayables, Credit = import.VatAmount, CompanyId = import.CompanyId, Notes = "VAT payable" });
+
+        if (journalResult.IsFailure)
+            return Result.Failure<CompanyBillImportResponse>(journalResult.Error);
+
+        AddAuditLog("CompanyBillImport", import.Id, "Approve", approvedBy, import.Notes);
+        await Db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+
+        return await GetImportAsync(import.Id, cancellationToken);
+    }
+
+    public async Task<Result<CompanyBillImportResponse>> ReverseCompanyBillImportAsync(
+        int importId,
+        string reversedBy,
+        CancellationToken cancellationToken = default)
+    {
+        var import = await Db.CompanyBillImports.FirstOrDefaultAsync(i => i.Id == importId, cancellationToken);
+        if (import is null)
+            return Result.Failure<CompanyBillImportResponse>(AccountingErrors.NotFound("Accounting import"));
+
+        var periodResult = await EnsureOpenPeriodAsync(import.Year, import.Month, cancellationToken);
+        if (periodResult.IsFailure)
+            return Result.Failure<CompanyBillImportResponse>(periodResult.Error);
+
+        await using var transaction = await Db.Database.BeginTransactionAsync(cancellationToken);
+
+        var reverseResult = await ReverseJournalEntriesForSourceAsync(
+            "CompanyBillImport",
+            import.Id,
+            PeriodEnd(import.Year, import.Month),
+            reversedBy,
+            "Company bill import reversed.",
+            cancellationToken);
+
+        if (reverseResult.IsFailure)
+            return Result.Failure<CompanyBillImportResponse>(reverseResult.Error);
+
+        import.Status = AccountingRecordStatus.Reversed;
+
+        var receivables = await Db.CompanyReceivables
+            .Where(r => r.CompanyBillImportId == import.Id)
+            .ToListAsync(cancellationToken);
+
+        foreach (var receivable in receivables)
+        {
+            receivable.Status = AccountingRecordStatus.Reversed;
+            receivable.PendingAmount = 0;
+        }
+
+        AddAuditLog("CompanyBillImport", import.Id, "Reverse", reversedBy);
         await Db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 
@@ -447,7 +675,7 @@ public class AccountingImportService(ApplicationDbcontext db) : AccountingServic
         }
     }
 
-    private void PostImportTotals(CompanyBillImport import, string uploadedBy)
+    private static void CalculateImportTotals(CompanyBillImport import)
     {
         import.GrossAmount = import.RiderSummaries.Sum(s => s.BasicPayment + s.BonusAmount + s.DistanceAmount);
         import.VatAmount = import.RiderSummaries.Sum(s => s.VatAmount);
@@ -455,32 +683,6 @@ public class AccountingImportService(ApplicationDbcontext db) : AccountingServic
         import.NetAmount = import.RiderSummaries.Any(s => s.NetAmount != 0)
             ? import.RiderSummaries.Sum(s => s.NetAmount)
             : import.GrossAmount + import.VatAmount - import.TotalDeductions;
-
-        var receivable = new CompanyReceivable
-        {
-            CompanyId = import.CompanyId,
-            CompanyBillImport = import,
-            Year = import.Year,
-            Month = import.Month,
-            GrossAmount = import.GrossAmount,
-            VatAmount = import.VatAmount,
-            NetAmount = import.NetAmount,
-            PendingAmount = import.NetAmount,
-            Status = AccountingRecordStatus.Posted,
-            Notes = $"Receivable from import {import.SourceFileName}"
-        };
-
-        Db.CompanyReceivables.Add(receivable);
-
-        AddJournalEntry(
-            PeriodEnd(import.Year, import.Month),
-            $"Company bill import {import.SourceFileName}",
-            "CompanyBillImport",
-            import.Id,
-            uploadedBy,
-            new JournalEntryLine { AccountId = 2, Debit = import.NetAmount, CompanyId = import.CompanyId },
-            new JournalEntryLine { AccountId = 9, Credit = import.NetAmount - import.VatAmount, CompanyId = import.CompanyId },
-            new JournalEntryLine { AccountId = 7, Credit = import.VatAmount, CompanyId = import.CompanyId, Notes = "VAT payable" });
     }
 
     private static int FindHeaderRow(IXLWorksheet worksheet)
@@ -879,6 +1081,10 @@ public class AccountingSalaryService(ApplicationDbcontext db) : AccountingServic
             {
                 Db.RiderMonthlySalaryLines.RemoveRange(existing.Lines);
                 Db.RiderMonthlySalaries.Remove(existing);
+                var existingAwards = await Db.RiderBonusAwards
+                    .Where(a => a.RiderId == riderGroup.Key && a.Year == request.Year && a.Month == request.Month)
+                    .ToListAsync(cancellationToken);
+                Db.RiderBonusAwards.RemoveRange(existingAwards);
                 await Db.SaveChangesAsync(cancellationToken);
             }
 
@@ -978,15 +1184,6 @@ public class AccountingSalaryService(ApplicationDbcontext db) : AccountingServic
 
             RecalculateSalary(salary);
             Db.RiderMonthlySalaries.Add(salary);
-
-            AddJournalEntry(
-                PeriodEnd(request.Year, request.Month),
-                $"Rider salary {rider.WorkingId} {request.Year}-{request.Month:00}",
-                "RiderMonthlySalary",
-                salary.Id,
-                generatedBy,
-                new JournalEntryLine { AccountId = 10, Debit = salary.NetSalary, RiderId = rider.Id, EmployeeIqamaNo = rider.EmployeeIqamaNo, CompanyId = request.CompanyId },
-                new JournalEntryLine { AccountId = 8, Credit = salary.NetSalary, RiderId = rider.Id, EmployeeIqamaNo = rider.EmployeeIqamaNo, CompanyId = request.CompanyId });
         }
 
         await Db.SaveChangesAsync(cancellationToken);
@@ -1032,10 +1229,83 @@ public class AccountingSalaryService(ApplicationDbcontext db) : AccountingServic
         if (periodResult.IsFailure)
             return Result.Failure<SalaryResponse>(periodResult.Error);
 
+        await using var transaction = await Db.Database.BeginTransactionAsync(cancellationToken);
+
         salary.Status = SalaryStatus.Approved;
         salary.ApprovedBy = approvedBy;
         salary.ApprovedAt = AccountingClock.Now;
+
+        var journalResult = await AddJournalEntryAsync(
+            PeriodEnd(salary.Year, salary.Month),
+            $"Rider salary {salary.Rider.WorkingId} {salary.Year}-{salary.Month:00}",
+            "RiderMonthlySalary",
+            salary.Id,
+            approvedBy,
+            cancellationToken,
+            new JournalEntryLine
+            {
+                AccountId = AccountingAccountIds.RiderSalaryExpense,
+                Debit = salary.NetSalary,
+                RiderId = salary.RiderId,
+                EmployeeIqamaNo = salary.Rider.EmployeeIqamaNo,
+                CompanyId = salary.Rider.CompanyId
+            },
+            new JournalEntryLine
+            {
+                AccountId = AccountingAccountIds.RiderPayables,
+                Credit = salary.NetSalary,
+                RiderId = salary.RiderId,
+                EmployeeIqamaNo = salary.Rider.EmployeeIqamaNo,
+                CompanyId = salary.Rider.CompanyId
+            });
+
+        if (journalResult.IsFailure)
+            return Result.Failure<SalaryResponse>(journalResult.Error);
+
+        AddAuditLog("RiderMonthlySalary", salary.Id, "Approve", approvedBy);
         await Db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+
+        return Result.Success(MapSalary(salary));
+    }
+
+    public async Task<Result<SalaryResponse>> ReverseSalaryAsync(int salaryId, string reversedBy, CancellationToken cancellationToken = default)
+    {
+        var salary = await Db.RiderMonthlySalaries
+            .Include(s => s.Rider)
+            .ThenInclude(r => r.Employee)
+            .Include(s => s.Lines)
+            .FirstOrDefaultAsync(s => s.Id == salaryId, cancellationToken);
+
+        if (salary is null)
+            return Result.Failure<SalaryResponse>(AccountingErrors.NotFound("Salary"));
+
+        var periodResult = await EnsureOpenPeriodAsync(salary.Year, salary.Month, cancellationToken);
+        if (periodResult.IsFailure)
+            return Result.Failure<SalaryResponse>(periodResult.Error);
+
+        if (salary.PaidAmount > 0)
+            return Result.Failure<SalaryResponse>(AccountingErrors.Invalid("Paid salaries cannot be reversed before payment reversal."));
+
+        await using var transaction = await Db.Database.BeginTransactionAsync(cancellationToken);
+
+        var reverseResult = await ReverseJournalEntriesForSourceAsync(
+            "RiderMonthlySalary",
+            salary.Id,
+            PeriodEnd(salary.Year, salary.Month),
+            reversedBy,
+            "Rider salary reversed.",
+            cancellationToken);
+
+        if (reverseResult.IsFailure)
+            return Result.Failure<SalaryResponse>(reverseResult.Error);
+
+        salary.Status = SalaryStatus.Cancelled;
+        salary.RemainingAmount = 0;
+        AddAuditLog("RiderMonthlySalary", salary.Id, "Reverse", reversedBy);
+
+        await Db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
 
         return Result.Success(MapSalary(salary));
     }
@@ -1369,6 +1639,20 @@ public class AccountingPaymentService(ApplicationDbcontext db) : AccountingServi
             .Where(s => request.CompanyId == null || s.Rider.CompanyId == request.CompanyId)
             .ToListAsync(cancellationToken);
 
+        var blockedSalaryIds = await Db.RiderSalaryPayments
+            .Include(p => p.Batch)
+            .Where(p => p.Batch.Year == request.Year && p.Batch.Month == request.Month)
+            .Where(p => p.Batch.PaymentMethod == RiderPaymentMethod.BankTransfer)
+            .Where(p => p.Batch.Status == PaymentBatchStatus.Prepared
+                || p.Batch.Status == PaymentBatchStatus.Sent
+                || p.Batch.Status == PaymentBatchStatus.PartiallyConfirmed)
+            .Where(p => p.Status == PaymentBatchStatus.Prepared || p.Status == PaymentBatchStatus.Sent)
+            .Select(p => p.RiderMonthlySalaryId)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
+        salaries = salaries.Where(s => !blockedSalaryIds.Contains(s.Id)).ToList();
+
         var batch = new RiderSalaryPaymentBatch
         {
             Year = request.Year,
@@ -1459,33 +1743,164 @@ public class AccountingPaymentService(ApplicationDbcontext db) : AccountingServi
 
         await using var transaction = await Db.Database.BeginTransactionAsync(cancellationToken);
         var batch = batchResult.Value;
-        batch.Status = PaymentBatchStatus.Confirmed;
+        if (batch.Status != PaymentBatchStatus.Prepared)
+            return Result.Failure<PaymentBatchResponse>(AccountingErrors.Invalid("Only prepared bank batches can be sent."));
+
+        batch.Status = PaymentBatchStatus.Sent;
         batch.SentAt = AccountingClock.Now;
         batch.SentBy = sentBy;
 
         foreach (var payment in batch.Payments)
         {
+            if (payment.Status == PaymentBatchStatus.Prepared)
+                payment.Status = PaymentBatchStatus.Sent;
+        }
+
+        AddAuditLog("RiderSalaryPaymentBatch", batch.Id, "Send", sentBy, batch.Notes);
+        await Db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+
+        return await GetPaymentBatchAsync(batchId, cancellationToken);
+    }
+
+    public async Task<Result<PaymentBatchResponse>> ConfirmBankPaymentBatchAsync(
+        int batchId,
+        BankPaymentConfirmationRequest request,
+        string confirmedBy,
+        CancellationToken cancellationToken = default)
+    {
+        var batchResult = await GetPaymentBatchEntityAsync(batchId, cancellationToken);
+        if (batchResult.IsFailure)
+            return Result.Failure<PaymentBatchResponse>(batchResult.Error);
+
+        var batch = batchResult.Value;
+        var periodResult = await EnsureOpenPeriodAsync(batch.Year, batch.Month, cancellationToken);
+        if (periodResult.IsFailure)
+            return Result.Failure<PaymentBatchResponse>(periodResult.Error);
+
+        if (batch.Status is not (PaymentBatchStatus.Sent or PaymentBatchStatus.PartiallyConfirmed))
+            return Result.Failure<PaymentBatchResponse>(AccountingErrors.Invalid("Only sent bank batches can be confirmed."));
+
+        var confirmed = request.ConfirmedPayments ?? [];
+        var rejected = request.RejectedPayments ?? [];
+        var confirmedIds = confirmed.Select(p => p.PaymentId).ToHashSet();
+        var rejectedIds = rejected.Select(p => p.PaymentId).ToHashSet();
+
+        if (confirmedIds.Overlaps(rejectedIds))
+            return Result.Failure<PaymentBatchResponse>(AccountingErrors.Invalid("A payment cannot be both confirmed and rejected."));
+
+        var requestedIds = confirmedIds.Concat(rejectedIds).ToHashSet();
+        if (requestedIds.Count == 0)
+            return Result.Failure<PaymentBatchResponse>(AccountingErrors.Invalid("At least one payment must be confirmed or rejected."));
+
+        if (batch.Payments.Any(p => requestedIds.Contains(p.Id) && p.RiderSalaryPaymentBatchId != batch.Id)
+            || requestedIds.Any(id => batch.Payments.All(p => p.Id != id)))
+            return Result.Failure<PaymentBatchResponse>(AccountingErrors.Invalid("One or more payments do not belong to this batch."));
+
+        await using var transaction = await Db.Database.BeginTransactionAsync(cancellationToken);
+
+        foreach (var confirmation in confirmed)
+        {
+            var payment = batch.Payments.First(p => p.Id == confirmation.PaymentId);
+            if (payment.Status == PaymentBatchStatus.Confirmed)
+                continue;
+            if (payment.Status == PaymentBatchStatus.Failed)
+                return Result.Failure<PaymentBatchResponse>(AccountingErrors.Invalid("Rejected payments cannot be confirmed."));
+
             payment.Status = PaymentBatchStatus.Confirmed;
+            payment.ReferenceNumber = confirmation.ReferenceNumber ?? payment.ReferenceNumber;
+            payment.Notes = AppendNote(payment.Notes, confirmation.Notes ?? request.Notes);
             payment.ConfirmedAt = AccountingClock.Now;
-            payment.ConfirmedBy = sentBy;
+            payment.ConfirmedBy = confirmedBy;
             payment.Salary.PaidAmount += payment.Amount;
             payment.Salary.RemainingAmount = payment.Salary.NetSalary - payment.Salary.PaidAmount;
             payment.Salary.Status = payment.Salary.RemainingAmount <= 0 ? SalaryStatus.Paid : SalaryStatus.PartiallyPaid;
 
-            AddJournalEntry(
+            var journalResult = await AddJournalEntryAsync(
                 PeriodEnd(batch.Year, batch.Month),
                 $"Bank salary payment {payment.Rider.WorkingId}",
                 "RiderSalaryPayment",
                 payment.Id,
-                sentBy,
-                new JournalEntryLine { AccountId = 8, Debit = payment.Amount, RiderId = payment.RiderId, EmployeeIqamaNo = payment.Rider.EmployeeIqamaNo },
-                new JournalEntryLine { AccountId = 1, Credit = payment.Amount, RiderId = payment.RiderId, EmployeeIqamaNo = payment.Rider.EmployeeIqamaNo });
+                confirmedBy,
+                cancellationToken,
+                new JournalEntryLine { AccountId = AccountingAccountIds.RiderPayables, Debit = payment.Amount, RiderId = payment.RiderId, EmployeeIqamaNo = payment.Rider.EmployeeIqamaNo },
+                new JournalEntryLine { AccountId = AccountingAccountIds.CashAndBank, Credit = payment.Amount, RiderId = payment.RiderId, EmployeeIqamaNo = payment.Rider.EmployeeIqamaNo });
+
+            if (journalResult.IsFailure)
+                return Result.Failure<PaymentBatchResponse>(journalResult.Error);
+
+            AddAuditLog("RiderSalaryPayment", payment.Id, "Confirm", confirmedBy, confirmation.Notes);
         }
+
+        foreach (var rejection in rejected)
+        {
+            var payment = batch.Payments.First(p => p.Id == rejection.PaymentId);
+            if (payment.Status == PaymentBatchStatus.Confirmed)
+                return Result.Failure<PaymentBatchResponse>(AccountingErrors.Invalid("Confirmed payments cannot be rejected."));
+
+            payment.Status = PaymentBatchStatus.Failed;
+            payment.Notes = AppendNote(payment.Notes, rejection.Notes ?? request.Notes);
+            AddAuditLog("RiderSalaryPayment", payment.Id, "Reject", confirmedBy, rejection.Notes);
+        }
+
+        batch.Status = batch.Payments.All(p => p.Status == PaymentBatchStatus.Confirmed)
+            ? PaymentBatchStatus.Confirmed
+            : batch.Payments.All(p => p.Status == PaymentBatchStatus.Failed)
+                ? PaymentBatchStatus.Failed
+                : PaymentBatchStatus.PartiallyConfirmed;
 
         await Db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 
         return await GetPaymentBatchAsync(batchId, cancellationToken);
+    }
+
+    public async Task<Result<PaymentLineResponse>> ReverseSalaryPaymentAsync(
+        int paymentId,
+        string reversedBy,
+        CancellationToken cancellationToken = default)
+    {
+        var payment = await Db.RiderSalaryPayments
+            .Include(p => p.Batch)
+            .Include(p => p.Salary)
+            .Include(p => p.Rider)
+            .ThenInclude(r => r.Employee)
+            .FirstOrDefaultAsync(p => p.Id == paymentId, cancellationToken);
+
+        if (payment is null)
+            return Result.Failure<PaymentLineResponse>(AccountingErrors.NotFound("Salary payment"));
+
+        var periodResult = await EnsureOpenPeriodAsync(payment.Batch.Year, payment.Batch.Month, cancellationToken);
+        if (periodResult.IsFailure)
+            return Result.Failure<PaymentLineResponse>(periodResult.Error);
+
+        if (payment.Status != PaymentBatchStatus.Confirmed)
+            return Result.Failure<PaymentLineResponse>(AccountingErrors.Invalid("Only confirmed payments can be reversed."));
+
+        await using var transaction = await Db.Database.BeginTransactionAsync(cancellationToken);
+
+        var reverseResult = await ReverseJournalEntriesForSourceAsync(
+            "RiderSalaryPayment",
+            payment.Id,
+            PeriodEnd(payment.Batch.Year, payment.Batch.Month),
+            reversedBy,
+            "Salary payment reversed.",
+            cancellationToken);
+
+        if (reverseResult.IsFailure)
+            return Result.Failure<PaymentLineResponse>(reverseResult.Error);
+
+        payment.Status = PaymentBatchStatus.Failed;
+        payment.Notes = AppendNote(payment.Notes, "Payment reversed.");
+        payment.Salary.PaidAmount = Math.Max(0, payment.Salary.PaidAmount - payment.Amount);
+        payment.Salary.RemainingAmount = payment.Salary.NetSalary - payment.Salary.PaidAmount;
+        payment.Salary.Status = payment.Salary.PaidAmount == 0 ? SalaryStatus.Approved : SalaryStatus.PartiallyPaid;
+        AddAuditLog("RiderSalaryPayment", payment.Id, "Reverse", reversedBy);
+
+        await Db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+
+        return Result.Success(MapPaymentLine(payment));
     }
 
     public async Task<Result<CashHandoverBatchResponse>> CreateCashHandoverBatchAsync(
@@ -1507,6 +1922,17 @@ public class AccountingPaymentService(ApplicationDbcontext db) : AccountingServi
             .Where(s => request.HousingId == null || s.Rider.Employee.HousingId == request.HousingId)
             .Where(s => request.CompanyId == null || s.Rider.CompanyId == request.CompanyId)
             .ToListAsync(cancellationToken);
+
+        var blockedCashSalaryIds = await Db.CashSalaryHandoverLines
+            .Include(l => l.Batch)
+            .Where(l => l.Batch.Year == request.Year && l.Batch.Month == request.Month)
+            .Where(l => l.Batch.Status == PaymentBatchStatus.Prepared || l.Batch.Status == PaymentBatchStatus.PartiallyConfirmed)
+            .Where(l => l.Status == CashHandoverLineStatus.Pending || l.Status == CashHandoverLineStatus.Delivered)
+            .Select(l => l.RiderMonthlySalaryId)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
+        salaries = salaries.Where(s => !blockedCashSalaryIds.Contains(s.Id)).ToList();
 
         var batch = new CashSalaryHandoverBatch
         {
@@ -1607,6 +2033,7 @@ public class AccountingPaymentService(ApplicationDbcontext db) : AccountingServi
     public async Task<Result<CashHandoverLineResponse>> SubmitCashHandoverLineAsync(
         int lineId,
         CashSalarySubmissionRequest request,
+        long managerIqamaNo,
         string submittedBy,
         CancellationToken cancellationToken = default)
     {
@@ -1620,8 +2047,23 @@ public class AccountingPaymentService(ApplicationDbcontext db) : AccountingServi
         if (line is null)
             return Result.Failure<CashHandoverLineResponse>(AccountingErrors.NotFound("Cash handover line"));
 
-        ApplyCashSubmission(line, request, submittedBy);
+        var periodResult = await EnsureOpenPeriodAsync(line.Batch.Year, line.Batch.Month, cancellationToken);
+        if (periodResult.IsFailure)
+            return Result.Failure<CashHandoverLineResponse>(periodResult.Error);
+
+        var accessResult = await EnsureCashManagerAccessAsync(line.Batch, managerIqamaNo, cancellationToken);
+        if (accessResult.IsFailure)
+            return Result.Failure<CashHandoverLineResponse>(accessResult.Error);
+
+        await using var transaction = await Db.Database.BeginTransactionAsync(cancellationToken);
+
+        var applyResult = await ApplyCashSubmissionAsync(line, request, submittedBy, cancellationToken);
+        if (applyResult.IsFailure)
+            return Result.Failure<CashHandoverLineResponse>(applyResult.Error);
+
+        UpdateCashBatchStatus(line.Batch, submittedBy);
         await Db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
 
         return Result.Success(MapCashLine(line));
     }
@@ -1629,6 +2071,7 @@ public class AccountingPaymentService(ApplicationDbcontext db) : AccountingServi
     public async Task<Result<CashHandoverBatchResponse>> SubmitCashHandoverBatchAsync(
         int batchId,
         CashSalarySubmissionRequest request,
+        long managerIqamaNo,
         string submittedBy,
         CancellationToken cancellationToken = default)
     {
@@ -1637,41 +2080,104 @@ public class AccountingPaymentService(ApplicationDbcontext db) : AccountingServi
             return Result.Failure<CashHandoverBatchResponse>(batchResult.Error);
 
         var batch = batchResult.Value;
-        foreach (var line in batch.Lines.Where(l => l.Status == CashHandoverLineStatus.Pending))
-            ApplyCashSubmission(line, request, submittedBy);
+        var periodResult = await EnsureOpenPeriodAsync(batch.Year, batch.Month, cancellationToken);
+        if (periodResult.IsFailure)
+            return Result.Failure<CashHandoverBatchResponse>(periodResult.Error);
 
-        batch.Status = batch.Lines.All(l => l.Status == CashHandoverLineStatus.Delivered)
-            ? PaymentBatchStatus.Confirmed
-            : PaymentBatchStatus.PartiallyConfirmed;
-        batch.ReviewedBy = submittedBy;
-        batch.ReviewedAt = AccountingClock.Now;
+        var accessResult = await EnsureCashManagerAccessAsync(batch, managerIqamaNo, cancellationToken);
+        if (accessResult.IsFailure)
+            return Result.Failure<CashHandoverBatchResponse>(accessResult.Error);
+
+        await using var transaction = await Db.Database.BeginTransactionAsync(cancellationToken);
+
+        foreach (var line in batch.Lines.Where(l => l.Status == CashHandoverLineStatus.Pending))
+        {
+            var applyResult = await ApplyCashSubmissionAsync(line, request, submittedBy, cancellationToken);
+            if (applyResult.IsFailure)
+                return Result.Failure<CashHandoverBatchResponse>(applyResult.Error);
+        }
+
+        UpdateCashBatchStatus(batch, submittedBy);
 
         await Db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
         return Result.Success(MapCashBatch(batch));
     }
 
-    private void ApplyCashSubmission(CashSalaryHandoverLine line, CashSalarySubmissionRequest request, string submittedBy)
+    private async Task<Result> ApplyCashSubmissionAsync(
+        CashSalaryHandoverLine line,
+        CashSalarySubmissionRequest request,
+        string submittedBy,
+        CancellationToken cancellationToken)
     {
+        if (line.Status == CashHandoverLineStatus.Delivered)
+        {
+            if (request.Status == CashHandoverLineStatus.Delivered)
+                return Result.Success();
+
+            return Result.Failure(AccountingErrors.Invalid("Delivered cash lines cannot be changed."));
+        }
+
         line.Status = request.Status;
         line.SubmittedBy = submittedBy;
         line.SubmittedAt = AccountingClock.Now;
         line.MemberNotes = request.Notes;
 
         if (request.Status != CashHandoverLineStatus.Delivered)
-            return;
+            return Result.Success();
 
         line.Salary.PaidAmount += line.Amount;
         line.Salary.RemainingAmount = line.Salary.NetSalary - line.Salary.PaidAmount;
         line.Salary.Status = line.Salary.RemainingAmount <= 0 ? SalaryStatus.Paid : SalaryStatus.PartiallyPaid;
 
-        AddJournalEntry(
+        var journalResult = await AddJournalEntryAsync(
             PeriodEnd(line.Batch.Year, line.Batch.Month),
             $"Cash salary handover {line.Rider.WorkingId}",
             "CashSalaryHandoverLine",
             line.Id,
             submittedBy,
-            new JournalEntryLine { AccountId = 8, Debit = line.Amount, RiderId = line.RiderId, EmployeeIqamaNo = line.Rider.EmployeeIqamaNo },
-            new JournalEntryLine { AccountId = 1, Credit = line.Amount, RiderId = line.RiderId, EmployeeIqamaNo = line.Rider.EmployeeIqamaNo });
+            cancellationToken,
+            new JournalEntryLine { AccountId = AccountingAccountIds.RiderPayables, Debit = line.Amount, RiderId = line.RiderId, EmployeeIqamaNo = line.Rider.EmployeeIqamaNo },
+            new JournalEntryLine { AccountId = AccountingAccountIds.CashAndBank, Credit = line.Amount, RiderId = line.RiderId, EmployeeIqamaNo = line.Rider.EmployeeIqamaNo });
+
+        if (journalResult.IsFailure)
+            return Result.Failure(journalResult.Error);
+
+        AddAuditLog("CashSalaryHandoverLine", line.Id, "Deliver", submittedBy, request.Notes);
+        return Result.Success();
+    }
+
+    private static void UpdateCashBatchStatus(CashSalaryHandoverBatch batch, string reviewedBy)
+    {
+        if (batch.Lines.Count == 0)
+            return;
+
+        if (batch.Lines.All(l => l.Status == CashHandoverLineStatus.Delivered))
+            batch.Status = PaymentBatchStatus.Confirmed;
+        else if (batch.Lines.Any(l => l.Status != CashHandoverLineStatus.Pending))
+            batch.Status = PaymentBatchStatus.PartiallyConfirmed;
+
+        batch.ReviewedBy = reviewedBy;
+        batch.ReviewedAt = AccountingClock.Now;
+    }
+
+    private async Task<Result> EnsureCashManagerAccessAsync(
+        CashSalaryHandoverBatch batch,
+        long managerIqamaNo,
+        CancellationToken cancellationToken)
+    {
+        if (managerIqamaNo <= 0)
+            return Result.Failure(AccountingErrors.Invalid("Authenticated member iqama is required."));
+
+        if (batch.HousingId is null)
+            return Result.Failure(AccountingErrors.Invalid("Cash batch is not assigned to a housing manager."));
+
+        var allowed = await Db.Housings
+            .AnyAsync(h => h.Id == batch.HousingId && h.ManagerIqamaNo == managerIqamaNo, cancellationToken);
+
+        return allowed
+            ? Result.Success()
+            : Result.Failure(AccountingErrors.Invalid("Cash batch is outside this member's housing."));
     }
 
     private async Task<Result<PaymentBatchResponse>> GetPaymentBatchAsync(int batchId, CancellationToken cancellationToken)
@@ -1731,18 +2237,21 @@ public class AccountingPaymentService(ApplicationDbcontext db) : AccountingServi
             batch.Status,
             batch.TotalAmount,
             batch.PaymentCount,
-            batch.Payments.OrderBy(p => p.Id).Select(p => new PaymentLineResponse(
-                p.Id,
-                p.RiderId,
-                p.Rider.WorkingId,
-                p.Rider.Employee?.NameEN ?? p.Rider.Employee?.NameAR ?? string.Empty,
-                p.Amount,
-                p.IbanSnapshot,
-                p.BankNameSnapshot,
-                p.Status,
-                p.ReferenceNumber,
-                p.Notes)).ToList(),
+            batch.Payments.OrderBy(p => p.Id).Select(MapPaymentLine).ToList(),
             batch.Notes);
+
+    private static PaymentLineResponse MapPaymentLine(RiderSalaryPayment payment)
+        => new(
+            payment.Id,
+            payment.RiderId,
+            payment.Rider.WorkingId,
+            payment.Rider.Employee?.NameEN ?? payment.Rider.Employee?.NameAR ?? string.Empty,
+            payment.Amount,
+            payment.IbanSnapshot,
+            payment.BankNameSnapshot,
+            payment.Status,
+            payment.ReferenceNumber,
+            payment.Notes);
 
     private static CashHandoverBatchResponse MapCashBatch(CashSalaryHandoverBatch batch)
         => new(
@@ -1768,8 +2277,6 @@ public class AccountingPaymentService(ApplicationDbcontext db) : AccountingServi
             line.SubmittedAt,
             line.MemberNotes);
 
-    private static string AppendNote(string? existing, string note)
-        => string.IsNullOrWhiteSpace(existing) ? note : $"{existing}{Environment.NewLine}{note}";
 }
 
 public class CompanyFinanceService(ApplicationDbcontext db) : AccountingServiceBase(db), ICompanyFinanceService
@@ -1783,12 +2290,14 @@ public class CompanyFinanceService(ApplicationDbcontext db) : AccountingServiceB
         var receivables = await Db.CompanyReceivables
             .Where(r => r.Year == year && r.Month == month)
             .Where(r => companyId == null || r.CompanyId == companyId)
+            .Where(r => r.Status != AccountingRecordStatus.Cancelled && r.Status != AccountingRecordStatus.Reversed)
             .ToListAsync(cancellationToken);
 
         var salaries = await Db.RiderMonthlySalaries
             .Include(s => s.Rider)
             .Where(s => s.Year == year && s.Month == month)
             .Where(s => companyId == null || s.Rider.CompanyId == companyId)
+            .Where(s => s.Status != SalaryStatus.Cancelled)
             .ToListAsync(cancellationToken);
 
         var expenses = await Db.CompanyExpenses
@@ -1852,6 +2361,7 @@ public class CompanyFinanceService(ApplicationDbcontext db) : AccountingServiceB
             .Where(r => new DateOnly(r.Year, r.Month, 1) >= new DateOnly(from.Year, from.Month, 1)
                 && new DateOnly(r.Year, r.Month, 1) <= new DateOnly(to.Year, to.Month, 1))
             .Where(r => companyId == null || r.CompanyId == companyId)
+            .Where(r => r.Status != AccountingRecordStatus.Cancelled && r.Status != AccountingRecordStatus.Reversed)
             .OrderBy(r => r.Year)
             .ThenBy(r => r.Month)
             .Select(r => new CompanyIncomeResponse(
@@ -1929,12 +2439,13 @@ public class CompanyFinanceService(ApplicationDbcontext db) : AccountingServiceB
 
         if (expense.Status == AccountingRecordStatus.Approved)
         {
-            AddJournalEntry(
+            var journalResult = await AddJournalEntryAsync(
                 expense.ExpenseDate,
                 expense.Description ?? category.Name,
                 "CompanyExpense",
                 expense.Id,
                 createdBy,
+                cancellationToken,
                 new JournalEntryLine
                 {
                     AccountId = ExpenseAccountId(category.Id),
@@ -1947,7 +2458,7 @@ public class CompanyFinanceService(ApplicationDbcontext db) : AccountingServiceB
                 },
                 new JournalEntryLine
                 {
-                    AccountId = 1,
+                    AccountId = AccountingAccountIds.CashAndBank,
                     Credit = expense.Amount + expense.VatAmount,
                     CostCenterId = expense.CostCenterId,
                     CompanyId = expense.CompanyId,
@@ -1955,6 +2466,9 @@ public class CompanyFinanceService(ApplicationDbcontext db) : AccountingServiceB
                     HousingId = expense.HousingId,
                     VehicleNumber = expense.VehicleNumber
                 });
+
+            if (journalResult.IsFailure)
+                return Result.Failure<CompanyExpenseResponse>(journalResult.Error);
         }
 
         await Db.SaveChangesAsync(cancellationToken);
@@ -1982,10 +2496,30 @@ public class CompanyFinanceService(ApplicationDbcontext db) : AccountingServiceB
         if (request.CompanyReceivableId is not null && receivable is null)
             return Result.Failure<CompanyPaymentReceiptResponse>(AccountingErrors.NotFound("Company receivable"));
 
+        if (request.Amount <= 0)
+            return Result.Failure<CompanyPaymentReceiptResponse>(AccountingErrors.Invalid("Receipt amount must be greater than zero."));
+
+        if (receivable is not null && request.Amount > receivable.PendingAmount)
+            return Result.Failure<CompanyPaymentReceiptResponse>(AccountingErrors.Invalid("Receipt amount exceeds receivable pending amount."));
+
+        var companyId = request.CompanyId ?? receivable?.CompanyId;
+        if (!string.IsNullOrWhiteSpace(request.ReferenceNumber))
+        {
+            var duplicateReceipt = await Db.CompanyPaymentReceipts.AnyAsync(r =>
+                r.CompanyId == companyId
+                && r.ReceiptDate == request.ReceiptDate
+                && r.ReferenceNumber == request.ReferenceNumber
+                && r.BankAccount == request.BankAccount,
+                cancellationToken);
+
+            if (duplicateReceipt)
+                return Result.Failure<CompanyPaymentReceiptResponse>(AccountingErrors.Invalid("A receipt with the same reference already exists."));
+        }
+
         var receipt = new CompanyPaymentReceipt
         {
             CompanyReceivableId = receivable?.Id,
-            CompanyId = request.CompanyId ?? receivable?.CompanyId,
+            CompanyId = companyId,
             ReceiptDate = request.ReceiptDate,
             Amount = request.Amount,
             ReferenceNumber = request.ReferenceNumber,
@@ -2005,27 +2539,70 @@ public class CompanyFinanceService(ApplicationDbcontext db) : AccountingServiceB
 
         await Db.SaveChangesAsync(cancellationToken);
 
-        AddJournalEntry(
+        var receiptJournalResult = await AddJournalEntryAsync(
             receipt.ReceiptDate,
             $"Company receipt {receipt.ReferenceNumber}",
             "CompanyPaymentReceipt",
             receipt.Id,
             receivedBy,
-            new JournalEntryLine { AccountId = 1, Debit = receipt.Amount, CompanyId = receipt.CompanyId },
-            new JournalEntryLine { AccountId = 2, Credit = receipt.Amount, CompanyId = receipt.CompanyId });
+            cancellationToken,
+            new JournalEntryLine { AccountId = AccountingAccountIds.CashAndBank, Debit = receipt.Amount, CompanyId = receipt.CompanyId },
+            new JournalEntryLine { AccountId = AccountingAccountIds.CompanyReceivables, Credit = receipt.Amount, CompanyId = receipt.CompanyId });
+
+        if (receiptJournalResult.IsFailure)
+            return Result.Failure<CompanyPaymentReceiptResponse>(receiptJournalResult.Error);
 
         await Db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 
-        return Result.Success(new CompanyPaymentReceiptResponse(
+        return Result.Success(MapReceipt(receipt));
+    }
+
+    public async Task<Result<CompanyPaymentReceiptResponse>> ReverseReceiptAsync(
+        int receiptId,
+        string reversedBy,
+        CancellationToken cancellationToken = default)
+    {
+        var receipt = await Db.CompanyPaymentReceipts
+            .Include(r => r.CompanyReceivable)
+            .FirstOrDefaultAsync(r => r.Id == receiptId, cancellationToken);
+
+        if (receipt is null)
+            return Result.Failure<CompanyPaymentReceiptResponse>(AccountingErrors.NotFound("Company receipt"));
+
+        var periodResult = await EnsureOpenPeriodAsync(receipt.ReceiptDate.Year, receipt.ReceiptDate.Month, cancellationToken);
+        if (periodResult.IsFailure)
+            return Result.Failure<CompanyPaymentReceiptResponse>(periodResult.Error);
+
+        await using var transaction = await Db.Database.BeginTransactionAsync(cancellationToken);
+
+        var reverseResult = await ReverseJournalEntriesForSourceAsync(
+            "CompanyPaymentReceipt",
             receipt.Id,
-            receipt.CompanyReceivableId,
-            receipt.CompanyId,
             receipt.ReceiptDate,
-            receipt.Amount,
-            receipt.ReferenceNumber,
-            receipt.BankAccount,
-            receipt.Notes));
+            reversedBy,
+            "Company receipt reversed.",
+            cancellationToken);
+
+        if (reverseResult.IsFailure)
+            return Result.Failure<CompanyPaymentReceiptResponse>(reverseResult.Error);
+
+        if (receipt.CompanyReceivable is not null)
+        {
+            receipt.CompanyReceivable.CollectedAmount = Math.Max(0, receipt.CompanyReceivable.CollectedAmount - receipt.Amount);
+            receipt.CompanyReceivable.PendingAmount = receipt.CompanyReceivable.NetAmount - receipt.CompanyReceivable.CollectedAmount;
+            receipt.CompanyReceivable.Status = receipt.CompanyReceivable.CollectedAmount == 0
+                ? AccountingRecordStatus.Posted
+                : AccountingRecordStatus.Approved;
+        }
+
+        receipt.Notes = AppendNote(receipt.Notes, "Receipt reversed.");
+        AddAuditLog("CompanyPaymentReceipt", receipt.Id, "Reverse", reversedBy);
+
+        await Db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+
+        return Result.Success(MapReceipt(receipt));
     }
 
     public async Task<Result<ProfitLossResponse>> GetProfitLossAsync(
@@ -2040,12 +2617,14 @@ public class CompanyFinanceService(ApplicationDbcontext db) : AccountingServiceB
             .Include(r => r.Company)
             .Where(r => new DateOnly(r.Year, r.Month, 1) >= monthStart && new DateOnly(r.Year, r.Month, 1) <= monthEnd)
             .Where(r => companyId == null || r.CompanyId == companyId)
+            .Where(r => r.Status != AccountingRecordStatus.Cancelled && r.Status != AccountingRecordStatus.Reversed)
             .ToListAsync(cancellationToken);
         var salaries = await Db.RiderMonthlySalaries
             .Include(s => s.Rider)
             .ThenInclude(r => r.Company)
             .Where(s => new DateOnly(s.Year, s.Month, 1) >= monthStart && new DateOnly(s.Year, s.Month, 1) <= monthEnd)
             .Where(s => companyId == null || s.Rider.CompanyId == companyId)
+            .Where(s => s.Status != SalaryStatus.Cancelled)
             .ToListAsync(cancellationToken);
         var expenses = await Db.CompanyExpenses
             .Include(e => e.Company)
@@ -2101,11 +2680,13 @@ public class CompanyFinanceService(ApplicationDbcontext db) : AccountingServiceB
         var incomes = await Db.CompanyReceivables
             .Where(r => new DateOnly(r.Year, r.Month, 1) >= new DateOnly(from.Year, from.Month, 1)
                 && new DateOnly(r.Year, r.Month, 1) <= new DateOnly(to.Year, to.Month, 1))
+            .Where(r => r.Status != AccountingRecordStatus.Cancelled && r.Status != AccountingRecordStatus.Reversed)
             .ToListAsync(cancellationToken);
         var salaries = await Db.RiderMonthlySalaries
             .Include(s => s.Rider)
             .Where(s => new DateOnly(s.Year, s.Month, 1) >= new DateOnly(from.Year, from.Month, 1)
                 && new DateOnly(s.Year, s.Month, 1) <= new DateOnly(to.Year, to.Month, 1))
+            .Where(s => s.Status != SalaryStatus.Cancelled)
             .ToListAsync(cancellationToken);
 
         var result = centers.Select(c =>
@@ -2148,6 +2729,17 @@ public class CompanyFinanceService(ApplicationDbcontext db) : AccountingServiceB
             expense.Status,
             expense.ReferenceNumber,
             expense.Description);
+
+    private static CompanyPaymentReceiptResponse MapReceipt(CompanyPaymentReceipt receipt)
+        => new(
+            receipt.Id,
+            receipt.CompanyReceivableId,
+            receipt.CompanyId,
+            receipt.ReceiptDate,
+            receipt.Amount,
+            receipt.ReferenceNumber,
+            receipt.BankAccount,
+            receipt.Notes);
 }
 
 public class RiderAccountingProfileService(ApplicationDbcontext db) : IRiderAccountingProfileService

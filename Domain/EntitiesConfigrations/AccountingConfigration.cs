@@ -77,6 +77,7 @@ public class JournalEntryConfigration : IEntityTypeConfiguration<JournalEntry>
         builder.HasIndex(j => j.EntryNumber).IsUnique();
         builder.HasIndex(j => j.EntryDate);
         builder.HasIndex(j => new { j.SourceType, j.SourceId });
+        builder.HasIndex(j => j.ReversedEntryId);
     }
 }
 
@@ -312,6 +313,22 @@ public class CompanyReceivableConfigration : IEntityTypeConfiguration<CompanyRec
     {
         builder.HasKey(r => r.Id);
         builder.HasIndex(r => new { r.Year, r.Month, r.CompanyId, r.Status });
+        builder.HasIndex(r => r.CompanyBillImportId)
+            .IsUnique()
+            .HasFilter("[CompanyBillImportId] IS NOT NULL");
+    }
+}
+
+public class CompanyPaymentReceiptConfigration : IEntityTypeConfiguration<CompanyPaymentReceipt>
+{
+    public void Configure(EntityTypeBuilder<CompanyPaymentReceipt> builder)
+    {
+        builder.HasKey(r => r.Id);
+        builder.Property(r => r.ReferenceNumber).HasMaxLength(150);
+        builder.Property(r => r.BankAccount).HasMaxLength(200);
+        builder.HasIndex(r => new { r.CompanyId, r.ReceiptDate, r.ReferenceNumber, r.BankAccount })
+            .IsUnique()
+            .HasFilter("[ReferenceNumber] IS NOT NULL");
     }
 }
 

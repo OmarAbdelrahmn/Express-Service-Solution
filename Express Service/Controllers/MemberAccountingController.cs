@@ -12,11 +12,11 @@ public class MemberAccountingController(IAccountingPaymentService paymentService
 {
     [HttpGet("cash-batches")]
     public async Task<IActionResult> GetCashBatches(
-        [FromQuery] long managerIqamaNo,
         [FromQuery] int year,
         [FromQuery] int month,
         CancellationToken cancellationToken)
     {
+        var managerIqamaNo = User.GetUserIqamaNo();
         var result = await paymentService.GetCashHandoverForHousingManagerAsync(managerIqamaNo, year, month, cancellationToken);
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
@@ -30,6 +30,7 @@ public class MemberAccountingController(IAccountingPaymentService paymentService
         var result = await paymentService.SubmitCashHandoverLineAsync(
             lineId,
             request,
+            User.GetUserIqamaNo(),
             User.GetUserId() ?? "member",
             cancellationToken);
 
@@ -45,6 +46,7 @@ public class MemberAccountingController(IAccountingPaymentService paymentService
         var result = await paymentService.SubmitCashHandoverBatchAsync(
             batchId,
             request,
+            User.GetUserIqamaNo(),
             User.GetUserId() ?? "member",
             cancellationToken);
 
