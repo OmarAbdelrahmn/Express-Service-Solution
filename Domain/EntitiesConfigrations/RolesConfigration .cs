@@ -30,6 +30,15 @@ public class RolesConfigration : IEntityTypeConfiguration<ApplicationRole>
                     IsDefault = true,
                     IsDeleted = false
                 },
+                new ApplicationRole
+                {
+                    Id = DefaultRoles.AccountantRoleId,
+                    Name = DefaultRoles.Accountant,
+                    ConcurrencyStamp = DefaultRoles.AccountantRoleConcurrencyStamp,
+                    NormalizedName = DefaultRoles.Accountant.ToUpper(),
+                    IsDefault = false,
+                    IsDeleted = false
+                },
                  new ApplicationRole
                 {
                     Id = DefaultRoles.MasterRoleId,
