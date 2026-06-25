@@ -135,6 +135,32 @@ public class AccountingController(
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
 
+    [HttpPost("financial-items/internet-replacement/bulk")]
+    public async Task<IActionResult> CreateBulkInternetReplacement(
+        [FromBody] BulkInternetReplacementRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await salaryService.CreateBulkInternetReplacementAsync(
+            request,
+            User.GetUserId() ?? "system",
+            cancellationToken);
+
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    [HttpPost("earnings/fixed-monthly")]
+    public async Task<IActionResult> CreateFixedMonthlyEarnings(
+        [FromBody] FixedMonthlyEarningRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await salaryService.CreateFixedMonthlyEarningsAsync(
+            request,
+            User.GetUserId() ?? "system",
+            cancellationToken);
+
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
     [HttpPost("loans")]
     public async Task<IActionResult> CreateLoan([FromBody] RiderLoanRequest request, CancellationToken cancellationToken)
     {

@@ -64,6 +64,16 @@ public interface IAccountingSalaryService
         string createdBy,
         CancellationToken cancellationToken = default);
 
+    Task<Result<List<RiderFinancialItemResponse>>> CreateBulkInternetReplacementAsync(
+        BulkInternetReplacementRequest request,
+        string createdBy,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<List<RiderEarningResponse>>> CreateFixedMonthlyEarningsAsync(
+        FixedMonthlyEarningRequest request,
+        string createdBy,
+        CancellationToken cancellationToken = default);
+
     Task<Result<RiderLoanResponse>> CreateLoanAsync(
         RiderLoanRequest request,
         string createdBy,
@@ -326,6 +336,24 @@ public record RiderFinancialItemRequest(
     string? ReferenceNumber,
     string? Notes);
 
+public record BulkInternetReplacementRequest(
+    int Year,
+    int Month,
+    int CompanyId,
+    decimal Amount,
+    DateOnly OccurredOn,
+    bool ReplaceExisting,
+    string? ReferenceNumber,
+    string? Notes);
+
+public record FixedMonthlyEarningRequest(
+    int Year,
+    int Month,
+    int CompanyId,
+    decimal SalaryAmount,
+    bool ReplaceExisting,
+    string? Notes);
+
 public record RiderFinancialItemResponse(
     int Id,
     int RiderId,
@@ -340,6 +368,20 @@ public record RiderFinancialItemResponse(
     decimal RemainingAmount,
     AccountingRecordStatus Status,
     string? ReferenceNumber,
+    string? Notes);
+
+public record RiderEarningResponse(
+    int Id,
+    int RiderId,
+    string? WorkingId,
+    int? CompanyId,
+    int Year,
+    int Month,
+    int AcceptedOrders,
+    decimal GrossAmount,
+    decimal SalaryAmount,
+    string SourceType,
+    AccountingRecordStatus Status,
     string? Notes);
 
 public record RiderLoanRequest(

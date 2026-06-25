@@ -1424,6 +1424,148 @@ public class AccountingSalaryService(ApplicationDbcontext db) : AccountingServic
         return Result.Success(MapFinancialItem(item));
     }
 
+    public async Task<Result<List<RiderFinancialItemResponse>>> CreateBulkInternetReplacementAsync(
+        BulkInternetReplacementRequest request,
+        string createdBy,
+        CancellationToken cancellationToken = default)
+    {
+        if (request.Amount <= 0)
+            return Result.Failure<List<RiderFinancialItemResponse>>(AccountingErrors.Invalid("Internet replacement amount must be greater than zero."));
+
+        var periodResult = await EnsureOpenPeriodAsync(request.Year, request.Month, cancellationToken);
+        if (periodResult.IsFailure)
+            return Result.Failure<List<RiderFinancialItemResponse>>(periodResult.Error);
+
+        var companyExists = await Db.Companies.AnyAsync(c => c.Id == request.CompanyId, cancellationToken);
+        if (!companyExists)
+            return Result.Failure<List<RiderFinancialItemResponse>>(AccountingErrors.NotFound("Company"));
+
+        var type = await EnsureFinancialItemTypeAsync(
+            "INTERNET_REPLACEMENT",
+            "Internet Replacement",
+            FinancialItemCategory.Reimbursement,
+            cancellationToken);
+
+        var riders = await Db.RiderDetails
+            .Include(r => r.Employee)
+            .Where(r => r.CompanyId == request.CompanyId)
+            .OrderBy(r => r.WorkingId)
+            .ToListAsync(cancellationToken);
+
+        if (riders.Count == 0)
+            return Result.Failure<List<RiderFinancialItemResponse>>(AccountingErrors.Invalid("No riders found for this company."));
+
+        await using var transaction = await Db.Database.BeginTransactionAsync(cancellationToken);
+
+        if (request.ReplaceExisting)
+        {
+            var riderIds = riders.Select(r => r.Id).ToList();
+            var existing = await Db.RiderFinancialItems
+                .Where(i => i.Year == request.Year
+                    && i.Month == request.Month
+                    && i.CompanyId == request.CompanyId
+                    && i.RiderFinancialItemTypeId == type.Id
+                    && riderIds.Contains(i.RiderId)
+                    && i.Status != AccountingRecordStatus.Posted)
+                .ToListAsync(cancellationToken);
+            Db.RiderFinancialItems.RemoveRange(existing);
+            await Db.SaveChangesAsync(cancellationToken);
+        }
+
+        var items = riders.Select(r => new RiderFinancialItem
+        {
+            RiderFinancialItemTypeId = type.Id,
+            RiderId = r.Id,
+            EmployeeIqamaNo = r.EmployeeIqamaNo,
+            CompanyId = request.CompanyId,
+            HousingId = r.Employee?.HousingId,
+            VehicleNumber = r.VehicleNumber,
+            Year = request.Year,
+            Month = request.Month,
+            OccurredOn = request.OccurredOn,
+            Amount = request.Amount,
+            RemainingAmount = request.Amount,
+            Status = AccountingRecordStatus.Approved,
+            ReferenceNumber = request.ReferenceNumber,
+            Notes = request.Notes,
+            CreatedBy = createdBy,
+            Type = type,
+            Rider = r
+        }).ToList();
+
+        Db.RiderFinancialItems.AddRange(items);
+        await Db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+
+        return Result.Success(items.Select(MapFinancialItem).ToList());
+    }
+
+    public async Task<Result<List<RiderEarningResponse>>> CreateFixedMonthlyEarningsAsync(
+        FixedMonthlyEarningRequest request,
+        string createdBy,
+        CancellationToken cancellationToken = default)
+    {
+        if (request.SalaryAmount <= 0)
+            return Result.Failure<List<RiderEarningResponse>>(AccountingErrors.Invalid("Fixed salary amount must be greater than zero."));
+
+        var periodResult = await EnsureOpenPeriodAsync(request.Year, request.Month, cancellationToken);
+        if (periodResult.IsFailure)
+            return Result.Failure<List<RiderEarningResponse>>(periodResult.Error);
+
+        var companyExists = await Db.Companies.AnyAsync(c => c.Id == request.CompanyId, cancellationToken);
+        if (!companyExists)
+            return Result.Failure<List<RiderEarningResponse>>(AccountingErrors.NotFound("Company"));
+
+        var riders = await Db.RiderDetails
+            .Where(r => r.CompanyId == request.CompanyId)
+            .OrderBy(r => r.WorkingId)
+            .ToListAsync(cancellationToken);
+
+        if (riders.Count == 0)
+            return Result.Failure<List<RiderEarningResponse>>(AccountingErrors.Invalid("No riders found for this company."));
+
+        await using var transaction = await Db.Database.BeginTransactionAsync(cancellationToken);
+
+        if (request.ReplaceExisting)
+        {
+            var riderIds = riders.Select(r => r.Id).ToList();
+            var existing = await Db.RiderEarnings
+                .Where(e => e.Year == request.Year
+                    && e.Month == request.Month
+                    && e.CompanyId == request.CompanyId
+                    && e.SourceType == "FixedMonthlySalary"
+                    && riderIds.Contains(e.PaidRiderId)
+                    && e.Status != AccountingRecordStatus.Posted)
+                .ToListAsync(cancellationToken);
+            Db.RiderEarnings.RemoveRange(existing);
+            await Db.SaveChangesAsync(cancellationToken);
+        }
+
+        var earnings = riders.Select(r => new RiderEarning
+        {
+            CompanyId = request.CompanyId,
+            OriginalRiderId = r.Id,
+            PaidRiderId = r.Id,
+            Year = request.Year,
+            Month = request.Month,
+            GrossAmount = request.SalaryAmount,
+            SalaryAmount = request.SalaryAmount,
+            SourceType = "FixedMonthlySalary",
+            Status = AccountingRecordStatus.Approved,
+            Notes = string.IsNullOrWhiteSpace(request.Notes)
+                ? $"Fixed monthly salary created by {createdBy}."
+                : request.Notes,
+            PaidRider = r,
+            OriginalRider = r
+        }).ToList();
+
+        Db.RiderEarnings.AddRange(earnings);
+        await Db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+
+        return Result.Success(earnings.Select(MapEarning).ToList());
+    }
+
     public async Task<Result<RiderLoanResponse>> CreateLoanAsync(
         RiderLoanRequest request,
         string createdBy,
@@ -1530,6 +1672,32 @@ public class AccountingSalaryService(ApplicationDbcontext db) : AccountingServic
             .ToListAsync(cancellationToken);
     }
 
+    private async Task<RiderFinancialItemType> EnsureFinancialItemTypeAsync(
+        string code,
+        string name,
+        FinancialItemCategory category,
+        CancellationToken cancellationToken)
+    {
+        var type = await Db.RiderFinancialItemTypes
+            .FirstOrDefaultAsync(t => t.Code == code, cancellationToken);
+
+        if (type is not null)
+            return type;
+
+        type = new RiderFinancialItemType
+        {
+            Code = code,
+            Name = name,
+            Category = category,
+            IsSystem = true,
+            IsActive = true
+        };
+
+        Db.RiderFinancialItemTypes.Add(type);
+        await Db.SaveChangesAsync(cancellationToken);
+        return type;
+    }
+
     private static void RecalculateSalary(RiderMonthlySalary salary)
     {
         salary.GrossEarnings = salary.Lines.Where(l => l.Type == SalaryLineType.Earning).Sum(l => l.Amount);
@@ -1600,6 +1768,21 @@ public class AccountingSalaryService(ApplicationDbcontext db) : AccountingServic
             item.Status,
             item.ReferenceNumber,
             item.Notes);
+
+    private static RiderEarningResponse MapEarning(RiderEarning earning)
+        => new(
+            earning.Id,
+            earning.PaidRiderId,
+            earning.PaidRider.WorkingId,
+            earning.CompanyId,
+            earning.Year,
+            earning.Month,
+            earning.AcceptedOrders,
+            earning.GrossAmount,
+            earning.SalaryAmount,
+            earning.SourceType,
+            earning.Status,
+            earning.Notes);
 
     private static RiderLoanResponse MapLoan(RiderLoan loan)
         => new(

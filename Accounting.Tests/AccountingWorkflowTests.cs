@@ -110,6 +110,59 @@ public class AccountingWorkflowTests
     }
 
     [Fact]
+    public async Task FixedMonthlyEarnings_GenerateFixedSalary_ForCompanyRiders()
+    {
+        await using var db = CreateDb();
+        var rider = await SeedRiderAsync(db, iban: "SA123");
+        var service = new AccountingSalaryService(db);
+
+        var earnings = await service.CreateFixedMonthlyEarningsAsync(
+            new FixedMonthlyEarningRequest(2026, 6, rider.CompanyId, 2000, true, "Amazon fixed salary"),
+            "accountant");
+        var salaries = await service.GenerateMonthlySalariesAsync(
+            new GenerateSalaryRequest(2026, 6, rider.CompanyId),
+            "accountant");
+
+        Assert.True(earnings.IsSuccess);
+        Assert.True(salaries.IsSuccess);
+        var salary = salaries.Value.Single();
+        Assert.Equal(2000, salary.NetSalary);
+        Assert.Contains(salary.Lines, l => l.SourceType == "FixedMonthlySalary" && l.Amount == 2000);
+    }
+
+    [Fact]
+    public async Task BulkInternetReplacement_AddsReimbursementLine_ToGeneratedSalary()
+    {
+        await using var db = CreateDb();
+        var rider = await SeedRiderAsync(db, iban: "SA123");
+        db.RiderEarnings.Add(new RiderEarning
+        {
+            PaidRiderId = rider.Id,
+            CompanyId = rider.CompanyId,
+            Year = 2026,
+            Month = 6,
+            SalaryAmount = 2000,
+            SourceType = "test",
+            Status = AccountingRecordStatus.Approved
+        });
+        await db.SaveChangesAsync();
+        var service = new AccountingSalaryService(db);
+
+        var replacements = await service.CreateBulkInternetReplacementAsync(
+            new BulkInternetReplacementRequest(2026, 6, rider.CompanyId, 100, new DateOnly(2026, 6, 30), true, null, "Internet"),
+            "accountant");
+        var salaries = await service.GenerateMonthlySalariesAsync(
+            new GenerateSalaryRequest(2026, 6, rider.CompanyId),
+            "accountant");
+
+        Assert.True(replacements.IsSuccess);
+        Assert.True(salaries.IsSuccess);
+        var salary = salaries.Value.Single();
+        Assert.Equal(2100, salary.NetSalary);
+        Assert.Contains(salary.Lines, l => l.Type == SalaryLineType.Reimbursement && l.Amount == 100);
+    }
+
+    [Fact]
     public async Task BankSend_DoesNotPayUntilConfirmation()
     {
         await using var db = CreateDb();
