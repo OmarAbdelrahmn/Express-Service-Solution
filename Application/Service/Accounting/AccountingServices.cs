@@ -210,15 +210,13 @@ public class AccountingImportService(ApplicationDbcontext db) : AccountingServic
 
         await using var transaction = await Db.Database.BeginTransactionAsync(cancellationToken);
 
-        var company = request.CompanyId is null
-            ? null
-            : await Db.Companies.FirstOrDefaultAsync(c => c.Id == request.CompanyId, cancellationToken);
-
-        if (request.CompanyId is not null && company is null)
+        var company = await Db.Companies.FirstOrDefaultAsync(c => c.Id == request.CompanyId, cancellationToken);
+        if (company is null)
             return Result.Failure<CompanyBillImportResponse>(AccountingErrors.NotFound("Company"));
 
         var riders = await Db.RiderDetails
             .Include(r => r.Employee)
+            .Where(r => r.CompanyId == company.Id)
             .ToListAsync(cancellationToken);
 
         var substitutions = await Db.RiderShiftSubstitutions
@@ -228,12 +226,11 @@ public class AccountingImportService(ApplicationDbcontext db) : AccountingServic
         await using var stream = request.File.OpenReadStream();
         using var workbook = new XLWorkbook(stream);
 
-        var template = request.TemplateType ?? DetectTemplate(request.File.FileName, workbook);
         var import = new CompanyBillImport
         {
-            CompanyId = company?.Id,
-            CompanyNameSnapshot = company?.Name ?? string.Empty,
-            TemplateType = template,
+            CompanyId = company.Id,
+            CompanyNameSnapshot = company.Name,
+            TemplateType = request.TemplateType,
             Year = request.Year,
             Month = request.Month,
             SourceFileName = request.File.FileName,
@@ -257,6 +254,85 @@ public class AccountingImportService(ApplicationDbcontext db) : AccountingServic
         return await GetImportAsync(import.Id, cancellationToken);
     }
 
+    public async Task<Result<List<CompanyBillImportListItemResponse>>> GetCompanyImportsAsync(
+        CompanyBillImportQuery request,
+        CancellationToken cancellationToken = default)
+    {
+        var company = await Db.Companies.FirstOrDefaultAsync(c => c.Id == request.CompanyId, cancellationToken);
+        if (company is null)
+            return Result.Failure<List<CompanyBillImportListItemResponse>>(AccountingErrors.NotFound("Company"));
+
+        var imports = await Db.CompanyBillImports
+            .Include(i => i.RiderSummaries)
+            .Include(i => i.TransactionLines)
+            .Where(i => i.CompanyId == request.CompanyId)
+            .Where(i => request.Year == null || i.Year == request.Year)
+            .Where(i => request.Month == null || i.Month == request.Month)
+            .Where(i => request.TemplateType == null || i.TemplateType == request.TemplateType)
+            .Where(i => request.Status == null || i.Status == request.Status)
+            .OrderByDescending(i => i.UploadedAt)
+            .ThenByDescending(i => i.Id)
+            .ToListAsync(cancellationToken);
+
+        var importIds = imports.Select(i => i.Id).ToList();
+        var issueCounts = await Db.CompanyBillResolutionIssues
+            .Where(i => importIds.Contains(i.CompanyBillImportId))
+            .GroupBy(i => i.CompanyBillImportId)
+            .Select(g => new { ImportId = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(g => g.ImportId, g => g.Count, cancellationToken);
+
+        return Result.Success(imports.Select(import => new CompanyBillImportListItemResponse(
+            import.Id,
+            import.CompanyId ?? 0,
+            string.IsNullOrWhiteSpace(import.CompanyNameSnapshot) ? company.Name : import.CompanyNameSnapshot,
+            import.TemplateType,
+            import.Year,
+            import.Month,
+            import.SourceFileName,
+            import.Status,
+            import.GrossAmount,
+            import.VatAmount,
+            import.NetAmount,
+            import.TotalDeductions,
+            import.RiderSummaries.Count,
+            import.TransactionLines.Count,
+            issueCounts.GetValueOrDefault(import.Id),
+            import.UploadedAt,
+            import.UploadedBy)).ToList());
+    }
+
+    public async Task<Result<CompanyBillImportResponse>> GetCompanyImportAsync(
+        int companyId,
+        int importId,
+        CancellationToken cancellationToken = default)
+    {
+        var import = await Db.CompanyBillImports
+            .AsNoTracking()
+            .FirstOrDefaultAsync(i => i.Id == importId, cancellationToken);
+
+        if (import is null)
+            return Result.Failure<CompanyBillImportResponse>(AccountingErrors.NotFound("Accounting import"));
+
+        if (import.CompanyId != companyId)
+            return Result.Failure<CompanyBillImportResponse>(AccountingErrors.NotFound("Accounting import for this company"));
+
+        return await GetImportAsync(importId, cancellationToken);
+    }
+
+    public async Task<Result<CompanyBillImportInfoResponse>> GetCompanyImportInfoAsync(
+        int companyId,
+        CancellationToken cancellationToken = default)
+    {
+        var company = await Db.Companies.FirstOrDefaultAsync(c => c.Id == companyId, cancellationToken);
+        if (company is null)
+            return Result.Failure<CompanyBillImportInfoResponse>(AccountingErrors.NotFound("Company"));
+
+        return Result.Success(new CompanyBillImportInfoResponse(
+            company.Id,
+            company.Name,
+            BuildImportTemplateInfo(company.Id)));
+    }
+
     public async Task<Result<CompanyBillImportResponse>> ApproveCompanyBillImportAsync(
         int importId,
         string approvedBy,
@@ -268,6 +344,9 @@ public class AccountingImportService(ApplicationDbcontext db) : AccountingServic
 
         if (import is null)
             return Result.Failure<CompanyBillImportResponse>(AccountingErrors.NotFound("Accounting import"));
+
+        if (import.CompanyId is null)
+            return Result.Failure<CompanyBillImportResponse>(AccountingErrors.Invalid("Import must belong to a company."));
 
         var periodResult = await EnsureOpenPeriodAsync(import.Year, import.Month, cancellationToken);
         if (periodResult.IsFailure)
@@ -339,6 +418,22 @@ public class AccountingImportService(ApplicationDbcontext db) : AccountingServic
         return await GetImportAsync(import.Id, cancellationToken);
     }
 
+    public async Task<Result<CompanyBillImportResponse>> ApproveCompanyBillImportAsync(
+        int companyId,
+        int importId,
+        string approvedBy,
+        CancellationToken cancellationToken = default)
+    {
+        var import = await Db.CompanyBillImports
+            .AsNoTracking()
+            .FirstOrDefaultAsync(i => i.Id == importId, cancellationToken);
+
+        if (import is null || import.CompanyId != companyId)
+            return Result.Failure<CompanyBillImportResponse>(AccountingErrors.NotFound("Accounting import for this company"));
+
+        return await ApproveCompanyBillImportAsync(importId, approvedBy, cancellationToken);
+    }
+
     public async Task<Result<CompanyBillImportResponse>> ReverseCompanyBillImportAsync(
         int importId,
         string reversedBy,
@@ -384,6 +479,22 @@ public class AccountingImportService(ApplicationDbcontext db) : AccountingServic
         return await GetImportAsync(import.Id, cancellationToken);
     }
 
+    public async Task<Result<CompanyBillImportResponse>> ReverseCompanyBillImportAsync(
+        int companyId,
+        int importId,
+        string reversedBy,
+        CancellationToken cancellationToken = default)
+    {
+        var import = await Db.CompanyBillImports
+            .AsNoTracking()
+            .FirstOrDefaultAsync(i => i.Id == importId, cancellationToken);
+
+        if (import is null || import.CompanyId != companyId)
+            return Result.Failure<CompanyBillImportResponse>(AccountingErrors.NotFound("Accounting import for this company"));
+
+        return await ReverseCompanyBillImportAsync(importId, reversedBy, cancellationToken);
+    }
+
     public async Task<Result<CompanyBillImportResponse>> GetImportAsync(
         int importId,
         CancellationToken cancellationToken = default)
@@ -416,7 +527,7 @@ public class AccountingImportService(ApplicationDbcontext db) : AccountingServic
 
         return Result.Success(new CompanyBillImportResponse(
             import.Id,
-            import.CompanyId,
+            import.CompanyId ?? 0,
             import.CompanyNameSnapshot,
             import.TemplateType,
             import.Year,
@@ -749,6 +860,51 @@ public class AccountingImportService(ApplicationDbcontext db) : AccountingServic
 
         return source.GetString()?.Trim();
     }
+
+    private static IReadOnlyList<CompanyBillTemplateInfoResponse> BuildImportTemplateInfo(int companyId)
+        =>
+        [
+            new CompanyBillTemplateInfoResponse(
+                CompanyBillTemplateType.FtrHunger,
+                "hunger-ftr",
+                "Hunger / FTR bill",
+                $"/api/accounting/companies/{companyId}/imports/company-bills/hunger-ftr",
+                ["Rider Id / Working Id", "Completed Deliveries / Total Orders", "Basic Payment or Net Amount"],
+                ["Working Days", "Distance Payment", "Bonus", "Penalty", "VAT", "Validity"],
+                "Use this for Hunger Station/FTR monthly company bills. The route fixes the company and parser type."),
+            new CompanyBillTemplateInfoResponse(
+                CompanyBillTemplateType.KeetaPayPerOrder,
+                "keeta-pay-per-order",
+                "Keeta pay per order",
+                $"/api/accounting/companies/{companyId}/imports/company-bills/keeta-pay-per-order",
+                ["Driver ID / Working Id", "Date or month", "Tasks Delivered / Completed Orders", "Amount or Net Amount"],
+                ["Connection Time", "Shift Summary", "Is In Shift", "Validity", "Penalty", "Bonus"],
+                "Use this for Keeta order-based bills and shift-derived payment files."),
+            new CompanyBillTemplateInfoResponse(
+                CompanyBillTemplateType.KeetaSegment,
+                "keeta-segment",
+                "Keeta segment bill",
+                $"/api/accounting/companies/{companyId}/imports/company-bills/keeta-segment",
+                ["Driver ID / Working Id", "Segment or month", "Completed Orders", "Net Amount"],
+                ["Validity", "Connection Time", "Distance", "Penalty", "Bonus"],
+                "Use this for Keeta segment/freelancer-style monthly accounting sheets."),
+            new CompanyBillTemplateInfoResponse(
+                CompanyBillTemplateType.Amazon,
+                "amazon",
+                "Amazon bill",
+                $"/api/accounting/companies/{companyId}/imports/company-bills/amazon",
+                ["Rider Id / Working Id", "Orders or Days", "Amount or Net Amount"],
+                ["Overtime", "Incentive", "Penalty", "VAT"],
+                "Use this for Amazon company sheets. Fixed monthly salary creation remains available separately."),
+            new CompanyBillTemplateInfoResponse(
+                CompanyBillTemplateType.Generic,
+                "generic",
+                "Generic company bill",
+                $"/api/accounting/companies/{companyId}/imports/company-bills/generic",
+                ["Rider Id / Working Id", "Completed Orders or Amount"],
+                ["Bonus", "Penalty", "VAT", "Distance", "Working Days"],
+                "Fallback for a new company template after confirming the columns with accounting.")
+        ];
 
     private static CompanyBillTemplateType DetectTemplate(string fileName, XLWorkbook workbook)
     {
@@ -1211,6 +1367,22 @@ public class AccountingSalaryService(ApplicationDbcontext db) : AccountingServic
 
         return salary is null
             ? Result.Failure<SalaryResponse>(AccountingErrors.NotFound("Salary"))
+            : Result.Success(MapSalary(salary));
+    }
+
+    public async Task<Result<SalaryResponse>> GetCompanySalaryAsync(
+        int companyId,
+        int salaryId,
+        CancellationToken cancellationToken = default)
+    {
+        var salary = await Db.RiderMonthlySalaries
+            .Include(s => s.Rider)
+            .ThenInclude(r => r.Employee)
+            .Include(s => s.Lines)
+            .FirstOrDefaultAsync(s => s.Id == salaryId && s.Rider.CompanyId == companyId, cancellationToken);
+
+        return salary is null
+            ? Result.Failure<SalaryResponse>(AccountingErrors.NotFound("Salary for this company"))
             : Result.Success(MapSalary(salary));
     }
 
@@ -2006,8 +2178,8 @@ public class AccountingPaymentService(ApplicationDbcontext db) : AccountingServi
                 payment.Id,
                 confirmedBy,
                 cancellationToken,
-                new JournalEntryLine { AccountId = AccountingAccountIds.RiderPayables, Debit = payment.Amount, RiderId = payment.RiderId, EmployeeIqamaNo = payment.Rider.EmployeeIqamaNo },
-                new JournalEntryLine { AccountId = AccountingAccountIds.CashAndBank, Credit = payment.Amount, RiderId = payment.RiderId, EmployeeIqamaNo = payment.Rider.EmployeeIqamaNo });
+                new JournalEntryLine { AccountId = AccountingAccountIds.RiderPayables, Debit = payment.Amount, RiderId = payment.RiderId, EmployeeIqamaNo = payment.Rider.EmployeeIqamaNo, CompanyId = payment.Rider.CompanyId },
+                new JournalEntryLine { AccountId = AccountingAccountIds.CashAndBank, Credit = payment.Amount, RiderId = payment.RiderId, EmployeeIqamaNo = payment.Rider.EmployeeIqamaNo, CompanyId = payment.Rider.CompanyId });
 
             if (journalResult.IsFailure)
                 return Result.Failure<PaymentBatchResponse>(journalResult.Error);
@@ -2320,8 +2492,8 @@ public class AccountingPaymentService(ApplicationDbcontext db) : AccountingServi
             line.Id,
             submittedBy,
             cancellationToken,
-            new JournalEntryLine { AccountId = AccountingAccountIds.RiderPayables, Debit = line.Amount, RiderId = line.RiderId, EmployeeIqamaNo = line.Rider.EmployeeIqamaNo },
-            new JournalEntryLine { AccountId = AccountingAccountIds.CashAndBank, Credit = line.Amount, RiderId = line.RiderId, EmployeeIqamaNo = line.Rider.EmployeeIqamaNo });
+            new JournalEntryLine { AccountId = AccountingAccountIds.RiderPayables, Debit = line.Amount, RiderId = line.RiderId, EmployeeIqamaNo = line.Rider.EmployeeIqamaNo, CompanyId = line.Rider.CompanyId },
+            new JournalEntryLine { AccountId = AccountingAccountIds.CashAndBank, Credit = line.Amount, RiderId = line.RiderId, EmployeeIqamaNo = line.Rider.EmployeeIqamaNo, CompanyId = line.Rider.CompanyId });
 
         if (journalResult.IsFailure)
             return Result.Failure(journalResult.Error);
@@ -2598,6 +2770,13 @@ public class CompanyFinanceService(ApplicationDbcontext db) : AccountingServiceB
         if (category is null)
             return Result.Failure<CompanyExpenseResponse>(AccountingErrors.NotFound("Expense category"));
 
+        if (request.CompanyId is not null)
+        {
+            var companyExists = await Db.Companies.AnyAsync(c => c.Id == request.CompanyId, cancellationToken);
+            if (!companyExists)
+                return Result.Failure<CompanyExpenseResponse>(AccountingErrors.NotFound("Company"));
+        }
+
         await using var transaction = await Db.Database.BeginTransactionAsync(cancellationToken);
 
         var expense = new CompanyExpense
@@ -2678,6 +2857,21 @@ public class CompanyFinanceService(ApplicationDbcontext db) : AccountingServiceB
 
         if (request.CompanyReceivableId is not null && receivable is null)
             return Result.Failure<CompanyPaymentReceiptResponse>(AccountingErrors.NotFound("Company receivable"));
+
+        if (request.CompanyId is not null)
+        {
+            var companyExists = await Db.Companies.AnyAsync(c => c.Id == request.CompanyId, cancellationToken);
+            if (!companyExists)
+                return Result.Failure<CompanyPaymentReceiptResponse>(AccountingErrors.NotFound("Company"));
+        }
+
+        if (receivable is not null
+            && request.CompanyId is not null
+            && receivable.CompanyId != request.CompanyId)
+        {
+            return Result.Failure<CompanyPaymentReceiptResponse>(
+                AccountingErrors.Invalid("Receivable does not belong to the selected company."));
+        }
 
         if (request.Amount <= 0)
             return Result.Failure<CompanyPaymentReceiptResponse>(AccountingErrors.Invalid("Receipt amount must be greater than zero."));
@@ -3122,6 +3316,7 @@ public class AccountingReportService(ApplicationDbcontext db) : IAccountingRepor
     public async Task<Result<TrialBalanceResponse>> GetTrialBalanceAsync(
         DateOnly from,
         DateOnly to,
+        int? companyId = null,
         CancellationToken cancellationToken = default)
     {
         var lines = await _db.JournalEntryLines
@@ -3129,6 +3324,7 @@ public class AccountingReportService(ApplicationDbcontext db) : IAccountingRepor
             .Include(l => l.JournalEntry)
             .Where(l => l.JournalEntry.EntryDate >= from && l.JournalEntry.EntryDate <= to)
             .Where(l => l.JournalEntry.Status == AccountingRecordStatus.Posted)
+            .Where(l => companyId == null || l.CompanyId == companyId)
             .GroupBy(l => new { l.AccountId, l.Account.Code, l.Account.Name, l.Account.Type })
             .Select(g => new TrialBalanceLineResponse(
                 g.Key.AccountId,
@@ -3153,6 +3349,7 @@ public class AccountingReportService(ApplicationDbcontext db) : IAccountingRepor
         DateOnly from,
         DateOnly to,
         int? accountId,
+        int? companyId = null,
         CancellationToken cancellationToken = default)
     {
         var rows = await _db.JournalEntryLines
@@ -3161,6 +3358,7 @@ public class AccountingReportService(ApplicationDbcontext db) : IAccountingRepor
             .Where(l => l.JournalEntry.EntryDate >= from && l.JournalEntry.EntryDate <= to)
             .Where(l => l.JournalEntry.Status == AccountingRecordStatus.Posted)
             .Where(l => accountId == null || l.AccountId == accountId)
+            .Where(l => companyId == null || l.CompanyId == companyId)
             .OrderBy(l => l.JournalEntry.EntryDate)
             .ThenBy(l => l.JournalEntry.EntryNumber)
             .ToListAsync(cancellationToken);

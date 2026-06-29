@@ -11,12 +11,37 @@ public interface IAccountingImportService
         string uploadedBy,
         CancellationToken cancellationToken = default);
 
+    Task<Result<List<CompanyBillImportListItemResponse>>> GetCompanyImportsAsync(
+        CompanyBillImportQuery request,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<CompanyBillImportResponse>> GetCompanyImportAsync(
+        int companyId,
+        int importId,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<CompanyBillImportInfoResponse>> GetCompanyImportInfoAsync(
+        int companyId,
+        CancellationToken cancellationToken = default);
+
     Task<Result<CompanyBillImportResponse>> ApproveCompanyBillImportAsync(
         int importId,
         string approvedBy,
         CancellationToken cancellationToken = default);
 
+    Task<Result<CompanyBillImportResponse>> ApproveCompanyBillImportAsync(
+        int companyId,
+        int importId,
+        string approvedBy,
+        CancellationToken cancellationToken = default);
+
     Task<Result<CompanyBillImportResponse>> ReverseCompanyBillImportAsync(
+        int importId,
+        string reversedBy,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<CompanyBillImportResponse>> ReverseCompanyBillImportAsync(
+        int companyId,
         int importId,
         string reversedBy,
         CancellationToken cancellationToken = default);
@@ -34,6 +59,11 @@ public interface IAccountingSalaryService
         CancellationToken cancellationToken = default);
 
     Task<Result<SalaryResponse>> GetSalaryAsync(
+        int salaryId,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<SalaryResponse>> GetCompanySalaryAsync(
+        int companyId,
         int salaryId,
         CancellationToken cancellationToken = default);
 
@@ -199,12 +229,14 @@ public interface IAccountingReportService
     Task<Result<TrialBalanceResponse>> GetTrialBalanceAsync(
         DateOnly from,
         DateOnly to,
+        int? companyId = null,
         CancellationToken cancellationToken = default);
 
     Task<Result<GeneralLedgerResponse>> GetGeneralLedgerAsync(
         DateOnly from,
         DateOnly to,
         int? accountId,
+        int? companyId = null,
         CancellationToken cancellationToken = default);
 }
 
@@ -212,13 +244,13 @@ public record ImportCompanyBillRequest(
     IFormFile File,
     int Year,
     int Month,
-    int? CompanyId,
-    CompanyBillTemplateType? TemplateType,
+    int CompanyId,
+    CompanyBillTemplateType TemplateType,
     string? Notes);
 
 public record CompanyBillImportResponse(
     int Id,
-    int? CompanyId,
+    int CompanyId,
     string CompanyName,
     CompanyBillTemplateType TemplateType,
     int Year,
@@ -238,6 +270,46 @@ public record CompanyBillImportResponse(
     int IssueCount,
     IReadOnlyList<CompanyBillSheetResponse> Sheets,
     IReadOnlyList<CompanyBillResolutionIssueResponse> Issues);
+
+public record CompanyBillImportQuery(
+    int CompanyId,
+    int? Year,
+    int? Month,
+    CompanyBillTemplateType? TemplateType,
+    AccountingRecordStatus? Status);
+
+public record CompanyBillImportListItemResponse(
+    int Id,
+    int CompanyId,
+    string CompanyName,
+    CompanyBillTemplateType TemplateType,
+    int Year,
+    int Month,
+    string SourceFileName,
+    AccountingRecordStatus Status,
+    decimal GrossAmount,
+    decimal VatAmount,
+    decimal NetAmount,
+    decimal TotalDeductions,
+    int RiderSummaryCount,
+    int TransactionLineCount,
+    int IssueCount,
+    DateTime UploadedAt,
+    string UploadedBy);
+
+public record CompanyBillImportInfoResponse(
+    int CompanyId,
+    string CompanyName,
+    IReadOnlyList<CompanyBillTemplateInfoResponse> Templates);
+
+public record CompanyBillTemplateInfoResponse(
+    CompanyBillTemplateType TemplateType,
+    string Code,
+    string DisplayName,
+    string UploadEndpoint,
+    IReadOnlyList<string> RequiredColumns,
+    IReadOnlyList<string> OptionalColumns,
+    string Notes);
 
 public record CompanyBillSheetResponse(
     int Id,

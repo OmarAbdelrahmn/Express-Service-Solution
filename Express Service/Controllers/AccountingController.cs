@@ -15,6 +15,117 @@ public class AccountingController(
     IAccountingPaymentService paymentService,
     IRiderAccountingProfileService riderProfileService) : ControllerBase
 {
+    [HttpGet("companies/{companyId:int}/imports/company-bills/info")]
+    public async Task<IActionResult> GetCompanyBillImportInfo(int companyId, CancellationToken cancellationToken)
+    {
+        var result = await importService.GetCompanyImportInfoAsync(companyId, cancellationToken);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    [HttpGet("companies/{companyId:int}/imports")]
+    public async Task<IActionResult> GetCompanyImports(
+        int companyId,
+        [FromQuery] int? year,
+        [FromQuery] int? month,
+        [FromQuery] CompanyBillTemplateType? templateType,
+        [FromQuery] AccountingRecordStatus? status,
+        CancellationToken cancellationToken)
+    {
+        var result = await importService.GetCompanyImportsAsync(
+            new CompanyBillImportQuery(companyId, year, month, templateType, status),
+            cancellationToken);
+
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    [HttpGet("companies/{companyId:int}/imports/{importId:int}")]
+    public async Task<IActionResult> GetCompanyImport(int companyId, int importId, CancellationToken cancellationToken)
+    {
+        var result = await importService.GetCompanyImportAsync(companyId, importId, cancellationToken);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    [HttpPost("companies/{companyId:int}/imports/company-bills/hunger-ftr")]
+    [Consumes("multipart/form-data")]
+    public Task<IActionResult> ImportHungerFtrCompanyBill(
+        int companyId,
+        IFormFile file,
+        [FromForm] int year,
+        [FromForm] int month,
+        [FromForm] string? notes,
+        CancellationToken cancellationToken)
+        => ImportCompanyBillForTemplate(companyId, CompanyBillTemplateType.FtrHunger, file, year, month, notes, cancellationToken);
+
+    [HttpPost("companies/{companyId:int}/imports/company-bills/keeta-pay-per-order")]
+    [HttpPost("companies/{companyId:int}/imports/company-bills/keeta-shifts")]
+    [Consumes("multipart/form-data")]
+    public Task<IActionResult> ImportKeetaPayPerOrderCompanyBill(
+        int companyId,
+        IFormFile file,
+        [FromForm] int year,
+        [FromForm] int month,
+        [FromForm] string? notes,
+        CancellationToken cancellationToken)
+        => ImportCompanyBillForTemplate(companyId, CompanyBillTemplateType.KeetaPayPerOrder, file, year, month, notes, cancellationToken);
+
+    [HttpPost("companies/{companyId:int}/imports/company-bills/keeta-segment")]
+    [HttpPost("companies/{companyId:int}/imports/company-bills/keeta-freelancers")]
+    [Consumes("multipart/form-data")]
+    public Task<IActionResult> ImportKeetaSegmentCompanyBill(
+        int companyId,
+        IFormFile file,
+        [FromForm] int year,
+        [FromForm] int month,
+        [FromForm] string? notes,
+        CancellationToken cancellationToken)
+        => ImportCompanyBillForTemplate(companyId, CompanyBillTemplateType.KeetaSegment, file, year, month, notes, cancellationToken);
+
+    [HttpPost("companies/{companyId:int}/imports/company-bills/amazon")]
+    [Consumes("multipart/form-data")]
+    public Task<IActionResult> ImportAmazonCompanyBill(
+        int companyId,
+        IFormFile file,
+        [FromForm] int year,
+        [FromForm] int month,
+        [FromForm] string? notes,
+        CancellationToken cancellationToken)
+        => ImportCompanyBillForTemplate(companyId, CompanyBillTemplateType.Amazon, file, year, month, notes, cancellationToken);
+
+    [HttpPost("companies/{companyId:int}/imports/company-bills/generic")]
+    [Consumes("multipart/form-data")]
+    public Task<IActionResult> ImportGenericCompanyBill(
+        int companyId,
+        IFormFile file,
+        [FromForm] int year,
+        [FromForm] int month,
+        [FromForm] string? notes,
+        CancellationToken cancellationToken)
+        => ImportCompanyBillForTemplate(companyId, CompanyBillTemplateType.Generic, file, year, month, notes, cancellationToken);
+
+    [HttpPost("companies/{companyId:int}/imports/{importId:int}/approve")]
+    public async Task<IActionResult> ApproveCompanyImport(int companyId, int importId, CancellationToken cancellationToken)
+    {
+        var result = await importService.ApproveCompanyBillImportAsync(
+            companyId,
+            importId,
+            User.GetUserId() ?? "system",
+            cancellationToken);
+
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    [HttpPost("companies/{companyId:int}/imports/{importId:int}/reverse")]
+    public async Task<IActionResult> ReverseCompanyImport(int companyId, int importId, CancellationToken cancellationToken)
+    {
+        var result = await importService.ReverseCompanyBillImportAsync(
+            companyId,
+            importId,
+            User.GetUserId() ?? "system",
+            cancellationToken);
+
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
     [HttpPost("imports/company-bills")]
     [Consumes("multipart/form-data")]
     public async Task<IActionResult> ImportCompanyBill(
@@ -26,8 +137,14 @@ public class AccountingController(
         [FromForm] string? notes,
         CancellationToken cancellationToken)
     {
+        if (companyId is null)
+            return BadRequest(new
+            {
+                error = "CompanyId is required. Use POST /api/accounting/companies/{companyId}/imports/company-bills/{template}."
+            });
+
         var result = await importService.ImportCompanyBillAsync(
-            new ImportCompanyBillRequest(file, year, month, companyId, templateType, notes),
+            new ImportCompanyBillRequest(file, year, month, companyId.Value, templateType ?? CompanyBillTemplateType.Generic, notes),
             User.GetUserId() ?? "system",
             cancellationToken);
 
@@ -74,10 +191,31 @@ public class AccountingController(
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
 
+    [HttpPost("companies/{companyId:int}/salaries/generate")]
+    public async Task<IActionResult> GenerateCompanySalaries(
+        int companyId,
+        [FromBody] GenerateSalaryRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await salaryService.GenerateMonthlySalariesAsync(
+            request with { CompanyId = companyId },
+            User.GetUserId() ?? "system",
+            cancellationToken);
+
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
     [HttpGet("salaries/{salaryId:int}")]
     public async Task<IActionResult> GetSalary(int salaryId, CancellationToken cancellationToken)
     {
         var result = await salaryService.GetSalaryAsync(salaryId, cancellationToken);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    [HttpGet("companies/{companyId:int}/salaries/{salaryId:int}")]
+    public async Task<IActionResult> GetCompanySalary(int companyId, int salaryId, CancellationToken cancellationToken)
+    {
+        var result = await salaryService.GetCompanySalaryAsync(companyId, salaryId, cancellationToken);
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
 
@@ -112,6 +250,23 @@ public class AccountingController(
 
     [HttpGet("bonus-rules")]
     public async Task<IActionResult> GetBonusRules([FromQuery] int? companyId, CancellationToken cancellationToken)
+    {
+        var result = await salaryService.GetBonusRulesAsync(companyId, cancellationToken);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    [HttpPost("companies/{companyId:int}/bonus-rules")]
+    public async Task<IActionResult> CreateCompanyBonusRule(
+        int companyId,
+        [FromBody] BonusRuleRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await salaryService.CreateBonusRuleAsync(request with { CompanyId = companyId }, cancellationToken);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    [HttpGet("companies/{companyId:int}/bonus-rules")]
+    public async Task<IActionResult> GetCompanyBonusRules(int companyId, CancellationToken cancellationToken)
     {
         var result = await salaryService.GetBonusRulesAsync(companyId, cancellationToken);
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
@@ -257,6 +412,23 @@ public class AccountingController(
         CancellationToken cancellationToken)
     {
         var result = await riderProfileService.GetRiderProfileAsync(riderId, from, to, cancellationToken);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    private async Task<IActionResult> ImportCompanyBillForTemplate(
+        int companyId,
+        CompanyBillTemplateType templateType,
+        IFormFile file,
+        int year,
+        int month,
+        string? notes,
+        CancellationToken cancellationToken)
+    {
+        var result = await importService.ImportCompanyBillAsync(
+            new ImportCompanyBillRequest(file, year, month, companyId, templateType, notes),
+            User.GetUserId() ?? "system",
+            cancellationToken);
+
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
 }

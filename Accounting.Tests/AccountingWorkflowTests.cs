@@ -39,6 +39,93 @@ public class AccountingWorkflowTests
     }
 
     [Fact]
+    public async Task ImportCompanyBill_RequiresExistingCompany()
+    {
+        await using var db = CreateDb();
+        var service = new AccountingImportService(db);
+
+        var file = CreateCompanyBillFile("W404", 10, 100);
+        var result = await service.ImportCompanyBillAsync(
+            new ImportCompanyBillRequest(file, 2026, 6, 404, CompanyBillTemplateType.Generic, null),
+            "accountant");
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(0, await db.CompanyBillImports.CountAsync());
+    }
+
+    [Fact]
+    public async Task CompanyScopedImportRead_RejectsWrongCompany()
+    {
+        await using var db = CreateDb();
+        var rider = await SeedRiderAsync(db, iban: "SA123");
+        var otherCompany = new Company { Name = "Other Client" };
+        db.Companies.Add(otherCompany);
+        await db.SaveChangesAsync();
+        var service = new AccountingImportService(db);
+
+        var file = CreateCompanyBillFile(rider.WorkingId!, 10, 100);
+        var import = await service.ImportCompanyBillAsync(
+            new ImportCompanyBillRequest(file, 2026, 6, rider.CompanyId, CompanyBillTemplateType.Generic, null),
+            "accountant");
+        var wrongCompanyRead = await service.GetCompanyImportAsync(otherCompany.Id, import.Value.Id);
+
+        Assert.True(import.IsSuccess);
+        Assert.True(wrongCompanyRead.IsFailure);
+    }
+
+    [Fact]
+    public async Task CompanyScopedImportList_ReturnsOnlySelectedCompany()
+    {
+        await using var db = CreateDb();
+        var rider1 = await SeedRiderAsync(db, iban: "SA123");
+        var rider2 = await SeedRiderAsync(db, iban: "SA456");
+        var service = new AccountingImportService(db);
+
+        var import1 = await service.ImportCompanyBillAsync(
+            new ImportCompanyBillRequest(CreateCompanyBillFile(rider1.WorkingId!, 10, 100), 2026, 6, rider1.CompanyId, CompanyBillTemplateType.Generic, null),
+            "accountant");
+        await service.ImportCompanyBillAsync(
+            new ImportCompanyBillRequest(CreateCompanyBillFile(rider2.WorkingId!, 20, 200), 2026, 6, rider2.CompanyId, CompanyBillTemplateType.Generic, null),
+            "accountant");
+
+        var list = await service.GetCompanyImportsAsync(
+            new CompanyBillImportQuery(rider1.CompanyId, 2026, 6, null, null));
+
+        Assert.True(import1.IsSuccess);
+        Assert.True(list.IsSuccess);
+        var item = Assert.Single(list.Value);
+        Assert.Equal(import1.Value.Id, item.Id);
+        Assert.Equal(rider1.CompanyId, item.CompanyId);
+    }
+
+    [Fact]
+    public async Task ImportCompanyBill_DoesNotResolveRiderFromDifferentCompany()
+    {
+        await using var db = CreateDb();
+        var sourceRider = await SeedRiderAsync(db, iban: "SA123");
+        var otherCompany = new Company { Name = "Other Client" };
+        db.Companies.Add(otherCompany);
+        await db.SaveChangesAsync();
+        var service = new AccountingImportService(db);
+
+        var import = await service.ImportCompanyBillAsync(
+            new ImportCompanyBillRequest(
+                CreateCompanyBillFile(sourceRider.WorkingId!, 10, 100),
+                2026,
+                6,
+                otherCompany.Id,
+                CompanyBillTemplateType.Generic,
+                null),
+            "accountant");
+        var approve = await service.ApproveCompanyBillImportAsync(otherCompany.Id, import.Value.Id, "accountant");
+
+        Assert.True(import.IsSuccess);
+        Assert.True(import.Value.IssueCount > 0);
+        Assert.True(approve.IsFailure);
+        Assert.Equal(0, await db.CompanyReceivables.CountAsync());
+    }
+
+    [Fact]
     public async Task ApproveCompanyBillImport_WithUnresolvedRows_IsRejected()
     {
         await using var db = CreateDb();
