@@ -4,6 +4,7 @@ using Domain;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Domain.Migrations
 {
     [DbContext(typeof(ApplicationDbcontext))]
-    partial class ApplicationDbcontextModelSnapshot : ModelSnapshot
+    [Migration("20260630134317_AddRiderSalaryRules")]
+    partial class AddRiderSalaryRules
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -214,15 +217,6 @@ namespace Domain.Migrations
                             IsSystem = true,
                             Name = "Manual Adjustments",
                             Type = 5
-                        },
-                        new
-                        {
-                            Id = 18,
-                            Code = "2200",
-                            IsActive = true,
-                            IsSystem = true,
-                            Name = "VAT Payable",
-                            Type = 2
                         });
                 });
 
@@ -1078,9 +1072,6 @@ namespace Domain.Migrations
                     b.Property<decimal>("Amount")
                         .HasColumnType("decimal(18, 2)");
 
-                    b.Property<int?>("BankAccountId")
-                        .HasColumnType("int");
-
                     b.Property<int>("CompanyExpenseCategoryId")
                         .HasColumnType("int");
 
@@ -1123,8 +1114,6 @@ namespace Domain.Migrations
                         .HasColumnType("nvarchar(450)");
 
                     b.HasKey("Id");
-
-                    b.HasIndex("BankAccountId");
 
                     b.HasIndex("CompanyExpenseCategoryId");
 
@@ -1280,9 +1269,6 @@ namespace Domain.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 
-                    b.Property<int?>("BankAccountId")
-                        .HasColumnType("int");
-
                     b.Property<int?>("CompanyId")
                         .HasColumnType("int");
 
@@ -1307,8 +1293,6 @@ namespace Domain.Migrations
                         .HasColumnType("nvarchar(150)");
 
                     b.HasKey("Id");
-
-                    b.HasIndex("BankAccountId");
 
                     b.HasIndex("CompanyReceivableId");
 
@@ -1623,9 +1607,6 @@ namespace Domain.Migrations
                     b.Property<int>("AccountId")
                         .HasColumnType("int");
 
-                    b.Property<int?>("BankAccountId")
-                        .HasColumnType("int");
-
                     b.Property<int?>("CompanyId")
                         .HasColumnType("int");
 
@@ -1662,8 +1643,6 @@ namespace Domain.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("AccountId");
-
-                    b.HasIndex("BankAccountId");
 
                     b.HasIndex("CostCenterId");
 
@@ -1879,68 +1858,6 @@ namespace Domain.Migrations
                     b.HasIndex("Year", "Month", "PaidRiderId");
 
                     b.ToTable("RiderEarnings");
-                });
-
-            modelBuilder.Entity("Domain.Entities.Accounting.RiderFinalSettlement", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("CreatedBy")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<decimal>("FinalSalaryAmount")
-                        .HasColumnType("decimal(18, 2)");
-
-                    b.Property<decimal>("LoanFinalDeductionAmount")
-                        .HasColumnType("decimal(18, 2)");
-
-                    b.Property<decimal>("LoanWriteOffAmount")
-                        .HasColumnType("decimal(18, 2)");
-
-                    b.Property<decimal>("ManualDeductionAmount")
-                        .HasColumnType("decimal(18, 2)");
-
-                    b.Property<int>("Month")
-                        .HasColumnType("int");
-
-                    b.Property<decimal>("NetSettlementAmount")
-                        .HasColumnType("decimal(18, 2)");
-
-                    b.Property<string>("Notes")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<decimal>("OutstandingLoanBalance")
-                        .HasColumnType("decimal(18, 2)");
-
-                    b.Property<decimal>("ReimbursementAmount")
-                        .HasColumnType("decimal(18, 2)");
-
-                    b.Property<int>("RiderId")
-                        .HasColumnType("int");
-
-                    b.Property<DateOnly>("SettlementDate")
-                        .HasColumnType("date");
-
-                    b.Property<int>("Status")
-                        .HasColumnType("int");
-
-                    b.Property<int>("Year")
-                        .HasColumnType("int");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("RiderId", "Year", "Month");
-
-                    b.ToTable("RiderFinalSettlements");
                 });
 
             modelBuilder.Entity("Domain.Entities.Accounting.RiderFinancialItem", b =>
@@ -5375,11 +5292,6 @@ namespace Domain.Migrations
 
             modelBuilder.Entity("Domain.Entities.Accounting.CompanyExpense", b =>
                 {
-                    b.HasOne("Domain.Entities.Accounting.BankAccount", "BankAccount")
-                        .WithMany()
-                        .HasForeignKey("BankAccountId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
                     b.HasOne("Domain.Entities.Accounting.CompanyExpenseCategory", "Category")
                         .WithMany()
                         .HasForeignKey("CompanyExpenseCategoryId")
@@ -5407,8 +5319,6 @@ namespace Domain.Migrations
                         .HasForeignKey("VehicleNumber")
                         .OnDelete(DeleteBehavior.Restrict);
 
-                    b.Navigation("BankAccount");
-
                     b.Navigation("Category");
 
                     b.Navigation("Company");
@@ -5424,11 +5334,6 @@ namespace Domain.Migrations
 
             modelBuilder.Entity("Domain.Entities.Accounting.CompanyPaymentReceipt", b =>
                 {
-                    b.HasOne("Domain.Entities.Accounting.BankAccount", "LinkedBankAccount")
-                        .WithMany()
-                        .HasForeignKey("BankAccountId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
                     b.HasOne("Domain.Entities.Company", "Company")
                         .WithMany()
                         .HasForeignKey("CompanyId");
@@ -5440,8 +5345,6 @@ namespace Domain.Migrations
                     b.Navigation("Company");
 
                     b.Navigation("CompanyReceivable");
-
-                    b.Navigation("LinkedBankAccount");
                 });
 
             modelBuilder.Entity("Domain.Entities.Accounting.CompanyProfitSnapshot", b =>
@@ -5532,11 +5435,6 @@ namespace Domain.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.HasOne("Domain.Entities.Accounting.BankAccount", "BankAccount")
-                        .WithMany()
-                        .HasForeignKey("BankAccountId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
                     b.HasOne("Domain.Entities.Accounting.CostCenter", "CostCenter")
                         .WithMany()
                         .HasForeignKey("CostCenterId");
@@ -5548,8 +5446,6 @@ namespace Domain.Migrations
                         .IsRequired();
 
                     b.Navigation("Account");
-
-                    b.Navigation("BankAccount");
 
                     b.Navigation("CostCenter");
 
@@ -5627,17 +5523,6 @@ namespace Domain.Migrations
                     b.Navigation("OriginalRider");
 
                     b.Navigation("PaidRider");
-                });
-
-            modelBuilder.Entity("Domain.Entities.Accounting.RiderFinalSettlement", b =>
-                {
-                    b.HasOne("Domain.Entities.RiderDetails", "Rider")
-                        .WithMany()
-                        .HasForeignKey("RiderId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Rider");
                 });
 
             modelBuilder.Entity("Domain.Entities.Accounting.RiderFinancialItem", b =>

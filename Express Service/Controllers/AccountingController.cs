@@ -10,11 +10,59 @@ namespace Express_Service.Controllers;
 [ApiController]
 [Authorize(Roles = "Master,Admin,Accountant")]
 public class AccountingController(
+    IAccountingPeriodService periodService,
     IAccountingImportService importService,
     IAccountingSalaryService salaryService,
     IAccountingPaymentService paymentService,
     IRiderAccountingProfileService riderProfileService) : ControllerBase
 {
+    [HttpGet("periods")]
+    public async Task<IActionResult> GetPeriods([FromQuery] int? year, CancellationToken cancellationToken)
+    {
+        var result = await periodService.GetPeriodsAsync(year, cancellationToken);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    [HttpGet("periods/{year:int}/{month:int}")]
+    public async Task<IActionResult> GetPeriod(int year, int month, CancellationToken cancellationToken)
+    {
+        var result = await periodService.GetPeriodAsync(year, month, cancellationToken);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    [HttpPost("periods/{year:int}/{month:int}/close")]
+    public async Task<IActionResult> ClosePeriod(
+        int year,
+        int month,
+        [FromBody] PeriodStatusChangeRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await periodService.ClosePeriodAsync(year, month, request, User.GetUserId() ?? "system", cancellationToken);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    [HttpPost("periods/{year:int}/{month:int}/lock")]
+    public async Task<IActionResult> LockPeriod(
+        int year,
+        int month,
+        [FromBody] PeriodStatusChangeRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await periodService.LockPeriodAsync(year, month, request, User.GetUserId() ?? "system", cancellationToken);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    [HttpPost("periods/{year:int}/{month:int}/reopen")]
+    public async Task<IActionResult> ReopenPeriod(
+        int year,
+        int month,
+        [FromBody] PeriodStatusChangeRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await periodService.ReopenPeriodAsync(year, month, request, User.GetUserId() ?? "system", cancellationToken);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
     [HttpGet("companies/{companyId:int}/imports/company-bills/info")]
     public async Task<IActionResult> GetCompanyBillImportInfo(int companyId, CancellationToken cancellationToken)
     {
@@ -180,6 +228,40 @@ public class AccountingController(
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
 
+    [HttpPost("imports/{importId:int}/issues/{issueId:int}/resolve")]
+    public async Task<IActionResult> ResolveImportIssue(
+        int importId,
+        int issueId,
+        [FromBody] ResolveImportIssueRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await importService.ResolveImportIssueAsync(
+            importId,
+            issueId,
+            request,
+            User.GetUserId() ?? "system",
+            cancellationToken);
+
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    [HttpPost("imports/{importId:int}/rider-summaries/{summaryId:int}/resolve")]
+    public async Task<IActionResult> ResolveRiderSummary(
+        int importId,
+        int summaryId,
+        [FromBody] ResolveRiderSummaryRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await importService.ResolveRiderSummaryAsync(
+            importId,
+            summaryId,
+            request,
+            User.GetUserId() ?? "system",
+            cancellationToken);
+
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
     [HttpPost("salaries/generate")]
     public async Task<IActionResult> GenerateSalaries([FromBody] GenerateSalaryRequest request, CancellationToken cancellationToken)
     {
@@ -272,6 +354,69 @@ public class AccountingController(
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
 
+    [HttpPost("salary-rules")]
+    public async Task<IActionResult> CreateSalaryRule([FromBody] SalaryRuleRequest request, CancellationToken cancellationToken)
+    {
+        var result = await salaryService.CreateSalaryRuleAsync(request, cancellationToken);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    [HttpGet("salary-rules")]
+    public async Task<IActionResult> GetSalaryRules(
+        [FromQuery] int? companyId,
+        [FromQuery] CompanyBillTemplateType? templateType,
+        [FromQuery] bool includeInactive,
+        CancellationToken cancellationToken)
+    {
+        var result = await salaryService.GetSalaryRulesAsync(companyId, templateType, includeInactive, cancellationToken);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    [HttpGet("salary-rules/{ruleId:int}")]
+    public async Task<IActionResult> GetSalaryRule(int ruleId, CancellationToken cancellationToken)
+    {
+        var result = await salaryService.GetSalaryRuleAsync(ruleId, cancellationToken);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    [HttpPut("salary-rules/{ruleId:int}")]
+    public async Task<IActionResult> UpdateSalaryRule(
+        int ruleId,
+        [FromBody] SalaryRuleRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await salaryService.UpdateSalaryRuleAsync(ruleId, request, cancellationToken);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    [HttpDelete("salary-rules/{ruleId:int}")]
+    public async Task<IActionResult> DeleteSalaryRule(int ruleId, CancellationToken cancellationToken)
+    {
+        var result = await salaryService.DeleteSalaryRuleAsync(ruleId, cancellationToken);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    [HttpPost("companies/{companyId:int}/salary-rules")]
+    public async Task<IActionResult> CreateCompanySalaryRule(
+        int companyId,
+        [FromBody] SalaryRuleRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await salaryService.CreateSalaryRuleAsync(request with { CompanyId = companyId }, cancellationToken);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    [HttpGet("companies/{companyId:int}/salary-rules")]
+    public async Task<IActionResult> GetCompanySalaryRules(
+        int companyId,
+        [FromQuery] CompanyBillTemplateType? templateType,
+        [FromQuery] bool includeInactive,
+        CancellationToken cancellationToken)
+    {
+        var result = await salaryService.GetSalaryRulesAsync(companyId, templateType, includeInactive, cancellationToken);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
     [HttpPost("financial-item-types")]
     public async Task<IActionResult> CreateFinancialItemType([FromBody] FinancialItemTypeRequest request, CancellationToken cancellationToken)
     {
@@ -321,6 +466,20 @@ public class AccountingController(
     {
         var result = await salaryService.CreateLoanAsync(
             request,
+            User.GetUserId() ?? "system",
+            cancellationToken);
+
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    [HttpPost("riders/{riderId:int}/final-settlements")]
+    public async Task<IActionResult> CreateFinalSettlement(
+        int riderId,
+        [FromBody] RiderFinalSettlementRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await salaryService.CreateFinalSettlementAsync(
+            request with { RiderId = riderId },
             User.GetUserId() ?? "system",
             cancellationToken);
 

@@ -238,11 +238,13 @@ public class JournalEntryLine
     public int? HousingId { get; set; }
     public string? VehicleNumber { get; set; }
     public int? SupplierId { get; set; }
+    public int? BankAccountId { get; set; }
     public string? Notes { get; set; }
 
     public JournalEntry JournalEntry { get; set; } = default!;
     public AccountingAccount Account { get; set; } = default!;
     public CostCenter? CostCenter { get; set; }
+    public BankAccount? BankAccount { get; set; }
 }
 
 public class AccountingAuditLog
@@ -479,6 +481,25 @@ public class RiderBonusRule
     public Company? Company { get; set; }
 }
 
+public class RiderSalaryRule
+{
+    public int Id { get; set; }
+    public int? CompanyId { get; set; }
+    public CompanyBillTemplateType? TemplateType { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public int MinimumAcceptedOrders { get; set; }
+    public decimal BaseAmount { get; set; }
+    public decimal ExtraOrderAmount { get; set; }
+    public decimal BelowThresholdOrderAmount { get; set; }
+    public DateOnly EffectiveFrom { get; set; }
+    public DateOnly? EffectiveTo { get; set; }
+    public int Priority { get; set; }
+    public bool IsActive { get; set; } = true;
+    public string? Notes { get; set; }
+
+    public Company? Company { get; set; }
+}
+
 public class RiderBonusAward
 {
     public int Id { get; set; }
@@ -564,6 +585,28 @@ public class RiderLoanInstallment
     public AccountingRecordStatus Status { get; set; } = AccountingRecordStatus.Draft;
 
     public RiderLoan RiderLoan { get; set; } = default!;
+}
+
+public class RiderFinalSettlement
+{
+    public int Id { get; set; }
+    public int RiderId { get; set; }
+    public DateOnly SettlementDate { get; set; }
+    public int Year { get; set; }
+    public int Month { get; set; }
+    public decimal FinalSalaryAmount { get; set; }
+    public decimal ReimbursementAmount { get; set; }
+    public decimal ManualDeductionAmount { get; set; }
+    public decimal OutstandingLoanBalance { get; set; }
+    public decimal LoanWriteOffAmount { get; set; }
+    public decimal LoanFinalDeductionAmount { get; set; }
+    public decimal NetSettlementAmount { get; set; }
+    public AccountingRecordStatus Status { get; set; } = AccountingRecordStatus.Approved;
+    public string CreatedBy { get; set; } = string.Empty;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow.AddHours(3);
+    public string? Notes { get; set; }
+
+    public RiderDetails Rider { get; set; } = default!;
 }
 
 public class RiderMonthlySalary
@@ -704,6 +747,7 @@ public class CompanyPaymentReceipt
     public int Id { get; set; }
     public int? CompanyReceivableId { get; set; }
     public int? CompanyId { get; set; }
+    public int? BankAccountId { get; set; }
     public DateOnly ReceiptDate { get; set; }
     public decimal Amount { get; set; }
     public string? ReferenceNumber { get; set; }
@@ -714,6 +758,7 @@ public class CompanyPaymentReceipt
 
     public CompanyReceivable? CompanyReceivable { get; set; }
     public Company? Company { get; set; }
+    public BankAccount? LinkedBankAccount { get; set; }
 }
 
 public class CompanyExpenseCategory
@@ -734,6 +779,7 @@ public class CompanyExpense
     public int? RiderId { get; set; }
     public int? HousingId { get; set; }
     public string? VehicleNumber { get; set; }
+    public int? BankAccountId { get; set; }
     public DateOnly ExpenseDate { get; set; }
     public decimal Amount { get; set; }
     public decimal VatAmount { get; set; }
@@ -749,6 +795,7 @@ public class CompanyExpense
     public RiderDetails? Rider { get; set; }
     public Housing? Housing { get; set; }
     public Vehicle? Vehicle { get; set; }
+    public BankAccount? BankAccount { get; set; }
 }
 
 public class SupplierPayable

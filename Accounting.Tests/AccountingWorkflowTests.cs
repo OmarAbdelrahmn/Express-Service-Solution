@@ -218,6 +218,85 @@ public class AccountingWorkflowTests
     }
 
     [Fact]
+    public async Task SalaryRules_CrudAndFtrHungerGeneration_UsesConfiguredRule()
+    {
+        await using var db = CreateDb();
+        var rider = await SeedRiderAsync(db, iban: "SA123");
+        var service = new AccountingSalaryService(db);
+
+        var created = await service.CreateSalaryRuleAsync(new SalaryRuleRequest(
+            rider.CompanyId,
+            CompanyBillTemplateType.FtrHunger,
+            "Custom Hunger salary",
+            400,
+            1800,
+            7,
+            2.5m,
+            new DateOnly(2026, 1, 1),
+            null,
+            10,
+            "Company override",
+            true));
+        var listed = await service.GetSalaryRulesAsync(rider.CompanyId, CompanyBillTemplateType.FtrHunger);
+        var fetched = await service.GetSalaryRuleAsync(created.Value.Id);
+
+        db.CompanyBillImports.Add(new CompanyBillImport
+        {
+            CompanyId = rider.CompanyId,
+            CompanyNameSnapshot = "Client",
+            TemplateType = CompanyBillTemplateType.FtrHunger,
+            Year = 2026,
+            Month = 6,
+            SourceFileName = "hunger.xlsx",
+            UploadedBy = "accountant",
+            Status = AccountingRecordStatus.Posted,
+            RiderSummaries =
+            {
+                new CompanyBillRiderSummary
+                {
+                    SourceRiderId = rider.WorkingId!,
+                    OriginalRiderId = rider.Id,
+                    PaidRiderId = rider.Id,
+                    ResolutionStatus = ImportResolutionStatus.Resolved,
+                    AcceptedOrders = 450,
+                    NetAmount = 999
+                }
+            }
+        });
+        await db.SaveChangesAsync();
+
+        var salaries = await service.GenerateMonthlySalariesAsync(
+            new GenerateSalaryRequest(2026, 6, rider.CompanyId),
+            "accountant");
+        var updated = await service.UpdateSalaryRuleAsync(created.Value.Id, new SalaryRuleRequest(
+            rider.CompanyId,
+            CompanyBillTemplateType.FtrHunger,
+            "Updated Hunger salary",
+            400,
+            1900,
+            8,
+            3,
+            new DateOnly(2026, 1, 1),
+            null,
+            11,
+            "Updated",
+            true));
+        var deleted = await service.DeleteSalaryRuleAsync(created.Value.Id);
+
+        Assert.True(created.IsSuccess);
+        Assert.True(listed.IsSuccess);
+        Assert.True(fetched.IsSuccess);
+        Assert.True(salaries.IsSuccess);
+        Assert.True(updated.IsSuccess);
+        Assert.True(deleted.IsSuccess);
+        Assert.Contains(listed.Value, r => r.Id == created.Value.Id);
+        Assert.Equal("Custom Hunger salary", fetched.Value.Name);
+        Assert.Equal(2150, salaries.Value.Single().NetSalary);
+        Assert.Equal("Updated Hunger salary", updated.Value.Name);
+        Assert.False(deleted.Value.IsActive);
+    }
+
+    [Fact]
     public async Task BulkInternetReplacement_AddsReimbursementLine_ToGeneratedSalary()
     {
         await using var db = CreateDb();
@@ -328,13 +407,13 @@ public class AccountingWorkflowTests
         var service = new CompanyFinanceService(db);
 
         var receipt = await service.CreateReceiptAsync(
-            new CompanyPaymentReceiptRequest(receivables[0].Id, company.Id, new DateOnly(2026, 6, 20), 100, "REF-1", "Bank", null),
+            new CompanyPaymentReceiptRequest(receivables[0].Id, company.Id, null, new DateOnly(2026, 6, 20), 100, "REF-1", "Bank", null),
             "accountant");
         var duplicate = await service.CreateReceiptAsync(
-            new CompanyPaymentReceiptRequest(null, company.Id, new DateOnly(2026, 6, 20), 10, "REF-1", "Bank", null),
+            new CompanyPaymentReceiptRequest(null, company.Id, null, new DateOnly(2026, 6, 20), 10, "REF-1", "Bank", null),
             "accountant");
         var overpayment = await service.CreateReceiptAsync(
-            new CompanyPaymentReceiptRequest(receivables[1].Id, company.Id, new DateOnly(2026, 6, 21), 60, "REF-2", "Bank", null),
+            new CompanyPaymentReceiptRequest(receivables[1].Id, company.Id, null, new DateOnly(2026, 6, 21), 60, "REF-2", "Bank", null),
             "accountant");
 
         Assert.True(receipt.IsSuccess);
@@ -358,10 +437,148 @@ public class AccountingWorkflowTests
         var service = new CompanyFinanceService(db);
 
         var result = await service.CreateReceiptAsync(
-            new CompanyPaymentReceiptRequest(null, null, new DateOnly(2026, 6, 10), 10, "REF", "Bank", null),
+            new CompanyPaymentReceiptRequest(null, null, null, new DateOnly(2026, 6, 10), 10, "REF", "Bank", null),
             "accountant");
 
         Assert.True(result.IsFailure);
+    }
+
+    [Fact]
+    public async Task PeriodWorkflow_CloseBlocksPosting_AndWritesAuditValues()
+    {
+        await using var db = CreateDb();
+        var periodService = new AccountingPeriodService(db);
+        var financeService = new CompanyFinanceService(db);
+
+        var closed = await periodService.ClosePeriodAsync(2026, 6, new PeriodStatusChangeRequest("Month reviewed"), "accountant");
+        var receipt = await financeService.CreateReceiptAsync(
+            new CompanyPaymentReceiptRequest(null, null, null, new DateOnly(2026, 6, 10), 10, "REF", "Bank", null),
+            "accountant");
+        var audit = await db.AccountingAuditLogs.SingleAsync(a => a.EntityName == "AccountingPeriod" && a.Action == "Close");
+
+        Assert.True(closed.IsSuccess);
+        Assert.Equal(AccountingPeriodStatus.Closed, closed.Value.Status);
+        Assert.True(receipt.IsFailure);
+        Assert.False(string.IsNullOrWhiteSpace(audit.OldValuesJson));
+        Assert.False(string.IsNullOrWhiteSpace(audit.NewValuesJson));
+    }
+
+    [Fact]
+    public async Task ApproveCompanyBill_PostsVat_ToVatPayableAccount()
+    {
+        await using var db = CreateDb();
+        var rider = await SeedRiderAsync(db, iban: "SA123");
+        var service = new AccountingImportService(db);
+
+        var import = await service.ImportCompanyBillAsync(
+            new ImportCompanyBillRequest(CreateCompanyBillFile(rider.WorkingId!, 10, 115, 15), 2026, 6, rider.CompanyId, CompanyBillTemplateType.Generic, null),
+            "accountant");
+        var approved = await service.ApproveCompanyBillImportAsync(import.Value.Id, "accountant");
+
+        Assert.True(import.IsSuccess);
+        Assert.True(approved.IsSuccess);
+        Assert.Contains(
+            await db.JournalEntryLines.ToListAsync(),
+            l => l.AccountId == 18 && l.Credit == 15);
+        Assert.DoesNotContain(
+            await db.JournalEntryLines.ToListAsync(),
+            l => l.AccountId == 7 && l.Notes == "VAT payable");
+    }
+
+    [Fact]
+    public async Task ResolveRiderSummary_ClearsIssue_AndAllowsApproval()
+    {
+        await using var db = CreateDb();
+        var rider = await SeedRiderAsync(db, iban: "SA123");
+        var service = new AccountingImportService(db);
+
+        var import = await service.ImportCompanyBillAsync(
+            new ImportCompanyBillRequest(CreateCompanyBillFile("UNKNOWN-RIDER", 10, 100), 2026, 6, rider.CompanyId, CompanyBillTemplateType.Generic, null),
+            "accountant");
+        var summary = await db.CompanyBillRiderSummaries.SingleAsync(s => s.CompanyBillImportId == import.Value.Id);
+        var issue = await db.CompanyBillResolutionIssues.SingleAsync(i => i.CompanyBillImportId == import.Value.Id);
+        var resolved = await service.ResolveRiderSummaryAsync(
+            import.Value.Id,
+            summary.Id,
+            new ResolveRiderSummaryRequest(rider.Id, "Matched manually"),
+            "accountant");
+        var approved = await service.ApproveCompanyBillImportAsync(import.Value.Id, "accountant");
+        var audit = await db.AccountingAuditLogs.SingleAsync(a => a.EntityName == "CompanyBillRiderSummary" && a.Action == "ResolveRider");
+
+        Assert.True(import.IsSuccess);
+        Assert.True(resolved.IsSuccess);
+        Assert.True(approved.IsSuccess);
+        Assert.True((await db.CompanyBillResolutionIssues.FindAsync(issue.Id))!.IsResolved);
+        Assert.False(string.IsNullOrWhiteSpace(audit.OldValuesJson));
+        Assert.False(string.IsNullOrWhiteSpace(audit.NewValuesJson));
+    }
+
+    [Fact]
+    public async Task Receipt_WithBankAccount_LinksCashJournalLine()
+    {
+        await using var db = CreateDb();
+        var company = new Company { Name = "Client" };
+        var bank = new BankAccount { AccountName = "Main", BankName = "Bank", Iban = "SA123" };
+        db.Companies.Add(company);
+        db.BankAccounts.Add(bank);
+        await db.SaveChangesAsync();
+        db.CompanyReceivables.Add(new CompanyReceivable { CompanyId = company.Id, Year = 2026, Month = 6, NetAmount = 100, PendingAmount = 100, Status = AccountingRecordStatus.Posted });
+        await db.SaveChangesAsync();
+        var receivable = await db.CompanyReceivables.SingleAsync();
+        var service = new CompanyFinanceService(db);
+
+        var receipt = await service.CreateReceiptAsync(
+            new CompanyPaymentReceiptRequest(receivable.Id, company.Id, bank.Id, new DateOnly(2026, 6, 20), 100, "REF-BANK", "Bank", null),
+            "accountant");
+
+        Assert.True(receipt.IsSuccess);
+        Assert.Equal(bank.Id, receipt.Value.BankAccountId);
+        Assert.Contains(
+            await db.JournalEntryLines.ToListAsync(),
+            l => l.AccountId == 1 && l.Debit == 100 && l.BankAccountId == bank.Id);
+    }
+
+    [Fact]
+    public async Task FinalSettlement_CreatesSettlementEntries_AndCanWriteOffLoans()
+    {
+        await using var db = CreateDb();
+        var rider = await SeedRiderAsync(db, iban: "SA123");
+        var service = new AccountingSalaryService(db);
+        var loan = await service.CreateLoanAsync(new RiderLoanRequest(rider.Id, 100, 2026, 6, 1, "Loan"), "accountant");
+
+        var settlement = await service.CreateFinalSettlementAsync(
+            new RiderFinalSettlementRequest(rider.Id, new DateOnly(2026, 6, 25), 500, 50, 20, true, "End of service"),
+            "accountant");
+        var storedLoan = await db.RiderLoans.FindAsync(loan.Value.Id);
+
+        Assert.True(loan.IsSuccess);
+        Assert.True(settlement.IsSuccess);
+        Assert.Equal(100, settlement.Value.LoanWriteOffAmount);
+        Assert.Equal(530, settlement.Value.NetSettlementAmount);
+        Assert.Equal(0, storedLoan!.RemainingAmount);
+        Assert.Equal(AccountingRecordStatus.Reversed, storedLoan.Status);
+        Assert.Equal(500, await db.RiderEarnings.Where(e => e.SourceType == "RiderFinalSettlement").SumAsync(e => e.SalaryAmount));
+        Assert.Contains(await db.RiderFinancialItems.Include(i => i.Type).ToListAsync(), i => i.Type.Code == "FINAL_SETTLEMENT_REIMBURSEMENT" && i.Amount == 50);
+        Assert.Contains(await db.RiderFinancialItems.Include(i => i.Type).ToListAsync(), i => i.Type.Code == "FINAL_SETTLEMENT_DEDUCTION" && i.Amount == 20);
+    }
+
+    [Fact]
+    public async Task RefreshProfitSnapshot_UpsertsMonthlySnapshot()
+    {
+        await using var db = CreateDb();
+        var rider = await SeedRiderAsync(db, iban: "SA123");
+        db.CompanyReceivables.Add(new CompanyReceivable { CompanyId = rider.CompanyId, Year = 2026, Month = 6, GrossAmount = 1000, VatAmount = 150, NetAmount = 1150, PendingAmount = 1150, Status = AccountingRecordStatus.Posted });
+        db.RiderMonthlySalaries.Add(new RiderMonthlySalary { RiderId = rider.Id, Rider = rider, Year = 2026, Month = 6, NetSalary = 400, TotalDeductions = 20, GeneratedBy = "test" });
+        db.CompanyExpenses.Add(new CompanyExpense { CompanyExpenseCategoryId = 11, CompanyId = rider.CompanyId, ExpenseDate = new DateOnly(2026, 6, 20), Amount = 100, Status = AccountingRecordStatus.Approved, CreatedBy = "test" });
+        await db.SaveChangesAsync();
+        var service = new CompanyFinanceService(db);
+
+        var summary = await service.RefreshProfitSnapshotAsync(2026, 6, rider.CompanyId);
+        var snapshot = await db.CompanyProfitSnapshots.SingleAsync(s => s.CompanyId == rider.CompanyId && s.Year == 2026 && s.Month == 6);
+
+        Assert.True(summary.IsSuccess);
+        Assert.Equal(summary.Value.GrossIncome, snapshot.GrossIncome);
+        Assert.Equal(summary.Value.Profit, snapshot.Profit);
     }
 
     private static ApplicationDbcontext CreateDb()
@@ -428,7 +645,7 @@ public class AccountingWorkflowTests
         return salary;
     }
 
-    private static IFormFile CreateCompanyBillFile(string workingId, int acceptedOrders, decimal netAmount)
+    private static IFormFile CreateCompanyBillFile(string workingId, int acceptedOrders, decimal netAmount, decimal vatAmount = 0)
     {
         using var workbook = new XLWorkbook();
         var ws = workbook.AddWorksheet("Summary");
@@ -436,10 +653,12 @@ public class AccountingWorkflowTests
         ws.Cell(1, 2).Value = "completed orders";
         ws.Cell(1, 3).Value = "basic payment";
         ws.Cell(1, 4).Value = "net amount";
+        ws.Cell(1, 5).Value = "vat";
         ws.Cell(2, 1).Value = workingId;
         ws.Cell(2, 2).Value = acceptedOrders;
-        ws.Cell(2, 3).Value = netAmount;
+        ws.Cell(2, 3).Value = netAmount - vatAmount;
         ws.Cell(2, 4).Value = netAmount;
+        ws.Cell(2, 5).Value = vatAmount;
 
         var stream = new MemoryStream();
         workbook.SaveAs(stream);

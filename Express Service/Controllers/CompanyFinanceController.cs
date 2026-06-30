@@ -32,6 +32,17 @@ public class CompanyFinanceController(ICompanyFinanceService financeService) : C
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
 
+    [HttpPost("summary/snapshot")]
+    public async Task<IActionResult> RefreshSummarySnapshot(
+        [FromQuery] int year,
+        [FromQuery] int month,
+        [FromQuery] int? companyId,
+        CancellationToken cancellationToken)
+    {
+        var result = await financeService.RefreshProfitSnapshotAsync(year, month, companyId, cancellationToken);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
     [HttpGet("~/api/accounting/companies/{companyId:int}/finance/income")]
     public async Task<IActionResult> GetCompanyIncome(
         int companyId,

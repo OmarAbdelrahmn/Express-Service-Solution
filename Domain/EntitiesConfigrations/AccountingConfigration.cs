@@ -34,7 +34,8 @@ public class AccountingAccountConfigration : IEntityTypeConfiguration<Accounting
             new AccountingAccount { Id = 14, Code = "5400", Name = "Housing Expense", Type = AccountType.Expense, IsSystem = true, IsActive = true },
             new AccountingAccount { Id = 15, Code = "5500", Name = "Vehicle Expense", Type = AccountType.Expense, IsSystem = true, IsActive = true },
             new AccountingAccount { Id = 16, Code = "5600", Name = "Government Fees Expense", Type = AccountType.Expense, IsSystem = true, IsActive = true },
-            new AccountingAccount { Id = 17, Code = "5700", Name = "Manual Adjustments", Type = AccountType.Expense, IsSystem = true, IsActive = true }
+            new AccountingAccount { Id = 17, Code = "5700", Name = "Manual Adjustments", Type = AccountType.Expense, IsSystem = true, IsActive = true },
+            new AccountingAccount { Id = 18, Code = "2200", Name = "VAT Payable", Type = AccountType.Liability, IsSystem = true, IsActive = true }
         );
     }
 }
@@ -91,6 +92,11 @@ public class JournalEntryLineConfigration : IEntityTypeConfiguration<JournalEntr
         builder.HasIndex(l => l.AccountId);
         builder.HasIndex(l => l.CostCenterId);
         builder.HasIndex(l => new { l.CompanyId, l.RiderId, l.HousingId });
+        builder.HasIndex(l => l.BankAccountId);
+        builder.HasOne(l => l.BankAccount)
+            .WithMany()
+            .HasForeignKey(l => l.BankAccountId)
+            .OnDelete(DeleteBehavior.Restrict);
     }
 }
 
@@ -221,6 +227,33 @@ public class RiderBonusRuleConfigration : IEntityTypeConfiguration<RiderBonusRul
     }
 }
 
+public class RiderSalaryRuleConfigration : IEntityTypeConfiguration<RiderSalaryRule>
+{
+    public void Configure(EntityTypeBuilder<RiderSalaryRule> builder)
+    {
+        builder.HasKey(r => r.Id);
+        builder.Property(r => r.Name).IsRequired().HasMaxLength(200);
+        builder.Property(r => r.BaseAmount).HasColumnType("decimal(18,2)");
+        builder.Property(r => r.ExtraOrderAmount).HasColumnType("decimal(18,2)");
+        builder.Property(r => r.BelowThresholdOrderAmount).HasColumnType("decimal(18,2)");
+        builder.HasIndex(r => new { r.CompanyId, r.TemplateType, r.IsActive, r.EffectiveFrom });
+        builder.HasData(new RiderSalaryRule
+        {
+            Id = 1,
+            TemplateType = CompanyBillTemplateType.FtrHunger,
+            Name = "Default FTR Hunger salary",
+            MinimumAcceptedOrders = 500,
+            BaseAmount = 2000,
+            ExtraOrderAmount = 6,
+            BelowThresholdOrderAmount = 3,
+            EffectiveFrom = new DateOnly(2026, 1, 1),
+            Priority = 0,
+            IsActive = true,
+            Notes = "Default rule matching the previous hardcoded Hunger/FTR salary formula."
+        });
+    }
+}
+
 public class RiderFinancialItemTypeConfigration : IEntityTypeConfiguration<RiderFinancialItemType>
 {
     public void Configure(EntityTypeBuilder<RiderFinancialItemType> builder)
@@ -261,6 +294,16 @@ public class RiderFinancialItemConfigration : IEntityTypeConfiguration<RiderFina
             .HasPrincipalKey(v => v.VehicleNumber)
             .OnDelete(DeleteBehavior.Restrict)
             .IsRequired(false);
+    }
+}
+
+public class RiderFinalSettlementConfigration : IEntityTypeConfiguration<RiderFinalSettlement>
+{
+    public void Configure(EntityTypeBuilder<RiderFinalSettlement> builder)
+    {
+        builder.HasKey(s => s.Id);
+        builder.Property(s => s.CreatedBy).IsRequired().HasMaxLength(200);
+        builder.HasIndex(s => new { s.RiderId, s.Year, s.Month });
     }
 }
 
@@ -329,6 +372,11 @@ public class CompanyPaymentReceiptConfigration : IEntityTypeConfiguration<Compan
         builder.HasIndex(r => new { r.CompanyId, r.ReceiptDate, r.ReferenceNumber, r.BankAccount })
             .IsUnique()
             .HasFilter("[ReferenceNumber] IS NOT NULL");
+        builder.HasIndex(r => r.BankAccountId);
+        builder.HasOne(r => r.LinkedBankAccount)
+            .WithMany()
+            .HasForeignKey(r => r.BankAccountId)
+            .OnDelete(DeleteBehavior.Restrict);
     }
 }
 
@@ -364,9 +412,14 @@ public class CompanyExpenseConfigration : IEntityTypeConfiguration<CompanyExpens
         builder.Property(e => e.CreatedBy).IsRequired().HasMaxLength(200);
         builder.HasIndex(e => new { e.ExpenseDate, e.CompanyId, e.CompanyExpenseCategoryId });
         builder.HasIndex(e => e.CostCenterId);
+        builder.HasIndex(e => e.BankAccountId);
         builder.HasOne(e => e.Vehicle)
             .WithMany()
             .HasForeignKey(e => e.VehicleNumber)
+            .OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne(e => e.BankAccount)
+            .WithMany()
+            .HasForeignKey(e => e.BankAccountId)
             .OnDelete(DeleteBehavior.Restrict);
     }
 }
