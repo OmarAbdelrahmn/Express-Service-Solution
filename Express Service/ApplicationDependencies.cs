@@ -106,6 +106,7 @@ public static class ApplicationDependencies
         Services.AddScoped<IReminderService, ReminderService>();
         Services.AddScoped<IAbsentReportJob, AbsentReportJob>();
         Services.AddScoped<IItemMovementReportService, ItemMovementReportService>();
+        Services.AddScoped<IAccountingPeriodService, AccountingPeriodService>();
         Services.AddScoped<IAccountingImportService, AccountingImportService>();
         Services.AddScoped<IAccountingSalaryService, AccountingSalaryService>();
         Services.AddScoped<IAccountingPaymentService, AccountingPaymentService>();

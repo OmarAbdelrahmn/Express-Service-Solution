@@ -10,6 +10,17 @@ namespace Express_Service.Controllers;
 [Authorize(Roles = "Master,Admin,Accountant")]
 public class CompanyFinanceController(ICompanyFinanceService financeService) : ControllerBase
 {
+    [HttpGet("~/api/accounting/companies/{companyId:int}/finance/summary")]
+    public async Task<IActionResult> GetCompanySummary(
+        int companyId,
+        [FromQuery] int year,
+        [FromQuery] int month,
+        CancellationToken cancellationToken)
+    {
+        var result = await financeService.GetSummaryAsync(year, month, companyId, cancellationToken);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
     [HttpGet("summary")]
     public async Task<IActionResult> GetSummary(
         [FromQuery] int year,
@@ -21,6 +32,28 @@ public class CompanyFinanceController(ICompanyFinanceService financeService) : C
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
 
+    [HttpPost("summary/snapshot")]
+    public async Task<IActionResult> RefreshSummarySnapshot(
+        [FromQuery] int year,
+        [FromQuery] int month,
+        [FromQuery] int? companyId,
+        CancellationToken cancellationToken)
+    {
+        var result = await financeService.RefreshProfitSnapshotAsync(year, month, companyId, cancellationToken);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    [HttpGet("~/api/accounting/companies/{companyId:int}/finance/income")]
+    public async Task<IActionResult> GetCompanyIncome(
+        int companyId,
+        [FromQuery] DateOnly from,
+        [FromQuery] DateOnly to,
+        CancellationToken cancellationToken)
+    {
+        var result = await financeService.GetIncomeAsync(from, to, companyId, cancellationToken);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
     [HttpGet("income")]
     public async Task<IActionResult> GetIncome(
         [FromQuery] DateOnly from,
@@ -29,6 +62,18 @@ public class CompanyFinanceController(ICompanyFinanceService financeService) : C
         CancellationToken cancellationToken)
     {
         var result = await financeService.GetIncomeAsync(from, to, companyId, cancellationToken);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    [HttpGet("~/api/accounting/companies/{companyId:int}/finance/expenses")]
+    public async Task<IActionResult> GetCompanyExpenses(
+        int companyId,
+        [FromQuery] DateOnly from,
+        [FromQuery] DateOnly to,
+        [FromQuery] string? category,
+        CancellationToken cancellationToken)
+    {
+        var result = await financeService.GetExpensesAsync(from, to, companyId, category, cancellationToken);
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
 
@@ -44,11 +89,39 @@ public class CompanyFinanceController(ICompanyFinanceService financeService) : C
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
 
+    [HttpPost("~/api/accounting/companies/{companyId:int}/finance/expenses")]
+    public async Task<IActionResult> CreateCompanyExpense(
+        int companyId,
+        [FromBody] CompanyExpenseRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await financeService.CreateExpenseAsync(
+            request with { CompanyId = companyId },
+            User.GetUserId() ?? "system",
+            cancellationToken);
+
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
     [HttpPost("expenses")]
     public async Task<IActionResult> CreateExpense([FromBody] CompanyExpenseRequest request, CancellationToken cancellationToken)
     {
         var result = await financeService.CreateExpenseAsync(
             request,
+            User.GetUserId() ?? "system",
+            cancellationToken);
+
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    [HttpPost("~/api/accounting/companies/{companyId:int}/finance/receipts")]
+    public async Task<IActionResult> CreateCompanyReceipt(
+        int companyId,
+        [FromBody] CompanyPaymentReceiptRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await financeService.CreateReceiptAsync(
+            request with { CompanyId = companyId },
             User.GetUserId() ?? "system",
             cancellationToken);
 
@@ -74,6 +147,17 @@ public class CompanyFinanceController(ICompanyFinanceService financeService) : C
             User.GetUserId() ?? "system",
             cancellationToken);
 
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    [HttpGet("~/api/accounting/companies/{companyId:int}/finance/profit-loss")]
+    public async Task<IActionResult> GetCompanyProfitLoss(
+        int companyId,
+        [FromQuery] DateOnly from,
+        [FromQuery] DateOnly to,
+        CancellationToken cancellationToken)
+    {
+        var result = await financeService.GetProfitLossAsync(from, to, companyId, cancellationToken);
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
 

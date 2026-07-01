@@ -76,11 +76,13 @@ public class ApplicationDbcontext(DbContextOptions<ApplicationDbcontext> options
     public DbSet<CompanyBillResolutionIssue> CompanyBillResolutionIssues { get; set; }
     public DbSet<RiderEarning> RiderEarnings { get; set; }
     public DbSet<RiderBonusRule> RiderBonusRules { get; set; }
+    public DbSet<RiderSalaryRule> RiderSalaryRules { get; set; }
     public DbSet<RiderBonusAward> RiderBonusAwards { get; set; }
     public DbSet<RiderFinancialItemType> RiderFinancialItemTypes { get; set; }
     public DbSet<RiderFinancialItem> RiderFinancialItems { get; set; }
     public DbSet<RiderLoan> RiderLoans { get; set; }
     public DbSet<RiderLoanInstallment> RiderLoanInstallments { get; set; }
+    public DbSet<RiderFinalSettlement> RiderFinalSettlements { get; set; }
     public DbSet<RiderMonthlySalary> RiderMonthlySalaries { get; set; }
     public DbSet<RiderMonthlySalaryLine> RiderMonthlySalaryLines { get; set; }
     public DbSet<RiderSalaryPaymentBatch> RiderSalaryPaymentBatches { get; set; }

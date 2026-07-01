@@ -9,13 +9,37 @@ namespace Express_Service.Controllers;
 [Authorize(Roles = "Master,Admin,Accountant")]
 public class AccountingReportsController(IAccountingReportService reportService) : ControllerBase
 {
-    [HttpGet("trial-balance")]
-    public async Task<IActionResult> GetTrialBalance(
+    [HttpGet("~/api/accounting/companies/{companyId:int}/reports/trial-balance")]
+    public async Task<IActionResult> GetCompanyTrialBalance(
+        int companyId,
         [FromQuery] DateOnly from,
         [FromQuery] DateOnly to,
         CancellationToken cancellationToken)
     {
-        var result = await reportService.GetTrialBalanceAsync(from, to, cancellationToken);
+        var result = await reportService.GetTrialBalanceAsync(from, to, companyId, cancellationToken);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    [HttpGet("trial-balance")]
+    public async Task<IActionResult> GetTrialBalance(
+        [FromQuery] DateOnly from,
+        [FromQuery] DateOnly to,
+        [FromQuery] int? companyId,
+        CancellationToken cancellationToken)
+    {
+        var result = await reportService.GetTrialBalanceAsync(from, to, companyId, cancellationToken);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    [HttpGet("~/api/accounting/companies/{companyId:int}/reports/general-ledger")]
+    public async Task<IActionResult> GetCompanyGeneralLedger(
+        int companyId,
+        [FromQuery] DateOnly from,
+        [FromQuery] DateOnly to,
+        [FromQuery] int? accountId,
+        CancellationToken cancellationToken)
+    {
+        var result = await reportService.GetGeneralLedgerAsync(from, to, accountId, companyId, cancellationToken);
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
 
@@ -24,9 +48,10 @@ public class AccountingReportsController(IAccountingReportService reportService)
         [FromQuery] DateOnly from,
         [FromQuery] DateOnly to,
         [FromQuery] int? accountId,
+        [FromQuery] int? companyId,
         CancellationToken cancellationToken)
     {
-        var result = await reportService.GetGeneralLedgerAsync(from, to, accountId, cancellationToken);
+        var result = await reportService.GetGeneralLedgerAsync(from, to, accountId, companyId, cancellationToken);
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
 }

@@ -11,7 +11,26 @@ public interface IAccountingImportService
         string uploadedBy,
         CancellationToken cancellationToken = default);
 
+    Task<Result<List<CompanyBillImportListItemResponse>>> GetCompanyImportsAsync(
+        CompanyBillImportQuery request,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<CompanyBillImportResponse>> GetCompanyImportAsync(
+        int companyId,
+        int importId,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<CompanyBillImportInfoResponse>> GetCompanyImportInfoAsync(
+        int companyId,
+        CancellationToken cancellationToken = default);
+
     Task<Result<CompanyBillImportResponse>> ApproveCompanyBillImportAsync(
+        int importId,
+        string approvedBy,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<CompanyBillImportResponse>> ApproveCompanyBillImportAsync(
+        int companyId,
         int importId,
         string approvedBy,
         CancellationToken cancellationToken = default);
@@ -21,8 +40,61 @@ public interface IAccountingImportService
         string reversedBy,
         CancellationToken cancellationToken = default);
 
+    Task<Result<CompanyBillImportResponse>> ReverseCompanyBillImportAsync(
+        int companyId,
+        int importId,
+        string reversedBy,
+        CancellationToken cancellationToken = default);
+
     Task<Result<CompanyBillImportResponse>> GetImportAsync(
         int importId,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<CompanyBillImportResponse>> ResolveImportIssueAsync(
+        int importId,
+        int issueId,
+        ResolveImportIssueRequest request,
+        string resolvedBy,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<CompanyBillImportResponse>> ResolveRiderSummaryAsync(
+        int importId,
+        int summaryId,
+        ResolveRiderSummaryRequest request,
+        string resolvedBy,
+        CancellationToken cancellationToken = default);
+}
+
+public interface IAccountingPeriodService
+{
+    Task<Result<AccountingPeriodResponse>> GetPeriodAsync(
+        int year,
+        int month,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<List<AccountingPeriodResponse>>> GetPeriodsAsync(
+        int? year = null,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<AccountingPeriodResponse>> ClosePeriodAsync(
+        int year,
+        int month,
+        PeriodStatusChangeRequest request,
+        string performedBy,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<AccountingPeriodResponse>> LockPeriodAsync(
+        int year,
+        int month,
+        PeriodStatusChangeRequest request,
+        string performedBy,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<AccountingPeriodResponse>> ReopenPeriodAsync(
+        int year,
+        int month,
+        PeriodStatusChangeRequest request,
+        string performedBy,
         CancellationToken cancellationToken = default);
 }
 
@@ -34,6 +106,11 @@ public interface IAccountingSalaryService
         CancellationToken cancellationToken = default);
 
     Task<Result<SalaryResponse>> GetSalaryAsync(
+        int salaryId,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<SalaryResponse>> GetCompanySalaryAsync(
+        int companyId,
         int salaryId,
         CancellationToken cancellationToken = default);
 
@@ -53,6 +130,29 @@ public interface IAccountingSalaryService
 
     Task<Result<List<BonusRuleResponse>>> GetBonusRulesAsync(
         int? companyId = null,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<SalaryRuleResponse>> CreateSalaryRuleAsync(
+        SalaryRuleRequest request,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<List<SalaryRuleResponse>>> GetSalaryRulesAsync(
+        int? companyId = null,
+        CompanyBillTemplateType? templateType = null,
+        bool includeInactive = false,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<SalaryRuleResponse>> GetSalaryRuleAsync(
+        int ruleId,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<SalaryRuleResponse>> UpdateSalaryRuleAsync(
+        int ruleId,
+        SalaryRuleRequest request,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<SalaryRuleResponse>> DeleteSalaryRuleAsync(
+        int ruleId,
         CancellationToken cancellationToken = default);
 
     Task<Result<FinancialItemTypeResponse>> CreateFinancialItemTypeAsync(
@@ -76,6 +176,11 @@ public interface IAccountingSalaryService
 
     Task<Result<RiderLoanResponse>> CreateLoanAsync(
         RiderLoanRequest request,
+        string createdBy,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<RiderFinalSettlementResponse>> CreateFinalSettlementAsync(
+        RiderFinalSettlementRequest request,
         string createdBy,
         CancellationToken cancellationToken = default);
 }
@@ -192,6 +297,12 @@ public interface ICompanyFinanceService
         DateOnly from,
         DateOnly to,
         CancellationToken cancellationToken = default);
+
+    Task<Result<CompanyFinanceSummaryResponse>> RefreshProfitSnapshotAsync(
+        int year,
+        int month,
+        int? companyId,
+        CancellationToken cancellationToken = default);
 }
 
 public interface IAccountingReportService
@@ -199,12 +310,14 @@ public interface IAccountingReportService
     Task<Result<TrialBalanceResponse>> GetTrialBalanceAsync(
         DateOnly from,
         DateOnly to,
+        int? companyId = null,
         CancellationToken cancellationToken = default);
 
     Task<Result<GeneralLedgerResponse>> GetGeneralLedgerAsync(
         DateOnly from,
         DateOnly to,
         int? accountId,
+        int? companyId = null,
         CancellationToken cancellationToken = default);
 }
 
@@ -212,13 +325,13 @@ public record ImportCompanyBillRequest(
     IFormFile File,
     int Year,
     int Month,
-    int? CompanyId,
-    CompanyBillTemplateType? TemplateType,
+    int CompanyId,
+    CompanyBillTemplateType TemplateType,
     string? Notes);
 
 public record CompanyBillImportResponse(
     int Id,
-    int? CompanyId,
+    int CompanyId,
     string CompanyName,
     CompanyBillTemplateType TemplateType,
     int Year,
@@ -239,6 +352,46 @@ public record CompanyBillImportResponse(
     IReadOnlyList<CompanyBillSheetResponse> Sheets,
     IReadOnlyList<CompanyBillResolutionIssueResponse> Issues);
 
+public record CompanyBillImportQuery(
+    int CompanyId,
+    int? Year,
+    int? Month,
+    CompanyBillTemplateType? TemplateType,
+    AccountingRecordStatus? Status);
+
+public record CompanyBillImportListItemResponse(
+    int Id,
+    int CompanyId,
+    string CompanyName,
+    CompanyBillTemplateType TemplateType,
+    int Year,
+    int Month,
+    string SourceFileName,
+    AccountingRecordStatus Status,
+    decimal GrossAmount,
+    decimal VatAmount,
+    decimal NetAmount,
+    decimal TotalDeductions,
+    int RiderSummaryCount,
+    int TransactionLineCount,
+    int IssueCount,
+    DateTime UploadedAt,
+    string UploadedBy);
+
+public record CompanyBillImportInfoResponse(
+    int CompanyId,
+    string CompanyName,
+    IReadOnlyList<CompanyBillTemplateInfoResponse> Templates);
+
+public record CompanyBillTemplateInfoResponse(
+    CompanyBillTemplateType TemplateType,
+    string Code,
+    string DisplayName,
+    string UploadEndpoint,
+    IReadOnlyList<string> RequiredColumns,
+    IReadOnlyList<string> OptionalColumns,
+    string Notes);
+
 public record CompanyBillSheetResponse(
     int Id,
     string SheetName,
@@ -253,6 +406,27 @@ public record CompanyBillResolutionIssueResponse(
     int? SourceRowNumber,
     string? SourceRiderId,
     bool IsResolved);
+
+public record ResolveImportIssueRequest(
+    bool IsResolved = true,
+    string? Notes = null);
+
+public record ResolveRiderSummaryRequest(
+    int PaidRiderId,
+    string? Notes);
+
+public record AccountingPeriodResponse(
+    int Id,
+    int Year,
+    int Month,
+    DateOnly StartDate,
+    DateOnly EndDate,
+    AccountingPeriodStatus Status,
+    string? ClosedBy,
+    DateTime? ClosedAt,
+    string? Notes);
+
+public record PeriodStatusChangeRequest(string? Notes = null);
 
 public record GenerateSalaryRequest(
     int Year,
@@ -304,6 +478,36 @@ public record BonusRuleResponse(
     string? CompanyName,
     int MinimumAcceptedOrders,
     decimal BonusAmount,
+    DateOnly EffectiveFrom,
+    DateOnly? EffectiveTo,
+    int Priority,
+    bool IsActive,
+    string? Notes);
+
+public record SalaryRuleRequest(
+    int? CompanyId,
+    CompanyBillTemplateType? TemplateType,
+    string Name,
+    int MinimumAcceptedOrders,
+    decimal BaseAmount,
+    decimal ExtraOrderAmount,
+    decimal BelowThresholdOrderAmount,
+    DateOnly EffectiveFrom,
+    DateOnly? EffectiveTo,
+    int Priority,
+    string? Notes,
+    bool IsActive = true);
+
+public record SalaryRuleResponse(
+    int Id,
+    int? CompanyId,
+    string? CompanyName,
+    CompanyBillTemplateType? TemplateType,
+    string Name,
+    int MinimumAcceptedOrders,
+    decimal BaseAmount,
+    decimal ExtraOrderAmount,
+    decimal BelowThresholdOrderAmount,
     DateOnly EffectiveFrom,
     DateOnly? EffectiveTo,
     int Priority,
@@ -411,6 +615,31 @@ public record RiderLoanInstallmentResponse(
     decimal PaidAmount,
     AccountingRecordStatus Status);
 
+public record RiderFinalSettlementRequest(
+    int RiderId,
+    DateOnly SettlementDate,
+    decimal FinalSalaryAmount,
+    decimal ReimbursementAmount,
+    decimal ManualDeductionAmount,
+    bool WriteOffOutstandingLoans,
+    string? Notes);
+
+public record RiderFinalSettlementResponse(
+    int Id,
+    int RiderId,
+    DateOnly SettlementDate,
+    int Year,
+    int Month,
+    decimal FinalSalaryAmount,
+    decimal ReimbursementAmount,
+    decimal ManualDeductionAmount,
+    decimal OutstandingLoanBalance,
+    decimal LoanWriteOffAmount,
+    decimal LoanFinalDeductionAmount,
+    decimal NetSettlementAmount,
+    AccountingRecordStatus Status,
+    string? Notes);
+
 public record CreatePaymentBatchRequest(
     int Year,
     int Month,
@@ -420,7 +649,8 @@ public record CreatePaymentBatchRequest(
 public record BankPaymentConfirmationRequest(
     IReadOnlyList<BankPaymentConfirmationLine> ConfirmedPayments,
     IReadOnlyList<BankPaymentRejectionLine> RejectedPayments,
-    string? Notes);
+    string? Notes,
+    int? BankAccountId = null);
 
 public record BankPaymentConfirmationLine(
     int PaymentId,
@@ -544,6 +774,7 @@ public record CompanyExpenseRequest(
     int? RiderId,
     int? HousingId,
     string? VehicleNumber,
+    int? BankAccountId,
     DateOnly ExpenseDate,
     decimal Amount,
     decimal VatAmount,
@@ -561,6 +792,7 @@ public record CompanyExpenseResponse(
     int? RiderId,
     int? HousingId,
     string? VehicleNumber,
+    int? BankAccountId,
     DateOnly ExpenseDate,
     decimal Amount,
     decimal VatAmount,
@@ -571,6 +803,7 @@ public record CompanyExpenseResponse(
 public record CompanyPaymentReceiptRequest(
     int? CompanyReceivableId,
     int? CompanyId,
+    int? BankAccountId,
     DateOnly ReceiptDate,
     decimal Amount,
     string? ReferenceNumber,
@@ -581,6 +814,7 @@ public record CompanyPaymentReceiptResponse(
     int Id,
     int? CompanyReceivableId,
     int? CompanyId,
+    int? BankAccountId,
     DateOnly ReceiptDate,
     decimal Amount,
     string? ReferenceNumber,
