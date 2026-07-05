@@ -55,6 +55,7 @@ public class ApplicationDbcontext(DbContextOptions<ApplicationDbcontext> options
     public DbSet<EmployeeOrder> EmployeeOrders{ get; set; }
 
     public DbSet<TransporterShift> TransporterShifts { get; set; }
+    public DbSet<SystemIdPhoneStatus> SystemIdPhoneStatuses { get; set; }
     public DbSet<MaintenanceInterval> MaintenanceIntervals { get; set; }
     public DbSet<KeetaDriverShift> KeetaDriverShifts { get; set; }
     public DbSet<KeetaShiftSlot> KeetaShiftSlots{ get; set; }

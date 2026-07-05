@@ -32,6 +32,7 @@ using Application.Service.Riders;
 using Application.Service.SparePart;
 using Application.Service.SupplierSer;
 using Application.Service.temp;
+using Application.Service.SystemIdPhoneStatuses;
 using Application.Service.Transfer;
 using Application.Service.TransporterShifts;
 using Application.Service.User;
@@ -98,6 +99,7 @@ public static class ApplicationDependencies
         Services.AddScoped<IEmailWarmupJob, EmailWarmupJob>();
         Services.AddScoped<IOrderService, OrderService>();
         Services.AddScoped<ITransporterShiftService, TransporterShiftService>();
+        Services.AddScoped<ISystemIdPhoneStatusService, SystemIdPhoneStatusService>();
         Services.AddScoped<ICostTrackingService, CostTrackingService>();
         Services.AddMemoryCache();
         Services.AddScoped<IAiConfirmationStore, AiConfirmationStore>();
