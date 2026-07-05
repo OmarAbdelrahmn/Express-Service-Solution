@@ -1,27 +1,27 @@
-using Application.Contracts.SystemIdPhoneStatuses;
-using Application.Service.SystemIdPhoneStatuses;
+using Application.Contracts.OutageShiftPerformances;
+using Application.Service.OutageShiftPerformances;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Express_Service.Controllers;
 
-[Route("api/system-id-phone-statuses")]
+[Route("api/outage-shift-performances")]
 [ApiController]
 [Authorize(Roles = "Master,Admin")]
-public class SystemIdPhoneStatusController(ISystemIdPhoneStatusService service) : ControllerBase
+public class OutageShiftPerformanceController(IOutageShiftPerformanceService service) : ControllerBase
 {
     private string Actor => User.Identity?.Name ?? "Unknown";
 
     [HttpPost]
     public async Task<IActionResult> Create(
-        [FromQuery] DateOnly statusDate,
-        [FromBody] CreateSystemIdPhoneStatusRequest request,
+        [FromQuery] DateOnly shiftDate,
+        [FromBody] CreateOutageShiftPerformanceRequest request,
         CancellationToken cancellationToken)
     {
-        if (statusDate == default)
-            return BadRequest(new { error = "statusDate query string is required." });
+        if (shiftDate == default)
+            return BadRequest(new { error = "shiftDate query string is required." });
 
-        var result = await service.CreateAsync(request, statusDate, Actor, cancellationToken);
+        var result = await service.CreateAsync(request, shiftDate, Actor, cancellationToken);
         return result.IsSuccess
             ? CreatedAtAction(nameof(GetById), new { id = result.Value.Id }, result.Value)
             : result.ToProblem();
@@ -31,11 +31,11 @@ public class SystemIdPhoneStatusController(ISystemIdPhoneStatusService service) 
     [RequestSizeLimit(10 * 1024 * 1024)]
     public async Task<IActionResult> Upload(
         IFormFile file,
-        [FromQuery] DateOnly statusDate,
+        [FromQuery] DateOnly shiftDate,
         CancellationToken cancellationToken = default)
     {
-        if (statusDate == default)
-            return BadRequest(new { error = "statusDate query string is required." });
+        if (shiftDate == default)
+            return BadRequest(new { error = "shiftDate query string is required." });
 
         if (file is null || file.Length == 0)
             return BadRequest(new { error = "No file uploaded." });
@@ -45,12 +45,12 @@ public class SystemIdPhoneStatusController(ISystemIdPhoneStatusService service) 
             return BadRequest(new { error = "Only .xlsx / .xls files are accepted." });
 
         List<string> parserWarnings;
-        Application.Contracts.SystemIdPhoneStatuses.ImportSystemIdPhoneStatusRequest importRequest;
+        ImportOutageShiftPerformanceRequest importRequest;
 
         try
         {
             await using var stream = file.OpenReadStream();
-            (importRequest, parserWarnings) = SystemIdPhoneStatusExcelParser.Parse(stream, statusDate);
+            (importRequest, parserWarnings) = OutageShiftPerformanceExcelParser.Parse(stream, shiftDate);
         }
         catch (InvalidOperationException ex)
         {
@@ -61,10 +61,10 @@ public class SystemIdPhoneStatusController(ISystemIdPhoneStatusService service) 
             return StatusCode(500, new { error = $"Failed to read Excel file: {ex.Message}" });
         }
 
-        if (importRequest.Cells.Count == 0)
+        if (importRequest.Rows.Count == 0)
             return BadRequest(new
             {
-                error = "The file contained no data rows to import.",
+                error = "The file contained no valid rows to import.",
                 parserWarnings
             });
 
@@ -74,9 +74,8 @@ public class SystemIdPhoneStatusController(ISystemIdPhoneStatusService service) 
 
         return Ok(new
         {
-            result.Value.TotalCellsProcessed,
+            result.Value.TotalRowsProcessed,
             result.Value.RecordsCreated,
-            result.Value.BlankCellsSkipped,
             Warnings = result.Value.Warnings.Concat(parserWarnings).ToList(),
             ParserWarningsOnly = parserWarnings
         });
@@ -104,14 +103,14 @@ public class SystemIdPhoneStatusController(ISystemIdPhoneStatusService service) 
     [HttpPut("{id:int}")]
     public async Task<IActionResult> Update(
         int id,
-        [FromQuery] DateOnly statusDate,
-        [FromBody] UpdateSystemIdPhoneStatusRequest request,
+        [FromQuery] DateOnly shiftDate,
+        [FromBody] UpdateOutageShiftPerformanceRequest request,
         CancellationToken cancellationToken)
     {
-        if (statusDate == default)
-            return BadRequest(new { error = "statusDate query string is required." });
+        if (shiftDate == default)
+            return BadRequest(new { error = "shiftDate query string is required." });
 
-        var result = await service.UpdateAsync(id, request, statusDate, cancellationToken);
+        var result = await service.UpdateAsync(id, request, shiftDate, cancellationToken);
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
 
@@ -120,7 +119,7 @@ public class SystemIdPhoneStatusController(ISystemIdPhoneStatusService service) 
     {
         var result = await service.DeleteAsync(id, cancellationToken);
         return result.IsSuccess
-            ? Ok(new { message = "System ID phone status record deleted successfully." })
+            ? Ok(new { message = "Outage shift performance record deleted successfully." })
             : result.ToProblem();
     }
 }
