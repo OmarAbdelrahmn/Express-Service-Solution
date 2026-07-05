@@ -14,36 +14,43 @@ public class OutageShiftPerformanceService(ApplicationDbcontext db) : IOutageShi
         string createdBy,
         CancellationToken cancellationToken = default)
     {
-        var validation = Validate(request.SystemId, request.PhoneNumber, request.AcceptedOrders, request.RejectedOrders, request.WorkingHours);
+        var validation = Validate(request.OutRiderInfoId, request.AcceptedOrders, request.RejectedOrders, request.WorkingHours);
         if (validation is not null)
             return Result.Failure<OutageShiftPerformanceResponse>(validation);
 
-        try
-        {
-            var record = new OutageShiftPerformance
-            {
-                SystemId = request.SystemId.Trim(),
-                PhoneNumber = request.PhoneNumber.Trim(),
-                ShiftDate = shiftDate,
-                AcceptedOrders = request.AcceptedOrders,
-                RejectedOrders = request.RejectedOrders,
-                WorkingHours = request.WorkingHours,
-                UploadedAt = DateTime.UtcNow.AddHours(3),
-                UploadedBy = createdBy
-            };
+        var outRiderInfo = await db.OutRiderInfos
+            .AsNoTracking()
+            .FirstOrDefaultAsync(r => r.Id == request.OutRiderInfoId, cancellationToken);
 
-            await db.OutageShiftPerformances.AddAsync(record, cancellationToken);
-            await db.SaveChangesAsync(cancellationToken);
+        if (outRiderInfo is null)
+            return Result.Failure<OutageShiftPerformanceResponse>(OutRiderInfoNotFound());
 
-            return Result.Success(Map(record));
-        }
-        catch (Exception ex)
+        var exists = await db.OutageShiftPerformances
+            .AnyAsync(p => p.OutRiderInfoId == request.OutRiderInfoId && p.ShiftDate == shiftDate, cancellationToken);
+
+        if (exists)
         {
             return Result.Failure<OutageShiftPerformanceResponse>(new Error(
-                "OutageShiftPerformance.CreateFailed",
-                ex.Message,
-                500));
+                "OutageShiftPerformance.Duplicate",
+                "Outage shift performance already exists for this rider and date.",
+                409));
         }
+
+        var record = new OutageShiftPerformance
+        {
+            OutRiderInfoId = request.OutRiderInfoId,
+            ShiftDate = shiftDate,
+            AcceptedOrders = request.AcceptedOrders,
+            RejectedOrders = request.RejectedOrders,
+            WorkingHours = request.WorkingHours,
+            UploadedAt = DateTime.UtcNow.AddHours(3),
+            UploadedBy = createdBy
+        };
+
+        await db.OutageShiftPerformances.AddAsync(record, cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
+
+        return Result.Success(Map(record, outRiderInfo.RiderId));
     }
 
     public async Task<Result<OutageShiftPerformanceImportResponse>> ImportAsync(
@@ -55,23 +62,51 @@ public class OutageShiftPerformanceService(ApplicationDbcontext db) : IOutageShi
         {
             var records = new List<OutageShiftPerformance>();
             var warnings = new List<string>();
-            var keysToDelete = new HashSet<(string systemId, DateOnly date)>();
+            var riderIds = request.Rows
+                .Select(r => r.RiderId.Trim())
+                .Where(r => r.Length > 0)
+                .Distinct()
+                .ToList();
+
+            var outRiders = await db.OutRiderInfos
+                .Where(r => riderIds.Contains(r.RiderId))
+                .ToDictionaryAsync(r => r.RiderId, cancellationToken);
+
+            var seenKeys = new HashSet<(int outRiderInfoId, DateOnly date)>();
             var now = DateTime.UtcNow.AddHours(3);
 
             foreach (var row in request.Rows)
             {
-                var validation = Validate(row.SystemId, row.PhoneNumber, row.AcceptedOrders, row.RejectedOrders, row.WorkingHours);
-                if (validation is not null)
+                if (string.IsNullOrWhiteSpace(row.RiderId))
                 {
-                    warnings.Add($"{row.SystemId}: {validation.Description}");
+                    warnings.Add("Missing rider ID. Row skipped.");
                     continue;
                 }
 
-                keysToDelete.Add((row.SystemId.Trim(), request.ShiftDate));
+                var validation = ValidateMetrics(row.AcceptedOrders, row.RejectedOrders, row.WorkingHours);
+                if (validation is not null)
+                {
+                    warnings.Add($"{row.RiderId}: {validation.Description}");
+                    continue;
+                }
+
+                var riderId = row.RiderId.Trim();
+                if (!outRiders.TryGetValue(riderId, out var outRiderInfo))
+                {
+                    warnings.Add($"{riderId}: rider ID does not exist in OutRiderInfo. Row skipped.");
+                    continue;
+                }
+
+                var key = (outRiderInfo.Id, request.ShiftDate);
+                if (!seenKeys.Add(key))
+                {
+                    warnings.Add($"{riderId}: duplicate rider/date in Excel file. Row skipped.");
+                    continue;
+                }
+
                 records.Add(new OutageShiftPerformance
                 {
-                    SystemId = row.SystemId.Trim(),
-                    PhoneNumber = row.PhoneNumber.Trim(),
+                    OutRiderInfoId = outRiderInfo.Id,
                     ShiftDate = request.ShiftDate,
                     AcceptedOrders = row.AcceptedOrders,
                     RejectedOrders = row.RejectedOrders,
@@ -81,17 +116,17 @@ public class OutageShiftPerformanceService(ApplicationDbcontext db) : IOutageShi
                 });
             }
 
-            if (keysToDelete.Count > 0)
+            if (seenKeys.Count > 0)
             {
-                var systemIds = keysToDelete.Select(k => k.systemId).Distinct().ToList();
-                var dates = keysToDelete.Select(k => k.date).Distinct().ToList();
+                var outRiderInfoIds = seenKeys.Select(k => k.outRiderInfoId).Distinct().ToList();
+                var dates = seenKeys.Select(k => k.date).Distinct().ToList();
 
                 var stale = await db.OutageShiftPerformances
-                    .Where(s => systemIds.Contains(s.SystemId) && dates.Contains(s.ShiftDate))
+                    .Where(s => outRiderInfoIds.Contains(s.OutRiderInfoId) && dates.Contains(s.ShiftDate))
                     .ToListAsync(cancellationToken);
 
                 db.OutageShiftPerformances.RemoveRange(
-                    stale.Where(s => keysToDelete.Contains((s.SystemId, s.ShiftDate))));
+                    stale.Where(s => seenKeys.Contains((s.OutRiderInfoId, s.ShiftDate))));
             }
 
             await db.OutageShiftPerformances.AddRangeAsync(records, cancellationToken);
@@ -118,6 +153,7 @@ public class OutageShiftPerformanceService(ApplicationDbcontext db) : IOutageShi
         try
         {
             var record = await db.OutageShiftPerformances
+                .Include(s => s.OutRiderInfo)
                 .AsNoTracking()
                 .FirstOrDefaultAsync(s => s.Id == id, cancellationToken);
 
@@ -135,21 +171,19 @@ public class OutageShiftPerformanceService(ApplicationDbcontext db) : IOutageShi
     }
 
     public async Task<Result<List<OutageShiftPerformanceResponse>>> GetAsync(
-        string? systemId,
-        string? phoneNumber,
+        string? riderId,
         DateOnly? from,
         DateOnly? to,
         CancellationToken cancellationToken = default)
     {
         try
         {
-            var query = db.OutageShiftPerformances.AsNoTracking();
+            var query = db.OutageShiftPerformances
+                .Include(s => s.OutRiderInfo)
+                .AsNoTracking();
 
-            if (!string.IsNullOrWhiteSpace(systemId))
-                query = query.Where(s => s.SystemId == systemId.Trim());
-
-            if (!string.IsNullOrWhiteSpace(phoneNumber))
-                query = query.Where(s => s.PhoneNumber == phoneNumber.Trim());
+            if (!string.IsNullOrWhiteSpace(riderId))
+                query = query.Where(s => s.OutRiderInfo.RiderId == riderId.Trim());
 
             if (from.HasValue)
                 query = query.Where(s => s.ShiftDate >= from.Value);
@@ -159,11 +193,11 @@ public class OutageShiftPerformanceService(ApplicationDbcontext db) : IOutageShi
 
             var rows = await query
                 .OrderByDescending(s => s.ShiftDate)
-                .ThenBy(s => s.SystemId)
+                .ThenBy(s => s.OutRiderInfo.RiderId)
                 .Select(s => new OutageShiftPerformanceResponse(
                     s.Id,
-                    s.SystemId,
-                    s.PhoneNumber,
+                    s.OutRiderInfoId,
+                    s.OutRiderInfo.RiderId,
                     s.ShiftDate,
                     s.AcceptedOrders,
                     s.RejectedOrders,
@@ -189,27 +223,45 @@ public class OutageShiftPerformanceService(ApplicationDbcontext db) : IOutageShi
         DateOnly shiftDate,
         CancellationToken cancellationToken = default)
     {
-        var validation = Validate(request.SystemId, request.PhoneNumber, request.AcceptedOrders, request.RejectedOrders, request.WorkingHours);
+        var validation = Validate(request.OutRiderInfoId, request.AcceptedOrders, request.RejectedOrders, request.WorkingHours);
         if (validation is not null)
             return Result.Failure<OutageShiftPerformanceResponse>(validation);
 
         try
         {
+            var outRiderInfo = await db.OutRiderInfos
+                .AsNoTracking()
+                .FirstOrDefaultAsync(r => r.Id == request.OutRiderInfoId, cancellationToken);
+
+            if (outRiderInfo is null)
+                return Result.Failure<OutageShiftPerformanceResponse>(OutRiderInfoNotFound());
+
             var record = await db.OutageShiftPerformances
+                .Include(s => s.OutRiderInfo)
                 .FirstOrDefaultAsync(s => s.Id == id, cancellationToken);
 
             if (record is null)
                 return Result.Failure<OutageShiftPerformanceResponse>(NotFound());
 
-            record.SystemId = request.SystemId.Trim();
-            record.PhoneNumber = request.PhoneNumber.Trim();
+            var duplicate = await db.OutageShiftPerformances
+                .AnyAsync(p => p.Id != id && p.OutRiderInfoId == request.OutRiderInfoId && p.ShiftDate == shiftDate, cancellationToken);
+
+            if (duplicate)
+            {
+                return Result.Failure<OutageShiftPerformanceResponse>(new Error(
+                    "OutageShiftPerformance.Duplicate",
+                    "Outage shift performance already exists for this rider and date.",
+                    409));
+            }
+
+            record.OutRiderInfoId = request.OutRiderInfoId;
             record.ShiftDate = shiftDate;
             record.AcceptedOrders = request.AcceptedOrders;
             record.RejectedOrders = request.RejectedOrders;
             record.WorkingHours = request.WorkingHours;
 
             await db.SaveChangesAsync(cancellationToken);
-            return Result.Success(Map(record));
+            return Result.Success(Map(record, outRiderInfo.RiderId));
         }
         catch (Exception ex)
         {
@@ -247,18 +299,22 @@ public class OutageShiftPerformanceService(ApplicationDbcontext db) : IOutageShi
     }
 
     private static Error? Validate(
-        string systemId,
-        string phoneNumber,
+        int outRiderInfoId,
         int acceptedOrders,
         int rejectedOrders,
         float workingHours)
     {
-        if (string.IsNullOrWhiteSpace(systemId))
-            return new Error("OutageShiftPerformance.SystemIdRequired", "System ID is required.", 400);
+        if (outRiderInfoId <= 0)
+            return new Error("OutageShiftPerformance.OutRiderInfoRequired", "Out rider info ID is required.", 400);
 
-        if (string.IsNullOrWhiteSpace(phoneNumber))
-            return new Error("OutageShiftPerformance.PhoneNumberRequired", "Phone number is required.", 400);
+        return ValidateMetrics(acceptedOrders, rejectedOrders, workingHours);
+    }
 
+    private static Error? ValidateMetrics(
+        int acceptedOrders,
+        int rejectedOrders,
+        float workingHours)
+    {
         if (acceptedOrders < 0)
             return new Error("OutageShiftPerformance.InvalidAcceptedOrders", "Accepted orders must be >= 0.", 400);
 
@@ -271,14 +327,29 @@ public class OutageShiftPerformanceService(ApplicationDbcontext db) : IOutageShi
         return null;
     }
 
+    private static Error OutRiderInfoNotFound() =>
+        new("OutageShiftPerformance.OutRiderInfoNotFound", "Out rider info record was not found.", 404);
+
     private static Error NotFound() =>
         new("OutageShiftPerformance.NotFound", "Outage shift performance record was not found.", 404);
 
     private static OutageShiftPerformanceResponse Map(OutageShiftPerformance s) =>
         new(
             s.Id,
-            s.SystemId,
-            s.PhoneNumber,
+            s.OutRiderInfoId,
+            s.OutRiderInfo.RiderId,
+            s.ShiftDate,
+            s.AcceptedOrders,
+            s.RejectedOrders,
+            s.WorkingHours,
+            s.UploadedAt,
+            s.UploadedBy);
+
+    private static OutageShiftPerformanceResponse Map(OutageShiftPerformance s, string riderId) =>
+        new(
+            s.Id,
+            s.OutRiderInfoId,
+            riderId,
             s.ShiftDate,
             s.AcceptedOrders,
             s.RejectedOrders,

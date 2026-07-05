@@ -10,20 +10,16 @@ public class OutageShiftPerformanceConfigration : IEntityTypeConfiguration<Outag
     {
         builder.HasKey(s => s.Id);
 
-        builder.Property(s => s.SystemId)
-            .IsRequired()
-            .HasMaxLength(50);
-
-        builder.Property(s => s.PhoneNumber)
-            .IsRequired()
-            .HasMaxLength(30);
-
         builder.Property(s => s.UploadedBy)
             .HasMaxLength(100);
 
-        builder.HasIndex(s => s.SystemId);
-        builder.HasIndex(s => s.PhoneNumber);
+        builder.HasOne(s => s.OutRiderInfo)
+            .WithMany(r => r.OutageShiftPerformances)
+            .HasForeignKey(s => s.OutRiderInfoId);
+
+        builder.HasIndex(s => s.OutRiderInfoId);
         builder.HasIndex(s => s.ShiftDate);
-        builder.HasIndex(s => new { s.SystemId, s.ShiftDate });
+        builder.HasIndex(s => new { s.OutRiderInfoId, s.ShiftDate })
+            .IsUnique();
     }
 }

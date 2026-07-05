@@ -5,13 +5,6 @@ namespace Application.Service.OutageShiftPerformances;
 
 public static class OutageShiftPerformanceExcelParser
 {
-    private const int PhoneNumberCol = 1;
-    private const int SystemIdCol = 2;
-    private const int AcceptedOrdersCol = 3;
-    private const int RejectedOrdersCol = 4;
-    private const int WorkingHoursCol = 5;
-    private const int HeaderRow = 1;
-
     public static (ImportOutageShiftPerformanceRequest Request, List<string> Warnings)
         Parse(Stream excelStream, DateOnly shiftDate)
     {
@@ -19,51 +12,57 @@ public static class OutageShiftPerformanceExcelParser
         var sheet = workbook.Worksheet(1)
             ?? throw new InvalidOperationException("The Excel file has no worksheets.");
 
+        var mapping = FindColumnIndices(sheet);
+        if (!mapping.IsValid)
+            throw new InvalidOperationException(mapping.ErrorMessage);
+
         var rows = new List<ImportOutageShiftPerformanceRow>();
         var warnings = new List<string>();
-        var lastRow = sheet.LastRowUsed()?.RowNumber() ?? HeaderRow;
+        var rowNumber = 1;
 
-        for (var row = HeaderRow + 1; row <= lastRow; row++)
+        foreach (var row in sheet.RowsUsed().Skip(1))
         {
-            var phoneNumber = sheet.Cell(row, PhoneNumberCol).GetString().Trim();
-            var systemId = sheet.Cell(row, SystemIdCol).GetString().Trim();
+            rowNumber++;
 
-            if (string.IsNullOrWhiteSpace(phoneNumber) && string.IsNullOrWhiteSpace(systemId))
-                continue;
-
-            if (string.IsNullOrWhiteSpace(systemId))
+            var riderId = row.Cell(mapping.RiderIdColumn).Value.ToString()?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(riderId))
             {
-                warnings.Add($"Row {row}: missing system ID. Row skipped.");
+                warnings.Add($"Row {rowNumber}: missing rider ID. Row skipped.");
                 continue;
             }
 
-            if (string.IsNullOrWhiteSpace(phoneNumber))
+            if (!TryGetInt(row.Cell(mapping.AcceptedOrdersColumn), out var acceptedOrders) || acceptedOrders < 0)
             {
-                warnings.Add($"Row {row}: missing phone number for system ID '{systemId}'. Row skipped.");
+                warnings.Add($"Row {rowNumber}: invalid accepted orders for rider ID '{riderId}'. Row skipped.");
                 continue;
             }
 
-            if (!TryGetInt(sheet.Cell(row, AcceptedOrdersCol), out var acceptedOrders) || acceptedOrders < 0)
+            if (!TryGetInt(row.Cell(mapping.RejectedOrdersColumn), out var rejectedOrders) || rejectedOrders < 0)
             {
-                warnings.Add($"Row {row}: invalid accepted orders for system ID '{systemId}'. Row skipped.");
+                warnings.Add($"Row {rowNumber}: invalid rejected orders for rider ID '{riderId}'. Row skipped.");
                 continue;
             }
 
-            if (!TryGetInt(sheet.Cell(row, RejectedOrdersCol), out var rejectedOrders) || rejectedOrders < 0)
+            if (!TryGetInt(row.Cell(mapping.StackedDeliveriesColumn), out var stackedDeliveries) || stackedDeliveries < 0)
             {
-                warnings.Add($"Row {row}: invalid rejected orders for system ID '{systemId}'. Row skipped.");
+                warnings.Add($"Row {rowNumber}: invalid stacked deliveries for rider ID '{riderId}'. Row skipped.");
                 continue;
             }
 
-            if (!TryGetFloat(sheet.Cell(row, WorkingHoursCol), out var workingHours) || workingHours < 0 || workingHours > 24)
+            if (!TryGetFloat(row.Cell(mapping.WorkingHoursColumn), out var workingHours) || workingHours < 0 || workingHours > 24)
             {
-                warnings.Add($"Row {row}: invalid working hours for system ID '{systemId}'. Row skipped.");
+                warnings.Add($"Row {rowNumber}: invalid working hours for rider ID '{riderId}'. Row skipped.");
+                continue;
+            }
+
+            if (acceptedOrders == 0 && rejectedOrders == 0 && stackedDeliveries == 0 && workingHours <= 1)
+            {
+                warnings.Add($"Row {rowNumber}: accepted orders, rejected orders, and stacked deliveries are all zero. Row skipped.");
                 continue;
             }
 
             rows.Add(new ImportOutageShiftPerformanceRow(
-                systemId,
-                phoneNumber,
+                riderId,
                 acceptedOrders,
                 rejectedOrders,
                 workingHours));
@@ -72,9 +71,99 @@ public static class OutageShiftPerformanceExcelParser
         return (new ImportOutageShiftPerformanceRequest(rows, shiftDate), warnings);
     }
 
+    private static OutageShiftColumnMapping FindColumnIndices(IXLWorksheet worksheet)
+    {
+        var headerRow = worksheet.FirstRowUsed();
+        if (headerRow is null)
+        {
+            return new OutageShiftColumnMapping
+            {
+                IsValid = false,
+                ErrorMessage = "Excel file is empty or has no header row."
+            };
+        }
+
+        var headerCells = headerRow.CellsUsed().ToList();
+        var mapping = new OutageShiftColumnMapping
+        {
+            RiderIdColumn = FindColumn(headerCells, ShiftImportColumns.RiderIdColumns),
+            AcceptedOrdersColumn = FindColumn(headerCells, ShiftImportColumns.AcceptedOrdersColumns),
+            RejectedOrdersColumn = FindColumn(headerCells, ShiftImportColumns.RejectedOrdersColumns),
+            StackedDeliveriesColumn = FindColumn(headerCells, ShiftImportColumns.StackedDeliveriesColumns),
+            WorkingHoursColumn = FindColumn(headerCells, ShiftImportColumns.WorkingHoursColumns)
+        };
+
+        var missingColumns = new List<string>();
+
+        if (mapping.RiderIdColumn == 0)
+            missingColumns.Add($"RiderId (tried: {string.Join(", ", ShiftImportColumns.RiderIdColumns)})");
+        if (mapping.AcceptedOrdersColumn == 0)
+            missingColumns.Add($"AcceptedOrders (tried: {string.Join(", ", ShiftImportColumns.AcceptedOrdersColumns)})");
+        if (mapping.RejectedOrdersColumn == 0)
+            missingColumns.Add($"RejectedOrders (tried: {string.Join(", ", ShiftImportColumns.RejectedOrdersColumns)})");
+        if (mapping.StackedDeliveriesColumn == 0)
+            missingColumns.Add($"StackedDeliveries (tried: {string.Join(", ", ShiftImportColumns.StackedDeliveriesColumns)})");
+        if (mapping.WorkingHoursColumn == 0)
+            missingColumns.Add($"WorkingHours (tried: {string.Join(", ", ShiftImportColumns.WorkingHoursColumns)})");
+
+        if (missingColumns.Count > 0)
+        {
+            mapping.IsValid = false;
+            mapping.ErrorMessage = $"Missing required columns: {string.Join(", ", missingColumns)}";
+            return mapping;
+        }
+
+        mapping.IsValid = true;
+        return mapping;
+    }
+
+    private static int FindColumn(List<IXLCell> headerCells, string[] possibleNames)
+    {
+        foreach (var cell in headerCells)
+        {
+            var headerValue = cell.Value.ToString().Trim();
+            foreach (var possibleName in possibleNames)
+            {
+                if (headerValue.Equals(possibleName, StringComparison.OrdinalIgnoreCase))
+                    return cell.Address.ColumnNumber;
+            }
+        }
+
+        return 0;
+    }
+
     private static bool TryGetInt(IXLCell cell, out int value)
         => int.TryParse(cell.Value.ToString()?.Trim(), out value);
 
     private static bool TryGetFloat(IXLCell cell, out float value)
         => float.TryParse(cell.Value.ToString()?.Trim(), out value);
+
+    private class OutageShiftColumnMapping
+    {
+        public bool IsValid { get; set; }
+        public string? ErrorMessage { get; set; }
+        public int RiderIdColumn { get; set; }
+        public int AcceptedOrdersColumn { get; set; }
+        public int RejectedOrdersColumn { get; set; }
+        public int StackedDeliveriesColumn { get; set; }
+        public int WorkingHoursColumn { get; set; }
+    }
+
+    private static class ShiftImportColumns
+    {
+        public static readonly string[] RiderIdColumns =
+            { "Rider Id", "Working_ID", "معرّف السائق", "ID", "RiderID", "Rider_ID", "EmployeeID" };
+
+        public static readonly string[] AcceptedOrdersColumns =
+            { "Completed Deliveries", "Accepted_Orders", "Accepted Orders", "المهام التي تم تسليمها", "AcceptedDaily", "Accepted_Daily" };
+
+        public static readonly string[] RejectedOrdersColumns =
+            { "Declined Deliveries", "Rejected_Orders", "المهام المرفوضة", "Rejected", "RejectedDaily", "Rejected_Daily" };
+
+        public static readonly string[] StackedDeliveriesColumns =
+            { "Stacked Deliveries", "Stacked_Deliveries", "StackedDeliveries" };
+
+        public static readonly string[] WorkingHoursColumns =
+            { "Actual Working Hours", "Working_Hours", "Working Hours", "وقت اتصال السائقين عبر تطبيق السائق.", "وقت اتصال السائقين عبر تطبيق السائق", "Total_Hours" };
+    }
 }

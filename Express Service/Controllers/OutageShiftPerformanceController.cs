@@ -90,13 +90,12 @@ public class OutageShiftPerformanceController(IOutageShiftPerformanceService ser
 
     [HttpGet]
     public async Task<IActionResult> Get(
-        [FromQuery] string? systemId,
-        [FromQuery] string? phoneNumber,
+        [FromQuery] string? riderId,
         [FromQuery] DateOnly? from,
         [FromQuery] DateOnly? to,
         CancellationToken cancellationToken)
     {
-        var result = await service.GetAsync(systemId, phoneNumber, from, to, cancellationToken);
+        var result = await service.GetAsync(riderId, from, to, cancellationToken);
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
 

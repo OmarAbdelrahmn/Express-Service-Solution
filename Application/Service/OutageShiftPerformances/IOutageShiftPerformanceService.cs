@@ -21,8 +21,7 @@ public interface IOutageShiftPerformanceService
         CancellationToken cancellationToken = default);
 
     Task<Result<List<OutageShiftPerformanceResponse>>> GetAsync(
-        string? systemId,
-        string? phoneNumber,
+        string? riderId,
         DateOnly? from,
         DateOnly? to,
         CancellationToken cancellationToken = default);

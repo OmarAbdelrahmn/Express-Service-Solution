@@ -55,6 +55,7 @@ public class ApplicationDbcontext(DbContextOptions<ApplicationDbcontext> options
     public DbSet<EmployeeOrder> EmployeeOrders{ get; set; }
 
     public DbSet<TransporterShift> TransporterShifts { get; set; }
+    public DbSet<OutRiderInfo> OutRiderInfos { get; set; }
     public DbSet<OutageShiftPerformance> OutageShiftPerformances { get; set; }
     public DbSet<MaintenanceInterval> MaintenanceIntervals { get; set; }
     public DbSet<KeetaDriverShift> KeetaDriverShifts { get; set; }
