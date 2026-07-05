@@ -7,6 +7,7 @@ public interface ISystemIdPhoneStatusService
 {
     Task<Result<SystemIdPhoneStatusResponse>> CreateAsync(
         CreateSystemIdPhoneStatusRequest request,
+        DateOnly statusDate,
         string createdBy,
         CancellationToken cancellationToken = default);
 
@@ -29,6 +30,7 @@ public interface ISystemIdPhoneStatusService
     Task<Result<SystemIdPhoneStatusResponse>> UpdateAsync(
         int id,
         UpdateSystemIdPhoneStatusRequest request,
+        DateOnly statusDate,
         CancellationToken cancellationToken = default);
 
     Task<Result> DeleteAsync(

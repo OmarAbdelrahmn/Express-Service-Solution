@@ -1,5 +1,4 @@
 using Application.Contracts.SystemIdPhoneStatuses;
-using Application.Service.TransporterShifts;
 using ClosedXML.Excel;
 
 namespace Application.Service.SystemIdPhoneStatuses;
@@ -8,23 +7,18 @@ public static class SystemIdPhoneStatusExcelParser
 {
     private const int PhoneNumberCol = 1;
     private const int SystemIdCol = 2;
-    private const int FirstDateCol = 3;
+    private const int StatusCol = 3;
     private const int HeaderRow = 1;
 
     public static (ImportSystemIdPhoneStatusRequest Request, List<string> Warnings)
-        Parse(Stream excelStream, int? overrideYear = null)
+        Parse(Stream excelStream, DateOnly statusDate)
     {
         using var workbook = new XLWorkbook(excelStream);
         var sheet = workbook.Worksheet(1)
             ?? throw new InvalidOperationException("The Excel file has no worksheets.");
 
-        var dateColumns = BuildDateColumnMap(sheet, overrideYear, out var headerWarnings);
-        if (dateColumns.Count == 0)
-            throw new InvalidOperationException(
-                "No valid date column headers found. Expected format: \"Sun, 03/May\" starting at column C.");
-
         var cells = new List<ImportSystemIdPhoneStatusCell>();
-        var warnings = new List<string>(headerWarnings);
+        var warnings = new List<string>();
         var lastRow = sheet.LastRowUsed()?.RowNumber() ?? HeaderRow;
 
         for (var row = HeaderRow + 1; row <= lastRow; row++)
@@ -47,44 +41,13 @@ public static class SystemIdPhoneStatusExcelParser
                 continue;
             }
 
-            foreach (var (colIndex, columnHeader) in dateColumns)
-            {
-                cells.Add(new ImportSystemIdPhoneStatusCell(
-                    SystemId: systemId,
-                    PhoneNumber: phoneNumber,
-                    ColumnHeader: columnHeader,
-                    CellContent: ReadCellText(sheet.Cell(row, colIndex))));
-            }
+            cells.Add(new ImportSystemIdPhoneStatusCell(
+                SystemId: systemId,
+                PhoneNumber: phoneNumber,
+                Status: ReadCellText(sheet.Cell(row, StatusCol))));
         }
 
-        return (new ImportSystemIdPhoneStatusRequest(cells, overrideYear), warnings);
-    }
-
-    private static Dictionary<int, string> BuildDateColumnMap(
-        IXLWorksheet sheet,
-        int? overrideYear,
-        out List<string> warnings)
-    {
-        warnings = [];
-        var map = new Dictionary<int, string>();
-        var lastCol = sheet.LastColumnUsed()?.ColumnNumber() ?? FirstDateCol - 1;
-
-        for (var col = FirstDateCol; col <= lastCol; col++)
-        {
-            var header = sheet.Cell(HeaderRow, col).GetString().Trim();
-            if (string.IsNullOrWhiteSpace(header))
-                continue;
-
-            if (ScheduleHeaderParser.Parse(header, overrideYear) is null)
-            {
-                warnings.Add($"Column {col} header \"{header}\" could not be parsed as a date - column skipped.");
-                continue;
-            }
-
-            map[col] = header;
-        }
-
-        return map;
+        return (new ImportSystemIdPhoneStatusRequest(cells, statusDate), warnings);
     }
 
     private static string? ReadCellText(IXLCell cell)
