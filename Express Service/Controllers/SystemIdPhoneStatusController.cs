@@ -14,10 +14,14 @@ public class SystemIdPhoneStatusController(ISystemIdPhoneStatusService service) 
 
     [HttpPost]
     public async Task<IActionResult> Create(
+        [FromQuery] DateOnly statusDate,
         [FromBody] CreateSystemIdPhoneStatusRequest request,
         CancellationToken cancellationToken)
     {
-        var result = await service.CreateAsync(request, Actor, cancellationToken);
+        if (statusDate == default)
+            return BadRequest(new { error = "statusDate query string is required." });
+
+        var result = await service.CreateAsync(request, statusDate, Actor, cancellationToken);
         return result.IsSuccess
             ? CreatedAtAction(nameof(GetById), new { id = result.Value.Id }, result.Value)
             : result.ToProblem();
@@ -27,9 +31,12 @@ public class SystemIdPhoneStatusController(ISystemIdPhoneStatusService service) 
     [RequestSizeLimit(10 * 1024 * 1024)]
     public async Task<IActionResult> Upload(
         IFormFile file,
-        [FromQuery] int? overrideYear = null,
+        [FromQuery] DateOnly statusDate,
         CancellationToken cancellationToken = default)
     {
+        if (statusDate == default)
+            return BadRequest(new { error = "statusDate query string is required." });
+
         if (file is null || file.Length == 0)
             return BadRequest(new { error = "No file uploaded." });
 
@@ -43,7 +50,7 @@ public class SystemIdPhoneStatusController(ISystemIdPhoneStatusService service) 
         try
         {
             await using var stream = file.OpenReadStream();
-            (importRequest, parserWarnings) = SystemIdPhoneStatusExcelParser.Parse(stream, overrideYear);
+            (importRequest, parserWarnings) = SystemIdPhoneStatusExcelParser.Parse(stream, statusDate);
         }
         catch (InvalidOperationException ex)
         {
@@ -97,10 +104,14 @@ public class SystemIdPhoneStatusController(ISystemIdPhoneStatusService service) 
     [HttpPut("{id:int}")]
     public async Task<IActionResult> Update(
         int id,
+        [FromQuery] DateOnly statusDate,
         [FromBody] UpdateSystemIdPhoneStatusRequest request,
         CancellationToken cancellationToken)
     {
-        var result = await service.UpdateAsync(id, request, cancellationToken);
+        if (statusDate == default)
+            return BadRequest(new { error = "statusDate query string is required." });
+
+        var result = await service.UpdateAsync(id, request, statusDate, cancellationToken);
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
 

@@ -1,6 +1,5 @@
 using Application.Abstraction;
 using Application.Contracts.SystemIdPhoneStatuses;
-using Application.Service.TransporterShifts;
 using Domain;
 using Domain.Entities;
 using Microsoft.EntityFrameworkCore;
@@ -11,6 +10,7 @@ public class SystemIdPhoneStatusService(ApplicationDbcontext db) : ISystemIdPhon
 {
     public async Task<Result<SystemIdPhoneStatusResponse>> CreateAsync(
         CreateSystemIdPhoneStatusRequest request,
+        DateOnly statusDate,
         string createdBy,
         CancellationToken cancellationToken = default)
     {
@@ -24,7 +24,7 @@ public class SystemIdPhoneStatusService(ApplicationDbcontext db) : ISystemIdPhon
             {
                 SystemId = request.SystemId.Trim(),
                 PhoneNumber = request.PhoneNumber.Trim(),
-                StatusDate = request.StatusDate,
+                StatusDate = statusDate,
                 Status = NormalizeStatus(request.Status),
                 RawStatus = request.Status?.Trim(),
                 UploadedAt = DateTime.UtcNow.AddHours(3),
@@ -72,28 +72,21 @@ public class SystemIdPhoneStatusService(ApplicationDbcontext db) : ISystemIdPhon
                     continue;
                 }
 
-                var date = ScheduleHeaderParser.Parse(cell.ColumnHeader, request.OverrideYear);
-                if (date is null)
-                {
-                    warnings.Add($"Could not parse column header '{cell.ColumnHeader}' for system ID {cell.SystemId}.");
-                    continue;
-                }
-
-                if (string.IsNullOrWhiteSpace(cell.CellContent))
+                if (string.IsNullOrWhiteSpace(cell.Status))
                 {
                     blankCellsSkipped++;
-                    keysToDelete.Add((cell.SystemId.Trim(), date.Value));
+                    keysToDelete.Add((cell.SystemId.Trim(), request.StatusDate));
                     continue;
                 }
 
-                keysToDelete.Add((cell.SystemId.Trim(), date.Value));
+                keysToDelete.Add((cell.SystemId.Trim(), request.StatusDate));
                 records.Add(new SystemIdPhoneStatus
                 {
                     SystemId = cell.SystemId.Trim(),
                     PhoneNumber = cell.PhoneNumber.Trim(),
-                    StatusDate = date.Value,
-                    Status = NormalizeStatus(cell.CellContent),
-                    RawStatus = cell.CellContent.Trim(),
+                    StatusDate = request.StatusDate,
+                    Status = NormalizeStatus(cell.Status),
+                    RawStatus = cell.Status.Trim(),
                     UploadedAt = now,
                     UploadedBy = importedBy
                 });
@@ -204,6 +197,7 @@ public class SystemIdPhoneStatusService(ApplicationDbcontext db) : ISystemIdPhon
     public async Task<Result<SystemIdPhoneStatusResponse>> UpdateAsync(
         int id,
         UpdateSystemIdPhoneStatusRequest request,
+        DateOnly statusDate,
         CancellationToken cancellationToken = default)
     {
         var validation = Validate(request.SystemId, request.PhoneNumber);
@@ -220,7 +214,7 @@ public class SystemIdPhoneStatusService(ApplicationDbcontext db) : ISystemIdPhon
 
             record.SystemId = request.SystemId.Trim();
             record.PhoneNumber = request.PhoneNumber.Trim();
-            record.StatusDate = request.StatusDate;
+            record.StatusDate = statusDate;
             record.Status = NormalizeStatus(request.Status);
             record.RawStatus = request.Status?.Trim();
 

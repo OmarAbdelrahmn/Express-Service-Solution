@@ -3,13 +3,12 @@ namespace Application.Contracts.SystemIdPhoneStatuses;
 public record ImportSystemIdPhoneStatusCell(
     string SystemId,
     string PhoneNumber,
-    string ColumnHeader,
-    string? CellContent
+    string? Status
 );
 
 public record ImportSystemIdPhoneStatusRequest(
     List<ImportSystemIdPhoneStatusCell> Cells,
-    int? OverrideYear = null
+    DateOnly StatusDate
 );
 
 public record SystemIdPhoneStatusImportResponse(
@@ -22,14 +21,12 @@ public record SystemIdPhoneStatusImportResponse(
 public record CreateSystemIdPhoneStatusRequest(
     string SystemId,
     string PhoneNumber,
-    DateOnly StatusDate,
     string? Status
 );
 
 public record UpdateSystemIdPhoneStatusRequest(
     string SystemId,
     string PhoneNumber,
-    DateOnly StatusDate,
     string? Status
 );
 
