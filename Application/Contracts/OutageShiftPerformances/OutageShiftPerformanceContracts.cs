@@ -1,8 +1,7 @@
 namespace Application.Contracts.OutageShiftPerformances;
 
 public record ImportOutageShiftPerformanceRow(
-    string SystemId,
-    string PhoneNumber,
+    string RiderId,
     int AcceptedOrders,
     int RejectedOrders,
     float WorkingHours
@@ -20,16 +19,14 @@ public record OutageShiftPerformanceImportResponse(
 );
 
 public record CreateOutageShiftPerformanceRequest(
-    string SystemId,
-    string PhoneNumber,
+    int OutRiderInfoId,
     int AcceptedOrders,
     int RejectedOrders,
     float WorkingHours
 );
 
 public record UpdateOutageShiftPerformanceRequest(
-    string SystemId,
-    string PhoneNumber,
+    int OutRiderInfoId,
     int AcceptedOrders,
     int RejectedOrders,
     float WorkingHours
@@ -37,8 +34,8 @@ public record UpdateOutageShiftPerformanceRequest(
 
 public record OutageShiftPerformanceResponse(
     int Id,
-    string SystemId,
-    string PhoneNumber,
+    int OutRiderInfoId,
+    string RiderId,
     DateOnly ShiftDate,
     int AcceptedOrders,
     int RejectedOrders,

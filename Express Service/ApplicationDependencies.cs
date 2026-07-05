@@ -23,6 +23,7 @@ using Application.Service.KetaValidation;
 using Application.Service.Member;
 using Application.Service.MonthlyValidity;
 using Application.Service.Orders;
+using Application.Service.OutRiderInfos;
 using Application.Service.Petrol;
 using Application.Service.Reminder;
 using Application.Service.Reports;
@@ -99,6 +100,7 @@ public static class ApplicationDependencies
         Services.AddScoped<IEmailWarmupJob, EmailWarmupJob>();
         Services.AddScoped<IOrderService, OrderService>();
         Services.AddScoped<ITransporterShiftService, TransporterShiftService>();
+        Services.AddScoped<IOutRiderInfoService, OutRiderInfoService>();
         Services.AddScoped<IOutageShiftPerformanceService, OutageShiftPerformanceService>();
         Services.AddScoped<ICostTrackingService, CostTrackingService>();
         Services.AddMemoryCache();
