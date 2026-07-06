@@ -245,6 +245,51 @@ public interface IReportService
               DateOnly startDate,
       DateOnly endDate,
         CancellationToken cancellationToken = default);
+
+    Task<Result<RidersBelowMonthlyTargetReport>> GetRidersBelowMonthlyTargetAsync(
+        int? year = null,
+        int? month = null,
+        CancellationToken cancellationToken = default);
+
+    public record RidersBelowMonthlyTargetReport(
+        int Year,
+        int Month,
+        DateOnly StartDate,
+        DateOnly EndDate,
+        bool IsCurrentMonth,
+        int DaysInMonth,
+        int ElapsedDays,
+        List<CompanyMonthlyTargetSummary> CompanyTargets,
+        int TotalRidersWorked,
+        int TotalRidersBelowTarget,
+        List<RiderBelowMonthlyTargetDetail> Riders
+    );
+
+    public record CompanyMonthlyTargetSummary(
+        int CompanyId,
+        string CompanyName,
+        int MonthlyTarget,
+        int TargetToDate
+    );
+
+    public record RiderBelowMonthlyTargetDetail(
+        int RiderId,
+        long IqamaNo,
+        string RiderNameAR,
+        string RiderNameEN,
+        string WorkingId,
+        int CompanyId,
+        string CompanyName,
+        string HousingName,
+        int MonthlyTarget,
+        int TargetToDate,
+        int TotalAcceptedOrders,
+        int RemainingToTargetToDate,
+        int RemainingToMonthlyTarget,
+        int TotalShifts,
+        decimal AverageOrdersPerShift
+    );
+
     Task<Result<Company2DailySummaryReport>> GetCompany2DailySummaryAsync(
     DateOnly reportDate,
     CancellationToken cancellationToken = default);
