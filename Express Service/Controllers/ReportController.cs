@@ -175,6 +175,23 @@ public class ReportController(IReportService service) : ControllerBase
             : result.ToProblem();
     }
 
+    [HttpGet("riders/below-monthly-target")]
+    //[Authorize(Roles = "Master,Admin")]
+    public async Task<IActionResult> GetRidersBelowMonthlyTarget(
+        [FromQuery] int? year = null,
+        [FromQuery] int? month = null,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await service.GetRidersBelowMonthlyTargetAsync(
+            year,
+            month,
+            cancellationToken);
+
+        return result.IsSuccess
+            ? Ok(result.Value)
+            : result.ToProblem();
+    }
+
     [HttpGet("keta/daily-summary")]
     //[Authorize(Roles = "Master,Admin")]
     public async Task<IActionResult> GetCompany2DailySummary(
