@@ -144,6 +144,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext, IRiderWorkingIdHi
             totalRecords = rows.Count();
 
             var shiftsToAdd = new List<RiderShift>();
+            var outRiderWorkingIds = await GetOutRiderWorkingIdsAsync(cancellationToken);
             var rowNumber = 1;
 
             foreach (var row in rows)
@@ -158,6 +159,12 @@ public class RiderShiftService(ApplicationDbcontext dbcontext, IRiderWorkingIdHi
                         errors.Add(new ImportError(rowNumber, shiftData.WorkingId ?? "N/A", shiftData.ErrorMessage!));
                         continue;
                     }
+
+                    if (outRiderWorkingIds.Contains(shiftData.WorkingId!))
+                    {
+                        continue;
+                    }
+
                     var (riderId, originalWorkingId, isSubstitution) = await GetActualRiderAsync(
                            shiftData.WorkingId!,
                            cancellationToken
@@ -397,6 +404,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext, IRiderWorkingIdHi
             var rows = worksheet.RowsUsed().Skip(1);
             var rowNumber = 1;
             var tempComparisons = new List<TempRiderShiftComparison>();
+            var outRiderWorkingIds = await GetOutRiderWorkingIdsAsync(cancellationToken);
 
             foreach (var row in rows)
             {
@@ -411,6 +419,11 @@ public class RiderShiftService(ApplicationDbcontext dbcontext, IRiderWorkingIdHi
                             rowNumber,
                             shiftData.WorkingId?.ToString() ?? "N/A",
                             shiftData.ErrorMessage!));
+                        continue;
+                    }
+
+                    if (outRiderWorkingIds.Contains(shiftData.WorkingId!))
+                    {
                         continue;
                     }
 
@@ -1060,6 +1073,19 @@ public class RiderShiftService(ApplicationDbcontext dbcontext, IRiderWorkingIdHi
             }
         }
         return 0;
+    }
+
+    private async Task<HashSet<string>> GetOutRiderWorkingIdsAsync(CancellationToken cancellationToken)
+    {
+        var outRiderIds = await dbcontext.OutRiderInfos
+            .AsNoTracking()
+            .Select(r => r.RiderId)
+            .ToListAsync(cancellationToken);
+
+        return outRiderIds
+            .Where(riderId => !string.IsNullOrWhiteSpace(riderId))
+            .Select(riderId => riderId.Trim())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
     }
 
 
