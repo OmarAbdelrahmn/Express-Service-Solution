@@ -1922,7 +1922,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
         int? month = null,
         CancellationToken cancellationToken = default)
     {
-        var today = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3));
+        var today = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3).AddDays(-1));
         var reportYear = year ?? today.Year;
         var reportMonth = month ?? today.Month;
 
