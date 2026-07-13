@@ -19,6 +19,7 @@ using Application.Service.HousingInventory;
 using Application.Service.Hungerdisa;
 using Application.Service.HungerReports;
 using Application.Service.Import;
+using Application.Service.InventoryAudit;
 using Application.Service.KetaValidation;
 using Application.Service.Member;
 using Application.Service.MonthlyValidity;
@@ -83,6 +84,7 @@ public static class ApplicationDependencies
         Services.AddSingleton<IBackgroundImportService, BackgroundImportService>();
         Services.AddScoped<ISparePartService, SparePartService>();
         Services.AddScoped<IRiderAccessoryService, RiderAccessoryService>();
+        Services.AddScoped<IInventoryAuditService, InventoryAuditService>();
         Services.AddScoped<ITransferService, TransferService>();
         Services.AddScoped<IBillService, BillService>();
         Services.AddScoped<ISupplierService, SupplierService>();

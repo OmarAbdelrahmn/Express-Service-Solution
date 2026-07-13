@@ -5,6 +5,7 @@ using Domain.Entities.Spare;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using static Application.Service.HousingInventory.IHousingInventorySyncService;
+using InventoryItemType = Application.Service.HousingInventory.IHousingInventorySyncService.InventoryItemType;
 
 namespace Application.Service.HousingInventory;
 

@@ -1,4 +1,5 @@
 ﻿using Application.Abstraction;
+using Application.Contracts.InventoryAudit;
 using Application.Contracts.RiderAccessoryCon;
 using Application.Contracts.SparePartCo;
 using Application.Contracts.SupplierCon;
@@ -14,6 +15,16 @@ public interface IMemberService
     /// Get all spare-part and accessory usage records whose location is this housing
     /// </summary>
     Task<Result<HousingUsageHistoryResponse>> GetHousingUsageHistoryAsync(
+        long managerIqamaNo,
+        DateTime? fromDate = null,
+        DateTime? toDate = null);
+
+    /// <summary>
+    /// Get every manual spare-part / rider-accessory change (quantity, price,
+    /// location, etc.) made at this housing — who did it, when, and the
+    /// before/after values — regardless of who performed the edit.
+    /// </summary>
+    Task<Result<IEnumerable<InventoryAuditLogResponse>>> GetHousingInventoryAuditLogAsync(
         long managerIqamaNo,
         DateTime? fromDate = null,
         DateTime? toDate = null);

@@ -1,5 +1,6 @@
 ﻿using Application.Abstraction;
 using Application.Contracts.RiderAccessoryCon;
+using Application.Service.InventoryAudit;
 using Domain;
 using Domain.Entities.Spare;
 using Microsoft.EntityFrameworkCore;
@@ -178,7 +179,7 @@ public class RiderAccessoryService(ApplicationDbcontext dbcontext) : IRiderAcces
         return Result.Success(MapToResponse(accessory));
     }
 
-    public async Task<Result<RiderAccessoryResponse>> CreateAsync(RiderAccessoryRequest request)
+    public async Task<Result<RiderAccessoryResponse>> CreateAsync(RiderAccessoryRequest request, string performedBy)
     {
         var accessory = new Domain.Entities.Spare.RiderAccessory
         {
@@ -192,10 +193,14 @@ public class RiderAccessoryService(ApplicationDbcontext dbcontext) : IRiderAcces
         await _dbcontext.RiderAccessories.AddAsync(accessory);
         await _dbcontext.SaveChangesAsync();
 
+        // Log the manual creation now that the entity has its Id.
+        InventoryAuditLogger.LogAccessoryCreate(_dbcontext, accessory, performedBy);
+        await _dbcontext.SaveChangesAsync();
+
         return Result.Success(MapToResponse(accessory));
     }
 
-    public async Task<Result<RiderAccessoryResponse>> UpdateAsync(int id, RiderAccessoryRequest request)
+    public async Task<Result<RiderAccessoryResponse>> UpdateAsync(int id, RiderAccessoryRequest request, string performedBy)
     {
         var accessory = await _dbcontext.RiderAccessories.FindAsync(id);
 
@@ -203,23 +208,30 @@ public class RiderAccessoryService(ApplicationDbcontext dbcontext) : IRiderAcces
             return Result.Failure<RiderAccessoryResponse>(
                 new Error("NotFound", "Accessory not found", 404));
 
+        // Snapshot values before they're overwritten so we can log a before/after diff.
+        var before = RiderAccessorySnapshot.From(accessory);
+
         accessory.Name = request.Name;
         accessory.Quantity = request.Quantity;
         accessory.Price = request.Price;
         accessory.Location = request.Location;
+
+        InventoryAuditLogger.LogAccessoryUpdate(_dbcontext, before, accessory, performedBy);
 
         await _dbcontext.SaveChangesAsync();
 
         return Result.Success(MapToResponse(accessory));
     }
 
-    public async Task<Result> DeleteAsync(int id)
+    public async Task<Result> DeleteAsync(int id, string performedBy)
     {
         var accessory = await _dbcontext.RiderAccessories.FindAsync(id);
 
         if (accessory == null)
             return Result.Failure(
                 new Error("NotFound", "Accessory not found", 404));
+
+        InventoryAuditLogger.LogAccessoryDelete(_dbcontext, accessory, performedBy);
 
         _dbcontext.RiderAccessories.Remove(accessory);
         await _dbcontext.SaveChangesAsync();

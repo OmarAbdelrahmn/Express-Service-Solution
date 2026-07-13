@@ -13,6 +13,82 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
 {
     private readonly ApplicationDbcontext _db = dbcontext;
 
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // MANUAL ASSIGNMENT — attach a rider to an unrecognized (Unattributed) record
+    // ═══════════════════════════════════════════════════════════════════════
+
+    public async Task<Result> AssignRiderToUnattributedAsync(
+        string vehicleNumber,
+        DateOnly date,
+        long riderIqamaNo,
+        string assignedBy,
+        CancellationToken ct = default)
+    {
+        try
+        {
+            // ── 1. Resolve vehicle by plate number ─────────────────────────
+            var vehicle = await _db.Vehicles
+                .FirstOrDefaultAsync(v => v.PlateNumberE == vehicleNumber, ct);
+
+            if (vehicle == null)
+                return Result.Failure(
+                    new Error("NotFound",
+                        $"Vehicle with plate number {vehicleNumber} not found", 404));
+
+            // ── 2. Validate the rider exists ────────────────────────────────
+            var riderExists = await _db.Employees
+                .AnyAsync(e => e.IqamaNo == riderIqamaNo, ct);
+
+            if (!riderExists)
+                return Result.Failure(
+                    new Error("NotFound",
+                        $"Rider with Iqama {riderIqamaNo} not found", 404));
+
+            // ── 3. Locate that day's petrol cost record for the vehicle ────
+            var vehicleCost = await _db.VehiclePetrolCosts
+                .FirstOrDefaultAsync(c => c.VehicleNumber == vehicle.VehicleNumber && c.Date == date, ct);
+
+            if (vehicleCost == null)
+                return Result.Failure(
+                    new Error("NotFound",
+                        $"No petrol cost record found for vehicle {vehicleNumber} on date {date}", 404));
+
+            // ── 4. Locate the unrecognized (Unattributed) row for that record ─
+            var unattributedRow = await _db.RiderPetrolCosts
+                .Where(r => r.VehiclePetrolCostId == vehicleCost.Id && r.RiderIqamaNo == null)
+                .FirstOrDefaultAsync(ct);
+
+            if (unattributedRow == null)
+                return Result.Failure(
+                    new Error("AlreadyAttributed",
+                        $"No unrecognized petrol record found for vehicle {vehicleNumber} on {date:yyyy-MM-dd}. " +
+                        "It may already be attributed to a rider.", 409));
+
+            // ── 5. Assign the rider ─────────────────────────────────────────
+            var previousNotes = unattributedRow.Notes;
+
+            unattributedRow.RiderIqamaNo = riderIqamaNo;
+            unattributedRow.VehicleNumber ??= vehicle.VehicleNumber;
+            unattributedRow.AttributionSource = PetrolAttributionSource.ManualOverride;
+            unattributedRow.ResolvedFromStatusId = null;
+            unattributedRow.Notes = $"Manually assigned to rider {riderIqamaNo} by {assignedBy} on " +
+                                     $"{DateTime.UtcNow.AddHours(3):yyyy-MM-dd HH:mm}." +
+                                     (string.IsNullOrWhiteSpace(previousNotes) ? "" : $" Previously: {previousNotes}");
+
+            vehicleCost.IsAttributed = true;
+
+            await _db.SaveChangesAsync(ct);
+            return Result.Success();
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure(
+                new Error("AssignmentError",
+                    $"Failed to assign rider to petrol record: {ex.Message}", 500));
+        }
+    }
+
     // ── Vehicles excluded from the unattributed report (by PlateNumberE) ─
     // Add any plate number here to hide it from GetUnattributedCostsAsync
     private static readonly HashSet<string> _unattributedExclusions =

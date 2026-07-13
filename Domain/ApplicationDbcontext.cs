@@ -35,6 +35,7 @@ public class ApplicationDbcontext(DbContextOptions<ApplicationDbcontext> options
     public required DbSet<RiderAccessory> RiderAccessories { get; set; }
     public required DbSet<RiderAccessoryUsage> RiderAccessoryUsages { get; set; }
     public required DbSet<SparePartUsage> SparePartUsages { get; set; }
+    public required DbSet<InventoryAuditLog> InventoryAuditLogs { get; set; }
     public required DbSet<Supplier> Suppliers { get; set; }
     public required DbSet<Bill> Bills { get; set; }
     public required DbSet<BillItem> BillItems { get; set; }

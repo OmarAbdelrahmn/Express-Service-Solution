@@ -1,6 +1,7 @@
 ﻿using Application.Abstraction;
 using Application.Abstraction.Errors;
 using Application.Authentication;
+using Application.Contracts.InventoryAudit;
 using Application.Contracts.RiderAccessoryCon;
 using Application.Contracts.SparePartCo;
 using Application.Contracts.SupplierCon;
@@ -4922,6 +4923,59 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
             AccessoryUsages: acResponse
         ));
     }
+
+    /// <summary>
+    /// Housing-scoped audit trail: every manual spare-part / rider-accessory
+    /// change (quantity, price, location, etc.) recorded at this housing —
+    /// who did it, when, and the before/after values. Covers changes made
+    /// while the item was AT this housing either before or after the edit,
+    /// so a transfer in or out of the housing still shows up here.
+    /// </summary>
+    public async Task<Result<IEnumerable<InventoryAuditLogResponse>>> GetHousingInventoryAuditLogAsync(
+        long managerIqamaNo,
+        DateTime? fromDate = null,
+        DateTime? toDate = null)
+    {
+        var housingResult = await GetManagedHousing(managerIqamaNo);
+        if (housingResult.IsFailure)
+            return Result.Failure<IEnumerable<InventoryAuditLogResponse>>(housingResult.Error);
+
+        var housing = housingResult.Value;
+
+        var query = context.InventoryAuditLogs
+            .AsNoTracking()
+            .Where(a => a.LocationBefore == housing.Name || a.LocationAfter == housing.Name)
+            .AsQueryable();
+
+        if (fromDate.HasValue)
+            query = query.Where(a => a.PerformedAt >= fromDate.Value);
+        if (toDate.HasValue)
+            query = query.Where(a => a.PerformedAt <= toDate.Value);
+
+        var logs = await query
+            .OrderByDescending(a => a.PerformedAt)
+            .ToListAsync();
+
+        var response = logs.Select(a => new InventoryAuditLogResponse(
+            a.Id,
+            a.ItemType.ToString(),
+            a.ItemId,
+            a.ItemName,
+            a.Action.ToString(),
+            a.LocationBefore,
+            a.LocationAfter,
+            a.QuantityBefore,
+            a.QuantityAfter,
+            a.PriceBefore,
+            a.PriceAfter,
+            a.PerformedBy,
+            a.PerformedAt,
+            a.Notes
+        ));
+
+        return Result.Success(response);
+    }
+
     private static TransferResponse MapTransferToResponse(Domain.Entities.Spare.Transfer transfer)
     {
         var items = transfer.TransferItems.Select(ti => new TransferItemResponse(

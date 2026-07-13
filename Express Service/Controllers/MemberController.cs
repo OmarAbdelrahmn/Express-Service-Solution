@@ -29,6 +29,21 @@ public class MemberController(IMemberService housingService, IReminderService re
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
 
+    /// <summary>
+    /// Get every manual spare-part / rider-accessory change made at this
+    /// housing (quantity, price, location, etc.) — who did it, when, and the
+    /// before/after values. Optionally filter by date range.
+    /// </summary>
+    [HttpGet("inventory/audit-log")]
+    public async Task<IActionResult> GetInventoryAuditLog(
+        [FromQuery] DateTime? fromDate,
+        [FromQuery] DateTime? toDate)
+    {
+        var iqamaNo = User.GetUserIqamaNo()!;
+        var result = await housingService.GetHousingInventoryAuditLogAsync(iqamaNo, fromDate, toDate);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
 
 
     #region Maintenance Reminders

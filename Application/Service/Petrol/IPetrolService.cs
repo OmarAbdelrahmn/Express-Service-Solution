@@ -70,5 +70,17 @@ public interface IPetrolService
         DateOnly date,
         CancellationToken ct = default);
 
+    /// <summary>
+    /// Manually attaches a rider (by Iqama) to a vehicle's petrol cost for a given day,
+    /// when the automatic attribution engine could not resolve a rider (i.e. the record
+    /// is currently "unrecognized" / Unattributed). Sets AttributionSource to ManualOverride.
+    /// </summary>
+    Task<Result> AssignRiderToUnattributedAsync(
+        string vehicleNumber,
+        DateOnly date,
+        long riderIqamaNo,
+        string assignedBy,
+        CancellationToken ct = default);
+
     Task<Result> AddVehicleNoteAsync(string vehicleNumber, string note, DateOnly Date, CancellationToken ct = default);
 }

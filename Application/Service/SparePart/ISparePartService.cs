@@ -11,9 +11,9 @@ public interface ISparePartService
     Task<Result<IEnumerable<SparePartResponse>>> GetAllAsync();
     Task<Result<IEnumerable<SparePartResponse>>> GetAllAsync2();
     Task<Result<SparePartResponse>> GetByIdAsync(int id);
-    Task<Result<SparePartResponse>> CreateAsync(SparePartRequest request);
-    Task<Result<SparePartResponse>> UpdateAsync(int id, SparePartRequest request);
-    Task<Result> DeleteAsync(int id);
+    Task<Result<SparePartResponse>> CreateAsync(SparePartRequest request, string performedBy);
+    Task<Result<SparePartResponse>> UpdateAsync(int id, SparePartRequest request, string performedBy);
+    Task<Result> DeleteAsync(int id, string performedBy);
     Task<Result<IEnumerable<SparePartResponse>>> SearchAsync(string keyword);
     Task<Result<SparePartResponse>> RecordUsageAsync(int sparePartId, SparePartUsageRequest request);
     Task<Result<IEnumerable<SparePartUsageResponse>>> GetUsageHistoryAsync(int sparePartId);
