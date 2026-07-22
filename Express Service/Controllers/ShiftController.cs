@@ -6,7 +6,7 @@ namespace Express_Service.Controllers;
 
 [Route("api/[controller]")]
 [ApiController]
-//[Authorize(Roles = "Master,Admin")]
+[Microsoft.AspNetCore.Authorization.Authorize(Roles = "Master,Admin")]
 public class ShiftController(IRiderShiftService service) : ControllerBase
 {
     private readonly IRiderShiftService service = service;

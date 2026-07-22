@@ -10,6 +10,7 @@ namespace Express_Service.Controllers;
 
 [Route("api/[controller]")]
 [ApiController]
+[Authorize(Roles = "Master,Admin")]
 public class ImportController(IImportService service, IBackgroundImportService service1) : ControllerBase
 {
     private readonly IImportService service = service;

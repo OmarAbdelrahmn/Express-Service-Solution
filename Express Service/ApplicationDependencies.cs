@@ -22,6 +22,17 @@ using Application.Service.KetaValidation;
 using Application.Service.Member;
 using Application.Service.MonthlyValidity;
 using Application.Service.Orders;
+using Application.Service.Organization;
+using Application.Service.Ledger;
+using Application.Service.FinancialAccess;
+using Application.Service.FinancialOperations;
+using Application.Service.Compensation;
+using Application.Service.PlatformImports;
+using Application.Service.RiderPayroll;
+using Application.Service.AccountingStorage;
+using Application.Service.AccountingPosting;
+using Application.Service.AccountingOutbox;
+using Application.Service.AccountingFiles;
 using Application.Service.Petrol;
 using Application.Service.Reminder;
 using Application.Service.Reports;
@@ -37,6 +48,7 @@ using Application.Service.User;
 using Application.Service.VehiclePermission;
 using Application.Service.Wallet;
 using DocumentFormat.OpenXml.Office2016.Drawing.ChartDrawing;
+using Asp.Versioning;
 using Domain;
 using Domain.Entities;
 using FluentValidation;
@@ -44,7 +56,9 @@ using Hangfire;
 using Mapster;
 using MapsterMapper;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using System.Reflection;
@@ -65,6 +79,18 @@ public static class ApplicationDependencies
         Services.AddScoped<IRoleService, RoleService>();
         Services.AddScoped<IEmployeeService, EmployeeService>();
         Services.AddScoped<ICompanyService, CompanyService>();
+        Services.AddScoped<IOrganizationSettingsService, OrganizationSettingsService>();
+        Services.AddScoped<ILedgerService, LedgerService>();
+        Services.AddScoped<IFinancialAccessService, FinancialAccessService>();
+        Services.AddScoped<IFinancialOperationsService, FinancialOperationsService>();
+        Services.AddScoped<ICompensationService, CompensationService>();
+        Services.AddScoped<IPlatformImportService, PlatformImportService>();
+        Services.AddSingleton<IPrivateAccountingFileStorage, EncryptedPrivateAccountingFileStorage>();
+        Services.AddScoped<IAccountingFileService, AccountingFileService>();
+        Services.AddScoped<IAccountingPostingService, AccountingPostingService>();
+        Services.AddScoped<IAccountingOutboxJob, AccountingOutboxJob>();
+        Services.AddScoped<IAccountingOutboxDispatcher, LoggingAccountingOutboxDispatcher>();
+        Services.AddScoped<IRiderPayrollService, RiderPayrollService>();
         Services.AddScoped<IHousingService, HousingService>();
         Services.AddScoped<IVehicleService, VehicleService>();
         Services.AddScoped<IRiderService, RiderService>();
@@ -116,6 +142,7 @@ public static class ApplicationDependencies
 
         Services.Configure<DailyReportSettings>(
             configuration.GetSection("DailyReport"));
+        Services.Configure<AccountingStorageOptions>(configuration.GetSection(AccountingStorageOptions.SectionName));
 
         #region Hnagfire + Daily Report Job
         // ── Hangfire ────────────────────────────────────────────────────────────────
@@ -145,7 +172,21 @@ public static class ApplicationDependencies
                 .AddSwagger()
                 .AddDatabase(configuration)
                 .AddCORS()
-                .AddCaching()
+                .AddCaching(configuration)
+                .AddApiVersioning(options =>
+                {
+                    options.DefaultApiVersion = new ApiVersion(1, 0);
+                    options.AssumeDefaultVersionWhenUnspecified = true;
+                    options.ReportApiVersions = true;
+                    options.ApiVersionReader = ApiVersionReader.Combine(
+                        new QueryStringApiVersionReader("api-version"),
+                        new HeaderApiVersionReader("x-api-version"));
+                })
+                .AddApiExplorer(options =>
+                {
+                    options.GroupNameFormat = "'v'VVV";
+                    options.SubstituteApiVersionInUrl = false;
+                });
                 ;
 
         return Services;
@@ -154,7 +195,7 @@ public static class ApplicationDependencies
     public static IServiceCollection AddFluentValidation(this IServiceCollection Services)
     {
         Services
-            .AddValidatorsFromAssembly(Assembly.GetExecutingAssembly());
+            .AddValidatorsFromAssembly(typeof(IJwtProvider).Assembly);
 
         return Services;
     }
@@ -169,7 +210,7 @@ public static class ApplicationDependencies
     public static IServiceCollection AddMappester(this IServiceCollection Services)
     {
         var mappingConfig = TypeAdapterConfig.GlobalSettings;
-        mappingConfig.Scan(Assembly.GetExecutingAssembly());
+        mappingConfig.Scan(typeof(IJwtProvider).Assembly);
 
         Services.AddSingleton<IMapper>(new Mapper(mappingConfig));
 
@@ -198,10 +239,19 @@ public static class ApplicationDependencies
             .AddEntityFrameworkStores<ApplicationDbcontext>()
             .AddDefaultTokenProviders();
 
+        var jwtSettings = configuration.GetSection("Jwt").Get<JwtOptions>()
+            ?? throw new InvalidOperationException("JWT configuration is missing.");
+
+        if (string.IsNullOrWhiteSpace(jwtSettings.Key) ||
+            string.IsNullOrWhiteSpace(jwtSettings.Issuer) ||
+            string.IsNullOrWhiteSpace(jwtSettings.Audience) ||
+            jwtSettings.ExpiryIn <= 0)
+        {
+            throw new InvalidOperationException(
+                "JWT configuration must be supplied through secure configuration.");
+        }
+
         Services.Configure<JwtOptions>(configuration.GetSection("Jwt"));
-
-
-        var Jwtsetting = configuration.GetSection("Jwt").Get<JwtOptions>();
 
         Services.AddAuthentication(options =>
         {
@@ -218,21 +268,30 @@ public static class ApplicationDependencies
                 ValidateAudience = true,
                 ValidateLifetime = true,
                 ValidateIssuerSigningKey = true,
-                ValidAudience = Jwtsetting?.Audience,
-                ValidIssuer = Jwtsetting?.Issuer,
+                ValidAudience = jwtSettings.Audience,
+                ValidIssuer = jwtSettings.Issuer,
 
-                IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(Jwtsetting?.Key!))
+                IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSettings.Key))
             };
         });
+        Services.AddAuthorization(options =>
+        {
+            options.FallbackPolicy = new AuthorizationPolicyBuilder()
+                .RequireAuthenticatedUser()
+                .Build();
+        });
+
         Services.Configure<IdentityOptions>(options =>
         {
-            // Default Lockout settings.
-            //options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(5);
-            //options.Lockout.MaxFailedAccessAttempts = 5;
-            //options.Lockout.AllowedForNewUsers = true;
-            options.Password.RequiredLength = 6;
-            options.SignIn.RequireConfirmedEmail = false;
-            options.User.RequireUniqueEmail = false;
+            options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(15);
+            options.Lockout.MaxFailedAccessAttempts = 5;
+            options.Lockout.AllowedForNewUsers = true;
+            options.Password.RequiredLength = 12;
+            options.Password.RequireDigit = true;
+            options.Password.RequireLowercase = true;
+            options.Password.RequireUppercase = true;
+            options.Password.RequireNonAlphanumeric = true;
+            options.User.RequireUniqueEmail = true;
 
 
         });
@@ -252,10 +311,36 @@ public static class ApplicationDependencies
         });
         return Services;
     }
-    public static IServiceCollection AddCaching(this IServiceCollection Services)
+    public static IServiceCollection AddCaching(this IServiceCollection Services, IConfiguration configuration)
     {
         Services.AddResponseCaching();
+        var redisConnection = configuration.GetConnectionString("Redis") ?? configuration["Redis:ConnectionString"];
+        if (string.IsNullOrWhiteSpace(redisConnection))
+            Services.AddDistributedMemoryCache();
+        else
+            Services.AddStackExchangeRedisCache(options => options.Configuration = redisConnection);
+
         Services.AddMemoryCache();
+        Services.AddRateLimiter(options =>
+        {
+            options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+            options.AddFixedWindowLimiter("api", limiter =>
+            {
+                limiter.PermitLimit = 100;
+                limiter.Window = TimeSpan.FromMinutes(1);
+                limiter.QueueLimit = 0;
+            });
+            options.GlobalLimiter = System.Threading.RateLimiting.PartitionedRateLimiter.Create<HttpContext, string>(context =>
+                System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+                    context.User.Identity?.Name ?? context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                    _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+                    {
+                        PermitLimit = 100,
+                        Window = TimeSpan.FromMinutes(1),
+                        QueueLimit = 0,
+                        AutoReplenishment = true
+                    }));
+        });
         return Services;
     }
 

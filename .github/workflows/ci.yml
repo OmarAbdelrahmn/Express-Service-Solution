@@ -1,0 +1,55 @@
+name: Backend CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      ConnectionStrings__DefaultConnection: Server=(localdb)\\MSSQLLocalDB;Database=ExpressServiceCi;Trusted_Connection=True;Encrypt=False
+      Jwt__Key: ci-only-signing-key-must-never-be-used-outside-ci-1234567890
+      Jwt__Issuer: ExpressService.CI
+      Jwt__Audience: ExpressService.CI
+      Jwt__ExpiryIn: "15"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Reject whitespace errors
+        run: git diff --check HEAD~1 HEAD
+
+      - name: Restore
+        run: dotnet restore "Express Service Solution.slnx"
+
+      - name: Build
+        run: dotnet build "Express Service Solution.slnx" --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test "Express Service Solution.slnx" --configuration Release --no-build --no-restore
+
+      - name: Install EF Core tooling
+        run: dotnet tool install --global dotnet-ef --version 10.0.6
+
+      - name: Detect pending model changes
+        run: >-
+          dotnet ef migrations has-pending-model-changes
+          --project Domain/Domain.csproj
+          --startup-project "Express Service/Express Service.csproj"
+          --no-build
+
+      - name: Scan tracked configuration for secrets
+        run: |
+          if grep -RInE '"(DefaultConnection|Key|ApiKey|SmtpPassword|SmtpUser)"[[:space:]]*:[[:space:]]*"[^" ]{12,}"' --include='appsettings*.json' .; then
+            echo "Tracked configuration contains a likely secret. Use environment or managed secret configuration."
+            exit 1
+          fi

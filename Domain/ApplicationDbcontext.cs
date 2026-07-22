@@ -2,19 +2,105 @@
 using Domain.Entities.Keeta;
 using Domain.Entities.Petrol;
 using Domain.Entities.Spare;
+using Domain.Entities.Organization;
+using Domain.Entities.AccountingCore;
+using Domain.Entities.FinancialOperations;
+using Domain.Entities.AccountingPlatform;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 
 namespace Domain;
 
-public class ApplicationDbcontext(DbContextOptions<ApplicationDbcontext> options) : IdentityDbContext<ApplicationUser, ApplicationRole, string>(options)
+public class ApplicationDbcontext : IdentityDbContext<ApplicationUser, ApplicationRole, string>
 {
+    [SetsRequiredMembers]
+    public ApplicationDbcontext(DbContextOptions<ApplicationDbcontext> options) : base(options)
+    {
+    }
 
     public required DbSet<ApplicationUser> ApplicationUsers { get; set; }
     public required DbSet<ApplicationRole> ApplicationRoles { get; set; }
     public required DbSet<Company> Companies { get; set; }
+    public DbSet<Tenant> Tenants { get; set; }
+    public DbSet<LegalEntity> LegalEntities { get; set; }
+    public DbSet<Branch> Branches { get; set; }
+    public DbSet<PlatformAccount> PlatformAccounts { get; set; }
+    public DbSet<LegacyCompanyPlatformMapping> LegacyCompanyPlatformMappings { get; set; }
+    public DbSet<AccountingAccount> AccountingAccounts { get; set; }
+    public DbSet<Currency> Currencies { get; set; }
+    public DbSet<FinancialUserAccess> FinancialUserAccesses { get; set; }
+    public DbSet<ExchangeRate> ExchangeRates { get; set; }
+    public DbSet<FinancialDimension> FinancialDimensions { get; set; }
+    public DbSet<FinancialDimensionValue> FinancialDimensionValues { get; set; }
+    public DbSet<PostingProfile> PostingProfiles { get; set; }
+    public DbSet<PostingProfileLine> PostingProfileLines { get; set; }
+    public DbSet<FiscalYear> FiscalYears { get; set; }
+    public DbSet<FiscalPeriod> FiscalPeriods { get; set; }
+    public DbSet<FinancialDocument> FinancialDocuments { get; set; }
+    public DbSet<LegalEntityDocumentSequence> LegalEntityDocumentSequences { get; set; }
+    public DbSet<FinancialDocumentLine> FinancialDocumentLines { get; set; }
+    public DbSet<FinancialDocumentLineDimension> FinancialDocumentLineDimensions { get; set; }
+    public DbSet<DocumentApproval> DocumentApprovals { get; set; }
+    public DbSet<PostingBatch> PostingBatches { get; set; }
+    public DbSet<JournalEntry> JournalEntries { get; set; }
+    public DbSet<JournalLine> JournalLines { get; set; }
+    public DbSet<JournalLineDimension> JournalLineDimensions { get; set; }
+    public DbSet<RecurringJournalSchedule> RecurringJournalSchedules { get; set; }
+    public DbSet<RecurringJournalScheduleLine> RecurringJournalScheduleLines { get; set; }
+    public DbSet<AccountingAuditEvent> AccountingAuditEvents { get; set; }
+    public DbSet<AccountingOutboxMessage> AccountingOutboxMessages { get; set; }
+    public DbSet<AccountingAuditChainHead> AccountingAuditChainHeads { get; set; }
+    public DbSet<SourceEvidence> SourceEvidences { get; set; }
+    public DbSet<PlatformSettlement> PlatformSettlements { get; set; }
+    public DbSet<CustomerAccount> CustomerAccounts { get; set; }
+    public DbSet<CustomerInvoice> CustomerInvoices { get; set; }
+    public DbSet<CustomerInvoiceLine> CustomerInvoiceLines { get; set; }
+    public DbSet<CustomerReceipt> CustomerReceipts { get; set; }
+    public DbSet<CustomerReceiptAllocation> CustomerReceiptAllocations { get; set; }
+    public DbSet<EmployeePayContract> EmployeePayContracts { get; set; }
+    public DbSet<PayrollRun> PayrollRuns { get; set; }
+    public DbSet<PayrollRunLine> PayrollRunLines { get; set; }
+    public DbSet<SupplierAccount> SupplierAccounts { get; set; }
+    public DbSet<SupplierInvoice> SupplierInvoices { get; set; }
+    public DbSet<SupplierInvoiceLine> SupplierInvoiceLines { get; set; }
+    public DbSet<SupplierPayment> SupplierPayments { get; set; }
+    public DbSet<SupplierPaymentAllocation> SupplierPaymentAllocations { get; set; }
+    public DbSet<InventoryItem> InventoryItems { get; set; }
+    public DbSet<InventoryMovement> InventoryMovements { get; set; }
+    public DbSet<ExpenseClaim> ExpenseClaims { get; set; }
+    public DbSet<BankAccount> BankAccounts { get; set; }
+    public DbSet<BankStatementLine> BankStatementLines { get; set; }
+    public DbSet<TaxCode> TaxCodes { get; set; }
+    public DbSet<TaxTransaction> TaxTransactions { get; set; }
+    public DbSet<TaxReturn> TaxReturns { get; set; }
+    public DbSet<FixedAsset> FixedAssets { get; set; }
+    public DbSet<Budget> Budgets { get; set; }
+    public DbSet<BudgetLine> BudgetLines { get; set; }
+    public DbSet<AccountingStoredFile> AccountingStoredFiles { get; set; }
+    public DbSet<PlatformImportTemplate> PlatformImportTemplates { get; set; }
+    public DbSet<PlatformImportBatch> PlatformImportBatches { get; set; }
+    public DbSet<PlatformImportSheet> PlatformImportSheets { get; set; }
+    public DbSet<PlatformImportRawRow> PlatformImportRawRows { get; set; }
+    public DbSet<PlatformImportRawCell> PlatformImportRawCells { get; set; }
+    public DbSet<PlatformNormalizedFact> PlatformNormalizedFacts { get; set; }
+    public DbSet<PlatformFactOverride> PlatformFactOverrides { get; set; }
+    public DbSet<PlatformImportIssue> PlatformImportIssues { get; set; }
+    public DbSet<PlatformWorkerIdentity> PlatformWorkerIdentities { get; set; }
+    public DbSet<CompensationPolicyVersion> CompensationPolicyVersions { get; set; }
+    public DbSet<CompensationRule> CompensationRules { get; set; }
+    public DbSet<RiderPayrollRun> RiderPayrollRuns { get; set; }
+    public DbSet<RiderPayrollLine> RiderPayrollLines { get; set; }
+    public DbSet<RiderPayrollComponent> RiderPayrollComponents { get; set; }
+    public DbSet<RiderPayrollAdjustment> RiderPayrollAdjustments { get; set; }
+    public DbSet<RiderPayrollCarryForward> RiderPayrollCarryForwards { get; set; }
+    public DbSet<RiderFinancialItemType> RiderFinancialItemTypes { get; set; }
+    public DbSet<RiderFinancialItem> RiderFinancialItems { get; set; }
+    public DbSet<RiderFinancialInstallment> RiderFinancialInstallments { get; set; }
+    public DbSet<RiderPaymentBatch> RiderPaymentBatches { get; set; }
+    public DbSet<RiderPaymentBatchLine> RiderPaymentBatchLines { get; set; }
+    public DbSet<HousingCashUserAccess> HousingCashUserAccesses { get; set; }
     public required DbSet<Employees> Employees { get; set; }
     public required DbSet<EmployeeDocuments> EmployeeDocuments { get; set; }
     public required DbSet<Housing> Housings { get; set; }
@@ -276,9 +362,9 @@ public class ApplicationDbcontext(DbContextOptions<ApplicationDbcontext> options
 
         foreach (var property in modelBuilder.Model.GetEntityTypes()
        .SelectMany(t => t.GetProperties())
-       .Where(p => p.ClrType == typeof(decimal) || p.ClrType == typeof(decimal?)))
+       .Where(p => (p.ClrType == typeof(decimal) || p.ClrType == typeof(decimal?)) && p.GetPrecision() is null))
         {
-            property.SetColumnType("decimal(38, 0)");
+            property.SetColumnType("decimal(18, 2)");
         }
 
         base.OnModelCreating(modelBuilder);
@@ -340,12 +426,6 @@ public class ApplicationDbcontext(DbContextOptions<ApplicationDbcontext> options
         });
 
 
-    }
-
-    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
-    {
-        optionsBuilder.ConfigureWarnings(warnings =>
-            warnings.Ignore(RelationalEventId.PendingModelChangesWarning));
     }
 
 }

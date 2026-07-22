@@ -16,9 +16,9 @@ public class RolesController(IRoleService roleService) : ControllerBase
 
     [HttpGet("")]
     [Authorize(Roles = "Master")]
-    public async Task<IActionResult> GetAllRoles()
+    public async Task<IActionResult> GetAllRoles([FromQuery] Application.Contracts.Common.PaginationRequest pagination, [FromQuery] bool? includeDisable = null, CancellationToken cancellationToken = default)
     {
-        var response = await roleService.GetRolesAsync();
+        var response = await roleService.GetRolesAsync(pagination, includeDisable, cancellationToken);
 
         return response.IsSuccess ?
             Ok(response.Value) :

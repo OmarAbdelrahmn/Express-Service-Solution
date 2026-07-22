@@ -10,6 +10,7 @@ using QuestPDF.Infrastructure;
 
 [ApiController]
 [Route("debug")]
+[Microsoft.AspNetCore.Authorization.Authorize(Roles = "Master")]
 public class DebugController(
     ApplicationDbcontext db,
     IOptions<DailyReportSettings> options, IWebHostEnvironment env) : ControllerBase

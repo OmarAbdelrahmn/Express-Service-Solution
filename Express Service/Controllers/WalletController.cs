@@ -6,6 +6,7 @@ namespace Express_Service.Controllers;
 
 [Route("api/[controller]")]
 [ApiController]
+[Authorize(Roles = "Master,Admin")]
 public class WalletController(IWalletService walletService) : ControllerBase
 {
     private readonly IWalletService _walletService = walletService;

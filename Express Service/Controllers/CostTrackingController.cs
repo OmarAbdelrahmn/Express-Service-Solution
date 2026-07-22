@@ -6,7 +6,7 @@ namespace Express_Service.Controllers;
 
 [Route("api/[controller]")]
 [ApiController]
-//[Authorize(Roles = "Master,Admin,Member")]
+[Authorize(Roles = "Master,Admin")]
 public class CostTrackingController(ICostTrackingService service) : ControllerBase
 {
     [HttpGet("vehicle/{vehicleNumber}")]

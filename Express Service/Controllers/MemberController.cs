@@ -8,6 +8,7 @@ namespace Express_Service.Controllers;
 
 [Route("api/[controller]")]
 [ApiController]
+[Microsoft.AspNetCore.Authorization.Authorize(Roles = "Member")]
 //[ResponseCache(Duration = 300)]
 public class MemberController(IMemberService housingService, IReminderService reminderService) : ControllerBase
 {

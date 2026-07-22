@@ -6,11 +6,11 @@ using Microsoft.EntityFrameworkCore;
 namespace Express_Service.Controllers;
 
 /// <summary>
-/// Public endpoints — no authentication required.
-/// Only safe, non-sensitive data is exposed.
+/// Employee data and identity documents require operational authorization.
 /// </summary>
 [Route("api/public/employees")]
 [ApiController]
+[Microsoft.AspNetCore.Authorization.Authorize(Roles = "Master,Admin")]
 public class PublicEmployeeController(
     ApplicationDbcontext db,
     IEmployeeDocumentsService docsService) : ControllerBase

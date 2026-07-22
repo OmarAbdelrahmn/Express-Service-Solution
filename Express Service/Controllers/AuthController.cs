@@ -48,6 +48,7 @@ public class AuthController(IAuthService service) : ControllerBase
     }
 
     [HttpPost("login")]
+    [AllowAnonymous]
 
     public async Task<IActionResult> login([FromBody] AuthRequest request)
     {

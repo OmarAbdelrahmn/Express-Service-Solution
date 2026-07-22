@@ -7,6 +7,7 @@ namespace Express_Service.Controllers;
 
 [Route("api/[controller]")]
 [ApiController]
+[Microsoft.AspNetCore.Authorization.Authorize(Roles = "Master,Admin")]
 public class KetaValidation(IMonthlyValidityService service) : ControllerBase
 {
     private readonly IMonthlyValidityService service = service;
@@ -43,12 +44,14 @@ public class KetaValidation(IMonthlyValidityService service) : ControllerBase
     /// </summary>
     [HttpPost("shifts/import")]
     [RequestSizeLimit(50 * 1024 * 1024)] // 50 MB
-    public async Task<IActionResult> ImportShifts(
-        IFormFile file,
-        [FromQuery] string uploadedBy = "system")
+    public async Task<IActionResult> ImportShifts(IFormFile file)
     {
         if (file == null || file.Length == 0)
             return BadRequest(new { error = "No file uploaded." });
+
+        var uploadedBy = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        if (string.IsNullOrWhiteSpace(uploadedBy))
+            return Unauthorized();
 
         var result = await service.ImportKeetaDriverShiftsAsync(
             file,
@@ -89,7 +92,9 @@ public class KetaValidation(IMonthlyValidityService service) : ControllerBase
         if (!file.FileName.EndsWith(".xlsx") && !file.FileName.EndsWith(".xls"))
             return BadRequest(new { error = "File must be Excel format" });
 
-        var uploadedBy = User?.Identity?.Name ?? "System";
+        var uploadedBy = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        if (string.IsNullOrWhiteSpace(uploadedBy))
+            return Unauthorized();
         var result = await service.ImportAttendanceAsync(file, uploadedBy);
 
         if (result.IsSuccess)

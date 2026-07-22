@@ -1,0 +1,31 @@
+{
+  "inspectionMode": "sample-large-detail",
+  "fixtures": [
+    {
+      "adapter": "amazon-anow-v1",
+      "size": 18656,
+      "sha256": "7DA8D9FDAAB2C354FE4B4FABE1CA801615BE54A28D32484476E882106D595FE5",
+      "sheets": ["Sheet1"]
+    },
+    {
+      "adapter": "keeta-pay-per-order-v1",
+      "size": 183487,
+      "sha256": "60DAEDFC257743660B362380DB6AF7CB283D373BE9359B20C7861E98FE4602F6",
+      "sheets": ["partner-summary", "rider-summary", "order-detail"]
+    },
+    {
+      "adapter": "keeta-segments-v1",
+      "size": 11237627,
+      "sha256": "EC20FA79FB2949065D7431665BB2673727AA4E571AF2E216678858EB651D6243",
+      "detailInspection": "header-and-first-record-sample",
+      "detailApproximateRows": 162873,
+      "sheets": ["partner-summary", "rider-summary", "order-detail"]
+    },
+    {
+      "adapter": "hunger-ftr-v1",
+      "size": 25503,
+      "sha256": "31F18477F8C66BB234C8B202164EEC92A55BBC33999BB5FF42C623919B634B0B",
+      "sheets": ["WR", "RLVL", "FTR Cost", "Car Rental"]
+    }
+  ]
+}

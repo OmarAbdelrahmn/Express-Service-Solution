@@ -2,4 +2,5 @@
   <Project Path="Application/Application.csproj" />
   <Project Path="Domain/Domain.csproj" />
   <Project Path="Express Service/Express Service.csproj" />
+  <Project Path="Accounting.Tests/Accounting.Tests.csproj" />
 </Solution>

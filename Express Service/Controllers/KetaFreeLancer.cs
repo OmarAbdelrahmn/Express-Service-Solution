@@ -6,6 +6,7 @@ namespace Express_Service.Controllers;
 
 [Route("api/[controller]")]
 [ApiController]
+[Microsoft.AspNetCore.Authorization.Authorize(Roles = "Master,Admin")]
 public class KetaFreeLancer(IFreelancerService service) : ControllerBase
 {
     [HttpGet]
