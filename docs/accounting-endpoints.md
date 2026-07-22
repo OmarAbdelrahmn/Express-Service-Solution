@@ -2,6 +2,13 @@
 
 This reference describes the accounting routes currently implemented by the backend. The API is JSON unless noted as `multipart/form-data` or a file response.
 
+## Authoritative implementation boundary
+
+- The final accounting entity model is `Domain.Entities.AccountingCore`, `Domain.Entities.AccountingPlatform`, `Domain.Entities.FinancialOperations`, and `Domain.Entities.Organization`.
+- The final API implementation is split across the organization, accounting-files, platform-imports, compensation, rider-payroll, ledger, financial-access, accounting-posting, accounting-storage, and financial-operations service slices.
+- Do not reintroduce the retired monolithic `Domain.Entities.Accounting` or `Application.Service.Accounting` module. It duplicates DbSets, EF configurations, routes, and migrations from the authoritative implementation.
+- `/api/Supplier`, `/api/Bill`, `/api/return`, `/api/Transfer`, `/api/SparePart`, and `/api/RiderAccessory` remain isolated legacy maintenance APIs. Their integer identifiers must never be passed to the modern GUID-based accounting endpoints.
+
 ## Common rules
 
 - Base URL is the deployed API host.

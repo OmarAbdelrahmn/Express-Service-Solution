@@ -3,7 +3,6 @@ using Application.EmailWarmup;
 using Application.Roles;
 using Application.Service.Admin;
 using Application.Service.AI;
-using Application.Service.Accounting;
 using Application.Service.Auth;
 using Application.Service.Backgroundimports;
 using Application.Service.Dahsboard;
@@ -44,6 +43,7 @@ using Application.Service.Riders;
 using Application.Service.SparePart;
 using Application.Service.SupplierSer;
 using Application.Service.temp;
+using Application.Service.OutRiderInfos;
 using Application.Service.OutageShiftPerformances;
 using Application.Service.Transfer;
 using Application.Service.TransporterShifts;
@@ -137,14 +137,6 @@ public static class ApplicationDependencies
         Services.AddScoped<IReminderService, ReminderService>();
         Services.AddScoped<IAbsentReportJob, AbsentReportJob>();
         Services.AddScoped<IItemMovementReportService, ItemMovementReportService>();
-        Services.AddScoped<IAccountingPeriodService, AccountingPeriodService>();
-        Services.AddScoped<IAccountingImportService, AccountingImportService>();
-        Services.AddScoped<IAccountingSalaryService, AccountingSalaryService>();
-        Services.AddScoped<IAccountingPaymentService, AccountingPaymentService>();
-        Services.AddScoped<IRiderAccountingProfileService, RiderAccountingProfileService>();
-        Services.AddScoped<ICompanyFinanceService, CompanyFinanceService>();
-        Services.AddScoped<IAccountingReportService, AccountingReportService>();
-
         Services.AddScoped<IDailyReportJob, DailyReportJob>();
         Services.AddScoped<IAbsentReportEmailSender, AbsentReportEmailSender>();
 
