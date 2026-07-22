@@ -1,5 +1,6 @@
 ﻿using Application.Abstraction;
 using Application.Contracts.SparePartCo;
+using Application.Service.InventoryAudit;
 using Domain;
 using Domain.Entities.Spare;
 using Microsoft.EntityFrameworkCore;
@@ -1196,7 +1197,7 @@ public class SparePartService(ApplicationDbcontext dbcontext) : ISparePartServic
         return Result.Success(MapToResponse(sparePart));
     }
 
-    public async Task<Result<SparePartResponse>> CreateAsync(SparePartRequest request)
+    public async Task<Result<SparePartResponse>> CreateAsync(SparePartRequest request, string performedBy)
     {
         var sparePart = new Domain.Entities.Spare.SparePart
         {
@@ -1210,10 +1211,14 @@ public class SparePartService(ApplicationDbcontext dbcontext) : ISparePartServic
         await _dbcontext.SpareParts.AddAsync(sparePart);
         await _dbcontext.SaveChangesAsync();
 
+        // Log the manual creation now that the entity has its Id.
+        InventoryAuditLogger.LogSparePartCreate(_dbcontext, sparePart, performedBy);
+        await _dbcontext.SaveChangesAsync();
+
         return Result.Success(MapToResponse(sparePart));
     }
 
-    public async Task<Result<SparePartResponse>> UpdateAsync(int id, SparePartRequest request)
+    public async Task<Result<SparePartResponse>> UpdateAsync(int id, SparePartRequest request, string performedBy)
     {
         var sparePart = await _dbcontext.SpareParts.FindAsync(id);
 
@@ -1221,23 +1226,30 @@ public class SparePartService(ApplicationDbcontext dbcontext) : ISparePartServic
             return Result.Failure<SparePartResponse>(
                 new Error("NotFound", "Spare part not found", 404));
 
+        // Snapshot values before they're overwritten so we can log a before/after diff.
+        var before = SparePartSnapshot.From(sparePart);
+
         sparePart.Name = request.Name;
         sparePart.Quantity = request.Quantity;
         sparePart.Price = request.Price;
         sparePart.Location = request.Location;
+
+        InventoryAuditLogger.LogSparePartUpdate(_dbcontext, before, sparePart, performedBy);
 
         await _dbcontext.SaveChangesAsync();
 
         return Result.Success(MapToResponse(sparePart));
     }
 
-    public async Task<Result> DeleteAsync(int id)
+    public async Task<Result> DeleteAsync(int id, string performedBy)
     {
         var sparePart = await _dbcontext.SpareParts.FindAsync(id);
 
         if (sparePart == null)
             return Result.Failure(
                 new Error("NotFound", "Spare part not found", 404));
+
+        InventoryAuditLogger.LogSparePartDelete(_dbcontext, sparePart, performedBy);
 
         _dbcontext.SpareParts.Remove(sparePart);
         await _dbcontext.SaveChangesAsync();

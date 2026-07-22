@@ -1,4 +1,5 @@
 ﻿using Application.Contracts.SparePartCo;
+using Application.Extensions;
 using Application.Service.HousingInventory;
 using Application.Service.Import;
 using Application.Service.SparePart;
@@ -125,7 +126,8 @@ public class SparePartController(ISparePartService service , IHousingInventorySy
     //[Authorize(Roles = "Master,Admin")]
     public async Task<IActionResult> Create([FromBody] SparePartRequest request)
     {
-        var response = await service.CreateAsync(request);
+        var performedBy = User.GetUserName() ?? "unknown";
+        var response = await service.CreateAsync(request, performedBy);
         return response.IsSuccess ? Ok(response.Value) : response.ToProblem();
     }
 
@@ -133,7 +135,8 @@ public class SparePartController(ISparePartService service , IHousingInventorySy
     [Authorize(Roles = "Master,Admin")]
     public async Task<IActionResult> Update(int id, [FromBody] SparePartRequest request)
     {
-        var response = await service.UpdateAsync(id, request);
+        var performedBy = User.GetUserName() ?? "unknown";
+        var response = await service.UpdateAsync(id, request, performedBy);
         return response.IsSuccess ? Ok(response.Value) : response.ToProblem();
     }
 
@@ -141,7 +144,8 @@ public class SparePartController(ISparePartService service , IHousingInventorySy
     [Authorize(Roles = "Master,Admin")]
     public async Task<IActionResult> Delete(int id)
     {
-        var response = await service.DeleteAsync(id);
+        var performedBy = User.GetUserName() ?? "unknown";
+        var response = await service.DeleteAsync(id, performedBy);
         return response.IsSuccess ? Ok(new { message = "Deleted successfully" }) : response.ToProblem();
     }
 

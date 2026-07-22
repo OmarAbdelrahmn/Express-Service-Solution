@@ -12,6 +12,29 @@ public class PetrolController(IPetrolService service) : ControllerBase
     private readonly IPetrolService _service = service;
 
 
+
+    /// <summary>
+    /// Manually attaches a rider (by Iqama) to a vehicle's petrol cost for a given day,
+    /// used when the vehicle has an unrecognized (unattributed) record for that date.
+    /// </summary>
+    [HttpPatch("{vehicleNumber}/assign-rider")]
+    [Authorize(Roles = "Master,Admin")]
+    public async Task<IActionResult> AssignRiderToUnattributed(
+        string vehicleNumber,
+        [FromQuery] DateOnly date,
+        [FromQuery] long riderIqamaNo,
+        CancellationToken ct)
+    {
+        var assignedBy = User.GetUserId();
+        var response = await _service.AssignRiderToUnattributedAsync(
+            vehicleNumber, date, riderIqamaNo, assignedBy!, ct);
+
+        return response.IsSuccess
+            ? Ok(new Re($"Rider {riderIqamaNo} assigned to petrol cost for vehicle {vehicleNumber} on {date:yyyy-MM-dd}."))
+            : response.ToProblem();
+    }
+
+
     /// <summary>
     /// Shifts the PermissionStartDate of the rider's latest RiderVehicleStatus back by 1 day.
     /// </summary>

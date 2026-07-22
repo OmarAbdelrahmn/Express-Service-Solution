@@ -2526,6 +2526,15 @@ namespace Domain.Migrations
                         },
                         new
                         {
+                            Id = "A2C96C5D-F502-47TF-EE95-ABVN14A3CA22",
+                            ConcurrencyStamp = "A2C75EE9-DB35-480D-9F9F-18D2E499B004",
+                            IsDefault = false,
+                            IsDeleted = false,
+                            Name = "Accountant",
+                            NormalizedName = "ACCOUNTANT"
+                        },
+                        new
+                        {
                             Id = "17B96C5D-F502-47TF-EE95-ABVN14A3CA22",
                             ConcurrencyStamp = "17B75EE9-DB35-480D-9F9F-18D2E499B004",
                             IsDefault = false,
@@ -2623,7 +2632,7 @@ namespace Domain.Migrations
                             IsDisable = false,
                             LockoutEnabled = false,
                             NormalizedUserName = "ADMIN",
-                            PasswordHash = "AQAAAAIAAYagAAAAEA/zZpuqFzbTSnicQa4Tooll0FGxeDLCE2M5TALeSVR6BGE45Era3fs5IhF5zU2ZyQ==",
+                            PasswordHash = "AQAAAAIAAYagAAAAENcN/lSZJq/5fhzAgYxB9lzKj08EKsY5yotYcxjk2MYPCPyA/MzFjvimGAqK3DTNYg==",
                             PhoneNumberConfirmed = false,
                             SecurityStamp = "9FABB58491024B7BB140E4D6658B5BDA",
                             TwoFactorEnabled = false,
@@ -2640,7 +2649,7 @@ namespace Domain.Migrations
                             IsDisable = false,
                             LockoutEnabled = false,
                             NormalizedUserName = "MASTER",
-                            PasswordHash = "AQAAAAIAAYagAAAAEFpg1iN3qC51jcJrS5Ea9/Ab1Xi7kXnwjCrMOynu6YUpw7q1mrTe8yz+5Cx2W01t5A==",
+                            PasswordHash = "AQAAAAIAAYagAAAAENFqyKJ/maFmW6gis+E3E/EqS8dpttSs8z3aFucuD/xXD6jyClaftm5kcUQo9EjVDw==",
                             PhoneNumberConfirmed = false,
                             SecurityStamp = "9FABB58491024B7BB140E4D6658B5BDA",
                             TwoFactorEnabled = false,
@@ -5691,6 +5700,72 @@ namespace Domain.Migrations
                     b.HasIndex("BillId");
 
                     b.ToTable("BillItems");
+                });
+
+            modelBuilder.Entity("Domain.Entities.Spare.InventoryAuditLog", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("Action")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ItemId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ItemName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<int>("ItemType")
+                        .HasColumnType("int");
+
+                    b.Property<string>("LocationAfter")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("LocationBefore")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("Notes")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime>("PerformedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("PerformedBy")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<decimal?>("PriceAfter")
+                        .HasColumnType("decimal(38, 0)");
+
+                    b.Property<decimal?>("PriceBefore")
+                        .HasColumnType("decimal(38, 0)");
+
+                    b.Property<int?>("QuantityAfter")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("QuantityBefore")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LocationAfter");
+
+                    b.HasIndex("LocationBefore");
+
+                    b.HasIndex("PerformedAt");
+
+                    b.HasIndex("ItemType", "ItemId");
+
+                    b.ToTable("InventoryAuditLogs");
                 });
 
             modelBuilder.Entity("Domain.Entities.Spare.Return", b =>

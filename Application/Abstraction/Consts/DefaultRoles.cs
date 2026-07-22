@@ -11,6 +11,10 @@ public static class DefaultRoles
     public const string MemberRoleId = "77B96C5D-F502-47TF-EE95-ABVN14A3CA22";
     public const string Member = nameof(Member);
 
+    public const string AccountantRoleConcurrencyStamp = "A2C75EE9-DB35-480D-9F9F-18D2E499B004";
+    public const string AccountantRoleId = "A2C96C5D-F502-47TF-EE95-ABVN14A3CA22";
+    public const string Accountant = nameof(Accountant);
+
 
     public const string MasterRoleConcurrencyStamp = "17B75EE9-DB35-480D-9F9F-18D2E499B004";
     public const string MasterRoleId = "17B96C5D-F502-47TF-EE95-ABVN14A3CA22";

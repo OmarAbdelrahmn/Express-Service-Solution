@@ -1917,6 +1917,144 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
         }
     }
 
+    public async Task<Result<RidersBelowMonthlyTargetReport>> GetRidersBelowMonthlyTargetAsync(
+        int? year = null,
+        int? month = null,
+        CancellationToken cancellationToken = default)
+    {
+        var today = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3).AddDays(-1));
+        var reportYear = year ?? today.Year;
+        var reportMonth = month ?? today.Month;
+
+        if (reportMonth is < 1 or > 12)
+            return Result.Failure<RidersBelowMonthlyTargetReport>(
+                new Error("Month must be between 1 and 12", "invalid_input", 400));
+
+        if (reportYear < 1)
+            return Result.Failure<RidersBelowMonthlyTargetReport>(
+                new Error("Year must be greater than 0", "invalid_input", 400));
+
+        try
+        {
+            var startDate = new DateOnly(reportYear, reportMonth, 1);
+            var daysInMonth = DateTime.DaysInMonth(reportYear, reportMonth);
+            var monthEndDate = startDate.AddDays(daysInMonth - 1);
+            var isCurrentMonth = reportYear == today.Year && reportMonth == today.Month;
+            var endDate = isCurrentMonth ? today : monthEndDate;
+            var elapsedDays = endDate.Day;
+
+            var companyTargets = new[]
+            {
+                new { CompanyId = 1, CompanyName = "Hunger", MonthlyTarget = 450 },
+                new { CompanyId = 2, CompanyName = "Keeta", MonthlyTarget = 500 }
+            };
+
+            var targetByCompany = companyTargets.ToDictionary(t => t.CompanyId);
+            var companyIds = targetByCompany.Keys.ToList();
+
+            var targetSummaries = companyTargets
+                .Select(t => new CompanyMonthlyTargetSummary(
+                    t.CompanyId,
+                    t.CompanyName,
+                    t.MonthlyTarget,
+                    CalculateTargetToDate(t.MonthlyTarget, elapsedDays, daysInMonth)))
+                .ToList();
+
+            var shifts = await _dbcontext.RiderShifts
+                .Include(s => s.Rider)
+                    .ThenInclude(r => r.Employee)
+                .Include(s => s.Company)
+                .Include(s => s.Housing)
+                .Where(s => companyIds.Contains(s.CompanyId) &&
+                            s.ShiftDate >= startDate &&
+                            s.ShiftDate <= endDate)
+                .AsNoTracking()
+                .ToListAsync(cancellationToken);
+
+            var workedRiders = shifts
+                .Where(s => s.Rider?.Employee != null)
+                .GroupBy(s => new { s.RiderId, s.CompanyId })
+                .ToList();
+
+            var ridersBelowTarget = new List<RiderBelowMonthlyTargetDetail>();
+
+            foreach (var group in workedRiders)
+            {
+                if (!targetByCompany.TryGetValue(group.Key.CompanyId, out var companyTarget))
+                    continue;
+
+                var riderShifts = group.ToList();
+                var latestShift = riderShifts
+                    .OrderByDescending(s => s.ShiftDate)
+                    .First();
+                var rider = latestShift.Rider;
+                var totalAcceptedOrders = riderShifts.Sum(s => s.AcceptedDailyOrders);
+                var targetToDate = CalculateTargetToDate(
+                    companyTarget.MonthlyTarget,
+                    elapsedDays,
+                    daysInMonth);
+
+                if (totalAcceptedOrders >= targetToDate)
+                    continue;
+
+                var totalShifts = riderShifts.Count;
+                var companyName = latestShift.Company?.Name;
+
+                ridersBelowTarget.Add(new RiderBelowMonthlyTargetDetail(
+                    RiderId: rider.Id,
+                    IqamaNo: rider.EmployeeIqamaNo,
+                    RiderNameAR: rider.Employee.NameAR,
+                    RiderNameEN: rider.Employee.NameEN,
+                    WorkingId: latestShift.WorkingId ?? rider.WorkingId ?? "0",
+                    CompanyId: group.Key.CompanyId,
+                    CompanyName: string.IsNullOrWhiteSpace(companyName)
+                        ? companyTarget.CompanyName
+                        : companyName,
+                    HousingName: latestShift.Housing?.Name ?? "غير محدد",
+                    MonthlyTarget: companyTarget.MonthlyTarget,
+                    TargetToDate: targetToDate,
+                    TotalAcceptedOrders: totalAcceptedOrders,
+                    RemainingToTargetToDate: targetToDate - totalAcceptedOrders,
+                    RemainingToMonthlyTarget: Math.Max(companyTarget.MonthlyTarget - totalAcceptedOrders, 0),
+                    TotalShifts: totalShifts,
+                    AverageOrdersPerShift: totalShifts > 0
+                        ? Math.Round((decimal)totalAcceptedOrders / totalShifts, 2)
+                        : 0
+                ));
+            }
+
+            var report = new RidersBelowMonthlyTargetReport(
+                Year: reportYear,
+                Month: reportMonth,
+                StartDate: startDate,
+                EndDate: endDate,
+                IsCurrentMonth: isCurrentMonth,
+                DaysInMonth: daysInMonth,
+                ElapsedDays: elapsedDays,
+                CompanyTargets: targetSummaries,
+                TotalRidersWorked: workedRiders.Count,
+                TotalRidersBelowTarget: ridersBelowTarget.Count,
+                Riders: ridersBelowTarget
+                    .OrderByDescending(r => r.RemainingToTargetToDate)
+                    .ThenBy(r => r.CompanyId)
+                    .ThenBy(r => r.RiderNameEN)
+                    .ToList()
+            );
+
+            return Result.Success(report);
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<RidersBelowMonthlyTargetReport>(
+                new Error($"Error generating riders below target report: {ex.Message}", "server_error", 500));
+        }
+    }
+
+    private static int CalculateTargetToDate(int monthlyTarget, int elapsedDays, int daysInMonth)
+    {
+        return (int)Math.Ceiling((decimal)monthlyTarget * elapsedDays / daysInMonth);
+    }
+
     private (DateOnly startDate, bool isNewRider) GetRiderStartInfo(
         List<RiderShift> riderShifts,
         DateOnly monthStart,
