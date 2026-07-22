@@ -58,39 +58,18 @@ Response: `AccountingFileResponse`
 
 Downloads an authenticated private file. The physical storage path is never returned. Response is the original file stream with its stored content type and safe original filename.
 
-## 2. Platform templates and imports
+## 2. Direct platform imports
 
 Controller: `PlatformImportsController`, base route `api/accounting`.
 
-### `POST /api/accounting/platform-templates`
+The accountant does not create a template, copy a fingerprint, activate a template, or re-upload/reprocess the file. Use exactly one of these four direct upload routes:
 
-Request: `CreatePlatformImportTemplateRequest`
+- `POST /api/accounting/platform-imports/amazon`
+- `POST /api/accounting/platform-imports/hunger`
+- `POST /api/accounting/platform-imports/keeta/pay-per-order`
+- `POST /api/accounting/platform-imports/keeta/segments`
 
-```json
-{
-  "legalEntityId": 1,
-  "platformAccountId": 10,
-  "code": "KEETA-SEGMENTS-2026",
-  "name": "Keeta segments 2026",
-  "adapterKey": "keeta-segments-v1",
-  "schemaFingerprint": "64-hex-characters",
-  "configurationJson": "{}",
-  "effectiveFrom": "2026-01-01",
-  "effectiveTo": null
-}
-```
-
-Response: `PlatformImportTemplateResponse` containing `id`, entity/platform IDs, code, version, adapter, fingerprint, `configurationJson`, numeric status (`Draft`, `Active`, `Retired`), and effective dates.
-
-### `POST /api/accounting/platform-templates/{id}/activate`
-
-Request: `{ "comment": "Certified against the May workbook" }`.
-
-Response: the activated `PlatformImportTemplateResponse`. Overlapping active versions are rejected.
-
-### `POST /api/accounting/platform-imports`
-
-Request: `multipart/form-data` with `legalEntityId`, `platformAccountId`, optional `templateId`, `externalReference`, `periodStart`, `periodEnd`, optional `sourceControlTotal`, and `file`.
+Each route accepts the same `multipart/form-data` shape: `legalEntityId`, `platformAccountId`, `externalReference`, `periodStart`, `periodEnd`, optional `sourceControlTotal`, and `file`. There is no `templateId`, `adapterKey`, `schemaFingerprint`, or `configurationJson` in an upload request. The route selects the built-in parser and the backend creates or reuses the active system template for the relevant fingerprint.
 
 Response: `PlatformImportBatchResponse`:
 
@@ -101,32 +80,39 @@ Response: `PlatformImportBatchResponse`:
   "platformAccountId": 10,
   "storedFileId": "guid",
   "templateId": "guid",
+  "adapterKey": "keeta-segments-v1",
   "externalReference": "KEETA-2026-05",
   "periodStart": "2026-05-01",
   "periodEnd": "2026-05-31",
-  "parserVersion": "keeta-segments-v1",
+  "parserVersion": "openxml-stream-v1",
   "schemaFingerprint": "64-hex-characters",
   "status": 3,
   "sourceControlTotal": 1122463.40,
   "normalizedControlTotal": 1122463.40,
-  "sheetCount": 3,
-  "rawRowCount": 1000,
-  "rawCellCount": 20000,
-  "factCount": 5000,
+  "sheetCount": 2,
+  "rawRowCount": 154,
+  "rawCellCount": 3977,
+  "factCount": 1055,
   "openBlockingIssueCount": 0,
   "rowVersion": "base64"
 }
 ```
 
-Upload alone creates no payroll and no journal. The importer stores the original encrypted file, sheets, raw cells, normalized facts, control totals, and lineage.
+Upload alone creates no payroll and no journal. The importer stores the original encrypted file, the relevant summary sheets and cells, normalized facts, control totals, and lineage. Amazon stores `Sheet1`; Hunger stores `WR` and `RLVL`; each Keeta route stores `تفاصيل الشركاء` and `تفاصيل سائق التوصيل`. The very large Keeta order-detail sheet is intentionally not expanded into database rows.
+
+Template list/detail and maintenance actions remain available for support and audit visibility, but the accountant upload screen must not call template create/activate/reprocess during the normal four-route workflow.
 
 ### `GET /api/accounting/platform-imports/{id}`
 
-Response: the complete `PlatformImportBatchResponse` and current numeric status. Values `1..8` represent `Received`, `Parsing`, `NeedsResolution`, `Reconciled`, `Approved`, `Rejected`, `Superseded`, and `Failed` respectively.
+Response: the complete `PlatformImportBatchResponse` and current numeric status. Values `1..8` represent `Received`, `Parsing`, `NeedsResolution`, `Reconciled`, `Approved`, `Rejected`, `Superseded`, and `Failed` respectively. Use `statusNameAr` for the Arabic UI label; keep `status` for workflow logic.
 
 ### `GET /api/accounting/platform-imports/{id}/issues`
 
-Response: array of `PlatformImportIssueResponse` objects: `id`, severity (`Warning`/`Blocking`), status, issue code, message, resolution, and source raw-row ID.
+Response: array of `PlatformImportIssueResponse` objects: `id`, severity (`Warning`/`Blocking`), status, issue code, message, resolution, and source raw-row ID. The Arabic display fields are `severityNameAr`, `statusNameAr`, `codeAr`, and `messageAr`; use these in the accountant UI. `code` remains the stable machine-readable value (for example `IDENTITY_MISSING`). When the linked row has a resolved rider, the response also includes `riderIqamaNo` and `riderNameAr`.
+
+### `GET /api/accounting/platform-imports/{id}/facts` and `/rows`
+
+Fact responses include the stable `metricCode` plus Arabic `metricNameAr`, `categoryNameAr`, and `workerCategoryAr`. Rider facts include `riderIqamaNo` and `riderNameAr`; raw-row responses expose the same rider fields when the row can be linked to exactly one rider. Company summary rows correctly return these rider fields as `null`.
 
 ### `POST /api/accounting/import-issues/{id}/resolve`
 
@@ -379,6 +365,10 @@ All routes in this section require `Master,Accountant` unless explicitly marked 
 | `GET /api/accounting/files` | `legalEntityId`, `contentType`, date filters, pagination | `PagedResponse<AccountingFileResponse>` |
 | `GET /api/accounting/platform-templates` | `legalEntityId`, `platformAccountId`, `status`, `search`, pagination | `PagedResponse<PlatformImportTemplateResponse>` |
 | `GET /api/accounting/platform-templates/{id}` | template ID | complete template including `configurationJson` |
+| `POST /api/accounting/platform-imports/amazon` | direct multipart upload, no template fields | `PlatformImportBatchResponse` with `adapterKey=amazon-anow-v1` |
+| `POST /api/accounting/platform-imports/hunger` | direct multipart upload, no template fields | `PlatformImportBatchResponse` with `adapterKey=hunger-ftr-v1` |
+| `POST /api/accounting/platform-imports/keeta/pay-per-order` | direct multipart upload, no template fields | `PlatformImportBatchResponse` with `adapterKey=keeta-pay-per-order-v1` |
+| `POST /api/accounting/platform-imports/keeta/segments` | direct multipart upload, no template fields | `PlatformImportBatchResponse` with `adapterKey=keeta-segments-v1` |
 | `GET /api/accounting/platform-imports` | entity/platform/status/date/search, pagination | `PagedResponse<PlatformImportBatchResponse>` |
 | `GET /api/accounting/platform-imports/{id}/facts` | category/metric/resolved filters, pagination | paged normalized facts |
 | `GET /api/accounting/platform-imports/{id}/rows` | `sheetId`, `search`, pagination | paged raw rows with cells |
@@ -389,7 +379,7 @@ All routes in this section require `Master,Accountant` unless explicitly marked 
 | `POST /api/accounting/compensation-policies/{id}/versions` | `{effectiveFrom,effectiveTo?}` | cloned draft `CompensationPolicyResponse` |
 | `POST /api/accounting/compensation-policies/{id}/retire` | `{rowVersion?,comment?}` | retired `CompensationPolicyResponse` |
 
-An untemplated workbook is bootstrapped without an inspection entity: upload it without `templateId`, copy the returned stored fingerprint into a new template, then reprocess that same batch with the template ID. Import download resolves the batch's `StoredFileId`; callers do not pass a stored-file ID to the batch route.
+The four direct routes automatically certify the relevant workbook shape and create/reuse the internal active template. The create/activate/reprocess template workflow is maintenance-only and is not called by the accountant upload screen. Import download resolves the batch's `StoredFileId`; callers do not pass a stored-file ID to the batch route.
 
 ### Payroll, payments, and cash delivery
 

@@ -11,4 +11,6 @@ public static class UserErrors
     public static readonly Error UserNotFound = new("User.UserNotFound", "User not found", StatusCodes.Status401Unauthorized);
     public static readonly Error Disableuser = new("User.UserDisable", "User is disable , contact the administrator", StatusCodes.Status401Unauthorized);
     public static readonly Error userLockedout = new("User.LockedUser", "User is locked , contact the administrator", StatusCodes.Status401Unauthorized);
+    public static readonly Error PhoneNumberNotConfirmed = new("User.PhoneNumberNotConfirmed", "Phone number confirmation is required before signing in", StatusCodes.Status401Unauthorized);
+    public static readonly Error SignInNotAllowed = new("User.SignInNotAllowed", "Sign-in is not allowed for this account", StatusCodes.Status401Unauthorized);
 }

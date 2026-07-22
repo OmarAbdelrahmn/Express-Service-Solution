@@ -9,24 +9,23 @@ namespace Application.Service.AccountingStorage;
 public sealed class EncryptedPrivateAccountingFileStorage : IPrivateAccountingFileStorage
 {
     private static readonly byte[] Magic = Encoding.ASCII.GetBytes("ACCTENC1");
-    private readonly string rootPath;
-    private readonly byte[] key;
+    private readonly string? rootPath;
+    private readonly byte[]? key;
     private readonly AccountingStorageOptions options;
 
     public EncryptedPrivateAccountingFileStorage(IWebHostEnvironment environment, IOptions<AccountingStorageOptions> optionsAccessor)
     {
         options = optionsAccessor.Value;
-        if (string.IsNullOrWhiteSpace(environment.WebRootPath)) throw new InvalidOperationException("The web root is not configured.");
-        rootPath = Path.GetFullPath(Path.Combine(environment.WebRootPath, options.RootRelativePath.Replace('/', Path.DirectorySeparatorChar)));
-        Directory.CreateDirectory(rootPath);
+        rootPath = string.IsNullOrWhiteSpace(environment.WebRootPath)
+            ? null
+            : Path.GetFullPath(Path.Combine(environment.WebRootPath, options.RootRelativePath.Replace('/', Path.DirectorySeparatorChar)));
         try { key = Convert.FromBase64String(options.EncryptionKeyBase64); }
-        catch (FormatException ex) { throw new InvalidOperationException("AccountingStorage:EncryptionKeyBase64 must be valid base64.", ex); }
-        if (key.Length != 32) throw new InvalidOperationException("AccountingStorage:EncryptionKeyBase64 must contain exactly 32 bytes.");
-        if (options.EncryptionChunkBytes is < 4096 or > 8 * 1024 * 1024) throw new InvalidOperationException("Accounting storage chunk size is invalid.");
+        catch (FormatException) { key = null; }
     }
 
     public async Task<StoredAccountingFileResult> StoreAsync(int legalEntityId, Stream source, CancellationToken cancellationToken = default)
     {
+        EnsureConfigured();
         if (legalEntityId <= 0 || !source.CanRead) throw new ArgumentException("A readable source and legal entity are required.");
         var tempDirectory = ResolveContainedPath(Path.Combine(".tmp", legalEntityId.ToString("D10")));
         Directory.CreateDirectory(tempDirectory);
@@ -47,7 +46,7 @@ public sealed class EncryptedPrivateAccountingFileStorage : IPrivateAccountingFi
                 await output.WriteAsync(baseNonce, cancellationToken);
 
                 var plain = new byte[options.EncryptionChunkBytes];
-                using var aes = new AesGcm(key, 16);
+                using var aes = new AesGcm(key!, 16);
                 while (true)
                 {
                     var read = await ReadUpToAsync(source, plain, cancellationToken);
@@ -87,6 +86,7 @@ public sealed class EncryptedPrivateAccountingFileStorage : IPrivateAccountingFi
 
     public async Task<Stream> OpenReadAsync(string storageLocator, CancellationToken cancellationToken = default)
     {
+        EnsureConfigured();
         var sourcePath = ResolveContainedPath(storageLocator.Replace('/', Path.DirectorySeparatorChar));
         if (!File.Exists(sourcePath)) throw new FileNotFoundException("The private accounting file was not found.");
         var tempDirectory = ResolveContainedPath(".read");
@@ -107,7 +107,7 @@ public sealed class EncryptedPrivateAccountingFileStorage : IPrivateAccountingFi
                 if (chunkSize is < 4096 or > 8 * 1024 * 1024) throw new InvalidDataException("The encrypted accounting chunk size is invalid.");
                 var baseNonce = new byte[8];
                 await ReadExactlyAsync(input, baseNonce, cancellationToken);
-                using var aes = new AesGcm(key, 16);
+                using var aes = new AesGcm(key!, 16);
                 var index = 0;
                 while (true)
                 {
@@ -139,6 +139,7 @@ public sealed class EncryptedPrivateAccountingFileStorage : IPrivateAccountingFi
     public Task DeleteAsync(string storageLocator, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        EnsureConfigured();
         var path = ResolveContainedPath(storageLocator.Replace('/', Path.DirectorySeparatorChar));
         if (File.Exists(path)) File.Delete(path);
         return Task.CompletedTask;
@@ -146,11 +147,29 @@ public sealed class EncryptedPrivateAccountingFileStorage : IPrivateAccountingFi
 
     private string ResolveContainedPath(string relativePath)
     {
+        EnsureConfigured();
         if (Path.IsPathRooted(relativePath)) throw new InvalidDataException("Absolute accounting storage paths are not allowed.");
-        var full = Path.GetFullPath(Path.Combine(rootPath, relativePath));
-        var prefix = rootPath.EndsWith(Path.DirectorySeparatorChar) ? rootPath : rootPath + Path.DirectorySeparatorChar;
+        var configuredRootPath = rootPath!;
+        var full = Path.GetFullPath(Path.Combine(configuredRootPath, relativePath));
+        var prefix = configuredRootPath.EndsWith(Path.DirectorySeparatorChar) ? configuredRootPath : configuredRootPath + Path.DirectorySeparatorChar;
         if (!full.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("The accounting storage path escapes the private root.");
         return full;
+    }
+
+    private void EnsureConfigured()
+    {
+        if (string.IsNullOrWhiteSpace(rootPath))
+            throw new InvalidOperationException("The web root is not configured for private accounting storage.");
+        if (key is null)
+            throw new InvalidOperationException("AccountingStorage:EncryptionKeyBase64 must be valid base64.");
+        if (key.Length != 32)
+            throw new InvalidOperationException("AccountingStorage:EncryptionKeyBase64 must contain exactly 32 bytes.");
+        if (options.EncryptionChunkBytes is < 4096 or > 8 * 1024 * 1024)
+            throw new InvalidOperationException("Accounting storage chunk size is invalid.");
+        if (options.MaxFileBytes <= 0)
+            throw new InvalidOperationException("Accounting storage maximum file size is invalid.");
+
+        Directory.CreateDirectory(rootPath);
     }
 
     private static byte[] BuildNonce(byte[] baseNonce, int index)

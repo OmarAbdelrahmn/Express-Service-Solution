@@ -690,6 +690,7 @@ public class MemberController(IMemberService housingService, IReminderService re
             $"Housing_Report_{startDate}_{endDate}.xlsx");
     }
     [HttpPost("member/login")]
+    [Microsoft.AspNetCore.Authorization.AllowAnonymous]
     public async Task<IActionResult> MemberLogin([FromBody] MemberAuthRequest request)
     {
         var response = await housingService.MemberSignInAsync(request);

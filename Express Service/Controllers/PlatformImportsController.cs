@@ -36,25 +36,57 @@ public class PlatformImportsController(IPlatformImportService service) : Control
     public async Task<IActionResult> RetireTemplate(Guid id, [FromBody] RetirePlatformImportTemplateRequest request, CancellationToken ct)
         => await WithActor(actor => service.RetireTemplateAsync(id, request, actor, ct));
 
-    [HttpPost("platform-imports")]
+    [HttpPost("platform-imports/amazon")]
     [RequestSizeLimit(104_857_600)]
-    public async Task<IActionResult> Upload(
+    public Task<IActionResult> UploadAmazon(
         [FromForm] int legalEntityId,
         [FromForm] int platformAccountId,
-        [FromForm] Guid? templateId,
         [FromForm] string externalReference,
         [FromForm] DateOnly periodStart,
         [FromForm] DateOnly periodEnd,
         [FromForm] decimal? sourceControlTotal,
         [FromForm] IFormFile file,
         CancellationToken ct)
-    {
-        if (file is null || file.Length == 0)
-            return Application.Abstraction.Result.Failure(AccountingPlatformErrors.InvalidFile).ToProblem();
-        await using var content = file.OpenReadStream();
-        var request = new UploadPlatformImportRequest(legalEntityId, platformAccountId, templateId, externalReference, periodStart, periodEnd, sourceControlTotal);
-        return await WithActor(actor => service.UploadAsync(request, file.FileName, file.ContentType, content, actor, ct));
-    }
+        => UploadDirect(legalEntityId, platformAccountId, externalReference, periodStart, periodEnd, sourceControlTotal, file, service.UploadAmazonAsync, ct);
+
+    [HttpPost("platform-imports/hunger")]
+    [RequestSizeLimit(104_857_600)]
+    public Task<IActionResult> UploadHunger(
+        [FromForm] int legalEntityId,
+        [FromForm] int platformAccountId,
+        [FromForm] string externalReference,
+        [FromForm] DateOnly periodStart,
+        [FromForm] DateOnly periodEnd,
+        [FromForm] decimal? sourceControlTotal,
+        [FromForm] IFormFile file,
+        CancellationToken ct)
+        => UploadDirect(legalEntityId, platformAccountId, externalReference, periodStart, periodEnd, sourceControlTotal, file, service.UploadHungerAsync, ct);
+
+    [HttpPost("platform-imports/keeta/pay-per-order")]
+    [RequestSizeLimit(104_857_600)]
+    public Task<IActionResult> UploadKeetaPayPerOrder(
+        [FromForm] int legalEntityId,
+        [FromForm] int platformAccountId,
+        [FromForm] string externalReference,
+        [FromForm] DateOnly periodStart,
+        [FromForm] DateOnly periodEnd,
+        [FromForm] decimal? sourceControlTotal,
+        [FromForm] IFormFile file,
+        CancellationToken ct)
+        => UploadDirect(legalEntityId, platformAccountId, externalReference, periodStart, periodEnd, sourceControlTotal, file, service.UploadKeetaPayPerOrderAsync, ct);
+
+    [HttpPost("platform-imports/keeta/segments")]
+    [RequestSizeLimit(104_857_600)]
+    public Task<IActionResult> UploadKeetaSegments(
+        [FromForm] int legalEntityId,
+        [FromForm] int platformAccountId,
+        [FromForm] string externalReference,
+        [FromForm] DateOnly periodStart,
+        [FromForm] DateOnly periodEnd,
+        [FromForm] decimal? sourceControlTotal,
+        [FromForm] IFormFile file,
+        CancellationToken ct)
+        => UploadDirect(legalEntityId, platformAccountId, externalReference, periodStart, periodEnd, sourceControlTotal, file, service.UploadKeetaSegmentsAsync, ct);
 
     [HttpGet("platform-imports")]
     public async Task<IActionResult> GetBatches(
@@ -127,6 +159,29 @@ public class PlatformImportsController(IPlatformImportService service) : Control
         var actor = User.GetUserId();
         if (string.IsNullOrWhiteSpace(actor)) return Unauthorized();
         var result = await action(actor);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    private async Task<IActionResult> UploadDirect(
+        int legalEntityId,
+        int platformAccountId,
+        string externalReference,
+        DateOnly periodStart,
+        DateOnly periodEnd,
+        decimal? sourceControlTotal,
+        IFormFile file,
+        Func<DirectPlatformImportRequest, string, string, Stream, string, CancellationToken, Task<Application.Abstraction.Result<PlatformImportBatchResponse>>> upload,
+        CancellationToken ct)
+    {
+        if (file is null || file.Length == 0)
+            return Application.Abstraction.Result.Failure(AccountingPlatformErrors.InvalidFile).ToProblem();
+
+        var actor = User.GetUserId();
+        if (string.IsNullOrWhiteSpace(actor)) return Unauthorized();
+
+        await using var content = file.OpenReadStream();
+        var request = new DirectPlatformImportRequest(legalEntityId, platformAccountId, externalReference, periodStart, periodEnd, sourceControlTotal);
+        var result = await upload(request, file.FileName, file.ContentType, content, actor, ct);
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
 

@@ -1,5 +1,6 @@
 using Application.Abstraction;
 using Application.Abstraction.Errors;
+using Application.Contracts.Common;
 using Application.Contracts.Organization;
 using Domain;
 using Domain.Entities.AccountingCore;
@@ -51,7 +52,7 @@ public class OrganizationSettingsService(ApplicationDbcontext dbcontext) : IOrga
 
         return tenant is null
             ? Result.Failure<OrganizationResponse>(OrganizationErrors.TenantNotFound)
-            : Result.Success(ToResponse(tenant, accessibleLegalEntityIds));
+            : Result.Success(ToResponse(tenant, accessibleLegalEntityIds, includeInactive: false));
     }
 
     public async Task<Result<OrganizationResponse>> GetTenantAsync(int tenantId, CancellationToken cancellationToken = default)
@@ -82,6 +83,63 @@ public class OrganizationSettingsService(ApplicationDbcontext dbcontext) : IOrga
         return Result.Success(new TenantResponse(tenant.Id, tenant.Code, tenant.Name, tenant.IsActive));
     }
 
+    public async Task<Result<PagedResponse<LegalEntityResponse>>> GetLegalEntitiesAsync(
+        PaginationRequest pagination,
+        LegalEntityListFilter filter,
+        CancellationToken cancellationToken = default)
+    {
+        var query = dbcontext.LegalEntities
+            .AsNoTracking()
+            .Include(x => x.Branches)
+            .Include(x => x.PlatformAccounts)
+            .AsQueryable();
+
+        if (filter.TenantId.HasValue)
+            query = query.Where(x => x.TenantId == filter.TenantId.Value);
+        if (filter.Active.HasValue)
+            query = query.Where(x => x.IsActive == filter.Active.Value);
+        if (!string.IsNullOrWhiteSpace(filter.Search))
+        {
+            var search = filter.Search.Trim().ToUpperInvariant();
+            query = query.Where(x => x.Code.ToUpper().Contains(search) || x.LegalName.ToUpper().Contains(search) ||
+                                     (x.TaxRegistrationNumber != null && x.TaxRegistrationNumber.ToUpper().Contains(search)));
+        }
+
+        var totalCount = await query.CountAsync(cancellationToken);
+        var pageNumber = pagination.NormalizedPageNumber;
+        var pageSize = pagination.NormalizedPageSize;
+        var ascending = string.Equals(filter.SortDirection, "asc", StringComparison.OrdinalIgnoreCase);
+        var ordered = (filter.SortBy?.Trim().ToLowerInvariant(), ascending) switch
+        {
+            ("legalname", true) => query.OrderBy(x => x.LegalName).ThenBy(x => x.Id),
+            ("legalname", false) => query.OrderByDescending(x => x.LegalName).ThenByDescending(x => x.Id),
+            ("createdat", true) => query.OrderBy(x => x.CreatedAt).ThenBy(x => x.Id),
+            ("createdat", false) => query.OrderByDescending(x => x.CreatedAt).ThenByDescending(x => x.Id),
+            ("id", false) => query.OrderByDescending(x => x.Id),
+            ("id", true) => query.OrderBy(x => x.Id),
+            ("code", false) => query.OrderByDescending(x => x.Code).ThenByDescending(x => x.Id),
+            _ => query.OrderBy(x => x.Code).ThenBy(x => x.Id)
+        };
+
+        var items = (await ordered.Skip((pageNumber - 1) * pageSize).Take(pageSize).ToListAsync(cancellationToken))
+            .Select(x => ToResponse(x))
+            .ToArray();
+        return Result.Success(new PagedResponse<LegalEntityResponse>(items, pageNumber, pageSize, totalCount));
+    }
+
+    public async Task<Result<LegalEntityResponse>> GetLegalEntityAsync(int id, CancellationToken cancellationToken = default)
+    {
+        var entity = await dbcontext.LegalEntities
+            .AsNoTracking()
+            .Include(x => x.Branches)
+            .Include(x => x.PlatformAccounts)
+            .SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
+
+        return entity is null
+            ? Result.Failure<LegalEntityResponse>(OrganizationErrors.LegalEntityNotFound)
+            : Result.Success(ToResponse(entity));
+    }
+
     public async Task<Result<LegalEntityResponse>> CreateLegalEntityAsync(CreateLegalEntityRequest request, CancellationToken cancellationToken = default)
     {
         if (!await dbcontext.Tenants.AnyAsync(x => x.Id == request.TenantId, cancellationToken))
@@ -105,6 +163,44 @@ public class OrganizationSettingsService(ApplicationDbcontext dbcontext) : IOrga
         return Result.Success(ToResponse(entity));
     }
 
+    public async Task<Result<LegalEntityResponse>> UpdateLegalEntityAsync(int id, UpdateLegalEntityRequest request, CancellationToken cancellationToken = default)
+    {
+        var entity = await dbcontext.LegalEntities
+            .Include(x => x.Branches)
+            .Include(x => x.PlatformAccounts)
+            .SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
+        if (entity is null) return Result.Failure<LegalEntityResponse>(OrganizationErrors.LegalEntityNotFound);
+
+        var code = NormalizeCode(request.Code);
+        if (await dbcontext.LegalEntities.AnyAsync(x => x.TenantId == entity.TenantId && x.Code == code && x.Id != id, cancellationToken))
+            return Result.Failure<LegalEntityResponse>(OrganizationErrors.DuplicateCode);
+
+        entity.Code = code;
+        entity.LegalName = request.LegalName.Trim();
+        entity.BaseCurrencyCode = NormalizeCode(request.BaseCurrencyCode);
+        entity.TaxRegistrationNumber = TrimToNull(request.TaxRegistrationNumber);
+        entity.IsActive = request.IsActive;
+        await dbcontext.SaveChangesAsync(cancellationToken);
+
+        return Result.Success(ToResponse(entity));
+    }
+
+    public async Task<Result<LegalEntityResponse>> DeleteLegalEntityAsync(int id, CancellationToken cancellationToken = default)
+    {
+        var entity = await dbcontext.LegalEntities
+            .Include(x => x.Branches)
+            .Include(x => x.PlatformAccounts)
+            .SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
+        if (entity is null) return Result.Failure<LegalEntityResponse>(OrganizationErrors.LegalEntityNotFound);
+
+        entity.IsActive = false;
+        foreach (var platformAccount in entity.PlatformAccounts)
+            platformAccount.IsActive = false;
+        await dbcontext.SaveChangesAsync(cancellationToken);
+
+        return Result.Success(ToResponse(entity));
+    }
+
     public async Task<Result<BranchResponse>> CreateBranchAsync(CreateBranchRequest request, CancellationToken cancellationToken = default)
     {
         if (!await dbcontext.LegalEntities.AnyAsync(x => x.Id == request.LegalEntityId, cancellationToken))
@@ -119,6 +215,59 @@ public class OrganizationSettingsService(ApplicationDbcontext dbcontext) : IOrga
         await dbcontext.SaveChangesAsync(cancellationToken);
 
         return Result.Success(new BranchResponse(branch.Id, branch.Code, branch.Name, branch.IsActive));
+    }
+
+    public async Task<Result<PagedResponse<PlatformAccountResponse>>> GetPlatformAccountsAsync(
+        PaginationRequest pagination,
+        PlatformAccountListFilter filter,
+        CancellationToken cancellationToken = default)
+    {
+        if (filter.LegalEntityId <= 0)
+            return Result.Failure<PagedResponse<PlatformAccountResponse>>(OrganizationErrors.LegalEntityNotFound);
+        if (!await dbcontext.LegalEntities.AnyAsync(x => x.Id == filter.LegalEntityId, cancellationToken))
+            return Result.Failure<PagedResponse<PlatformAccountResponse>>(OrganizationErrors.LegalEntityNotFound);
+
+        var query = dbcontext.PlatformAccounts
+            .AsNoTracking()
+            .Where(x => x.LegalEntityId == filter.LegalEntityId);
+
+        if (filter.Active.HasValue)
+            query = query.Where(x => x.IsActive == filter.Active.Value);
+        if (!string.IsNullOrWhiteSpace(filter.Search))
+        {
+            var search = filter.Search.Trim().ToUpperInvariant();
+            query = query.Where(x => x.Code.ToUpper().Contains(search) || x.PlatformName.ToUpper().Contains(search) ||
+                                     (x.ExternalAccountReference != null && x.ExternalAccountReference.ToUpper().Contains(search)));
+        }
+
+        var totalCount = await query.CountAsync(cancellationToken);
+        var pageNumber = pagination.NormalizedPageNumber;
+        var pageSize = pagination.NormalizedPageSize;
+        var ascending = string.Equals(filter.SortDirection, "asc", StringComparison.OrdinalIgnoreCase);
+        var ordered = (filter.SortBy?.Trim().ToLowerInvariant(), ascending) switch
+        {
+            ("platformname", true) => query.OrderBy(x => x.PlatformName).ThenBy(x => x.Id),
+            ("platformname", false) => query.OrderByDescending(x => x.PlatformName).ThenByDescending(x => x.Id),
+            ("createdat", true) => query.OrderBy(x => x.CreatedAt).ThenBy(x => x.Id),
+            ("createdat", false) => query.OrderByDescending(x => x.CreatedAt).ThenByDescending(x => x.Id),
+            ("id", false) => query.OrderByDescending(x => x.Id),
+            ("id", true) => query.OrderBy(x => x.Id),
+            ("code", false) => query.OrderByDescending(x => x.Code).ThenByDescending(x => x.Id),
+            _ => query.OrderBy(x => x.Code).ThenBy(x => x.Id)
+        };
+
+        var items = (await ordered.Skip((pageNumber - 1) * pageSize).Take(pageSize).ToListAsync(cancellationToken))
+            .Select(x => ToResponse(x))
+            .ToArray();
+        return Result.Success(new PagedResponse<PlatformAccountResponse>(items, pageNumber, pageSize, totalCount));
+    }
+
+    public async Task<Result<PlatformAccountResponse>> GetPlatformAccountAsync(int id, CancellationToken cancellationToken = default)
+    {
+        var account = await dbcontext.PlatformAccounts.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
+        return account is null
+            ? Result.Failure<PlatformAccountResponse>(OrganizationErrors.PlatformAccountNotFound)
+            : Result.Success(ToResponse(account));
     }
 
     public async Task<Result<PlatformAccountResponse>> CreatePlatformAccountAsync(CreatePlatformAccountRequest request, CancellationToken cancellationToken = default)
@@ -141,6 +290,35 @@ public class OrganizationSettingsService(ApplicationDbcontext dbcontext) : IOrga
         await dbcontext.SaveChangesAsync(cancellationToken);
 
         return Result.Success(ToResponse(platformAccount));
+    }
+
+    public async Task<Result<PlatformAccountResponse>> UpdatePlatformAccountAsync(int id, UpdatePlatformAccountRequest request, CancellationToken cancellationToken = default)
+    {
+        var account = await dbcontext.PlatformAccounts.SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
+        if (account is null) return Result.Failure<PlatformAccountResponse>(OrganizationErrors.PlatformAccountNotFound);
+
+        var code = NormalizeCode(request.Code);
+        if (await dbcontext.PlatformAccounts.AnyAsync(x => x.LegalEntityId == account.LegalEntityId && x.Code == code && x.Id != id, cancellationToken))
+            return Result.Failure<PlatformAccountResponse>(OrganizationErrors.DuplicateCode);
+
+        account.Code = code;
+        account.PlatformName = request.PlatformName.Trim();
+        account.ExternalAccountReference = TrimToNull(request.ExternalAccountReference);
+        account.IsActive = request.IsActive;
+        await dbcontext.SaveChangesAsync(cancellationToken);
+
+        return Result.Success(ToResponse(account));
+    }
+
+    public async Task<Result<PlatformAccountResponse>> DeletePlatformAccountAsync(int id, CancellationToken cancellationToken = default)
+    {
+        var account = await dbcontext.PlatformAccounts.SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
+        if (account is null) return Result.Failure<PlatformAccountResponse>(OrganizationErrors.PlatformAccountNotFound);
+
+        account.IsActive = false;
+        await dbcontext.SaveChangesAsync(cancellationToken);
+
+        return Result.Success(ToResponse(account));
     }
 
     public async Task<Result<LegacyCompanyPlatformMappingResponse>> CreateLegacyCompanyPlatformMappingAsync(CreateLegacyCompanyPlatformMappingRequest request, CancellationToken cancellationToken = default)
@@ -166,16 +344,17 @@ public class OrganizationSettingsService(ApplicationDbcontext dbcontext) : IOrga
         return Result.Success(new LegacyCompanyPlatformMappingResponse(mapping.Id, mapping.CompanyId, mapping.PlatformAccountId, mapping.EffectiveFrom));
     }
 
-    private static OrganizationResponse ToResponse(Tenant tenant, IReadOnlySet<int>? accessibleLegalEntityIds = null) => new(
+    private static OrganizationResponse ToResponse(Tenant tenant, IReadOnlySet<int>? accessibleLegalEntityIds = null, bool includeInactive = true) => new(
         new TenantResponse(tenant.Id, tenant.Code, tenant.Name, tenant.IsActive),
         tenant.LegalEntities
+            .Where(x => includeInactive || x.IsActive)
             .Where(x => accessibleLegalEntityIds is null || accessibleLegalEntityIds.Contains(x.Id))
             .OrderBy(x => x.Code)
             .ThenBy(x => x.Id)
-            .Select(ToResponse)
+            .Select(x => ToResponse(x, includeInactive))
             .ToArray());
 
-    private static LegalEntityResponse ToResponse(LegalEntity entity) => new(
+    private static LegalEntityResponse ToResponse(LegalEntity entity, bool includeInactive = true) => new(
         entity.Id,
         entity.TenantId,
         entity.Code,
@@ -184,7 +363,7 @@ public class OrganizationSettingsService(ApplicationDbcontext dbcontext) : IOrga
         entity.TaxRegistrationNumber,
         entity.IsActive,
         entity.Branches.OrderBy(x => x.Code).ThenBy(x => x.Id).Select(x => new BranchResponse(x.Id, x.Code, x.Name, x.IsActive)).ToArray(),
-        entity.PlatformAccounts.OrderBy(x => x.Code).ThenBy(x => x.Id).Select(ToResponse).ToArray());
+        entity.PlatformAccounts.Where(x => includeInactive || x.IsActive).OrderBy(x => x.Code).ThenBy(x => x.Id).Select(ToResponse).ToArray());
 
     private static PlatformAccountResponse ToResponse(PlatformAccount account) => new(
         account.Id,

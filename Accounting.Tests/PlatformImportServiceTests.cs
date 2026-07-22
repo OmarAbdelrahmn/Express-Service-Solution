@@ -9,6 +9,7 @@ using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Spreadsheet;
 using Domain;
+using Domain.Entities;
 using Domain.Entities.AccountingCore;
 using Domain.Entities.AccountingPlatform;
 using Domain.Entities.Organization;
@@ -174,6 +175,89 @@ public class PlatformImportServiceTests
         Assert.Equal(upload.Value.Id, Assert.Single(batches.Value.Items).Id);
     }
 
+    [Fact]
+    public async Task DirectKeetaPayPerOrderUpload_AutoCertifiesAndSkipsOrderDetailSheet()
+    {
+        await using var db = CreateDbContext();
+        db.Tenants.Add(new Tenant { Id = 1, Code = "T", Name = "Tenant" });
+        db.LegalEntities.Add(new LegalEntity { Id = 1, TenantId = 1, Code = "E", LegalName = "Entity", BaseCurrencyCode = "SAR" });
+        db.PlatformAccounts.Add(new PlatformAccount { Id = 1, LegalEntityId = 1, Code = "KEETA", PlatformName = "Keeta" });
+        await db.SaveChangesAsync();
+        var service = new PlatformImportService(db, new AllowAllAccess(), new MemoryStorage());
+
+        var upload = await service.UploadKeetaPayPerOrderAsync(
+            new DirectPlatformImportRequest(1, 1, "KEETA-2026-05-PPO", new DateOnly(2026, 5, 1), new DateOnly(2026, 5, 31), 100m),
+            "keeta-pay-per-order.xlsx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            new MemoryStream(CreateKeetaPayPerOrderWorkbook()),
+            "accountant");
+
+        Assert.True(upload.IsSuccess);
+        Assert.Equal("keeta-pay-per-order-v1", upload.Value.AdapterKey);
+        Assert.NotNull(upload.Value.TemplateId);
+        Assert.Equal(2, upload.Value.SheetCount);
+        Assert.Equal(4, upload.Value.RawRowCount);
+        Assert.Equal(9, upload.Value.FactCount);
+        Assert.Equal(100m, upload.Value.NormalizedControlTotal);
+        Assert.Equal("تحتاج إلى معالجة", upload.Value.StatusNameAr);
+        Assert.DoesNotContain(await db.PlatformImportSheets.ToListAsync(), x => x.Name == "تفاصيل طلب السائق");
+
+        var template = await db.PlatformImportTemplates.SingleAsync();
+        Assert.Equal(PlatformTemplateStatus.Active, template.Status);
+        Assert.Equal("keeta-pay-per-order-v1", template.AdapterKey);
+        Assert.Equal(upload.Value.SchemaFingerprint, template.SchemaFingerprint);
+
+        var facts = await service.GetFactsAsync(
+            upload.Value.Id,
+            new PaginationRequest { PageNumber = 1, PageSize = 25 },
+            new PlatformNormalizedFactListFilter { SortBy = "id", SortDirection = "asc" },
+            "accountant");
+        var companyTotal = Assert.Single(facts.Value.Items, x => x.MetricCode == "COMPANY_TOTAL" && x.WorkerCategory == "Company");
+        Assert.Equal("إجمالي مستحقات الشركة", companyTotal.MetricNameAr);
+        Assert.Equal("إجمالي المطابقة", companyTotal.CategoryNameAr);
+
+        var issues = await service.GetIssuesAsync(upload.Value.Id, "accountant");
+        var identityIssue = Assert.Single(issues.Value, x => x.Code == "IDENTITY_MISSING");
+        Assert.Equal("هوية المندوب غير مرتبطة", identityIssue.CodeAr);
+        Assert.Equal("المندوب KEETA-RIDER-1 لديه 0 تطابق فعّال للهوية بتاريخ 2026-05-31. المصادر: لا يوجد.", identityIssue.MessageAr);
+    }
+
+    [Fact]
+    public async Task FactAndIssueResponses_ReturnRiderIqamaAndArabicName()
+    {
+        await using var db = CreateDbContext();
+        var batchId = Guid.NewGuid();
+        db.Tenants.Add(new Tenant { Id = 1, Code = "T", Name = "Tenant" });
+        db.LegalEntities.Add(new LegalEntity { Id = 1, TenantId = 1, Code = "E", LegalName = "Entity", BaseCurrencyCode = "SAR" });
+        db.PlatformAccounts.Add(new PlatformAccount { Id = 1, LegalEntityId = 1, Code = "P", PlatformName = "Platform" });
+        db.Employees.Add(new Employees { IqamaNo = 2039796, NameAR = "أحمد علي" });
+        db.PlatformImportBatches.Add(new PlatformImportBatch { Id = batchId, LegalEntityId = 1, PlatformAccountId = 1, ExternalReference = "TEST", PeriodStart = new DateOnly(2026, 7, 1), PeriodEnd = new DateOnly(2026, 7, 31) });
+        db.PlatformNormalizedFacts.Add(new PlatformNormalizedFact
+        {
+            PlatformImportBatchId = batchId, LegalEntityId = 1, PlatformAccountId = 1, SourceRawRowId = 77,
+            RiderIqamaNo = 2039796, ExternalWorkerId = "WORKER-1", FactDate = new DateOnly(2026, 7, 31),
+            Category = PlatformFactCategory.RiderPayout, MetricCode = "NET_SETTLEMENT", NumericValue = 123m, IsResolved = true
+        });
+        db.PlatformImportIssues.Add(new PlatformImportIssue
+        {
+            PlatformImportBatchId = batchId, SourceRawRowId = 77, Severity = PlatformImportIssueSeverity.Warning,
+            Code = "VALUE_INVALID", Message = "الخلية B2 لا تحتوي على قيمة صالحة من النوع number."
+        });
+        await db.SaveChangesAsync();
+        var service = new PlatformImportService(db, new AllowAllAccess(), new MemoryStorage());
+
+        var facts = await service.GetFactsAsync(batchId, new PaginationRequest { PageNumber = 1, PageSize = 10 }, new PlatformNormalizedFactListFilter(), "accountant");
+        var fact = Assert.Single(facts.Value.Items);
+        Assert.Equal(2039796, fact.RiderIqamaNo);
+        Assert.Equal("أحمد علي", fact.RiderNameAr);
+        Assert.Equal("صافي التسوية", fact.MetricNameAr);
+
+        var issues = await service.GetIssuesAsync(batchId, "accountant");
+        var issue = Assert.Single(issues.Value);
+        Assert.Equal(2039796, issue.RiderIqamaNo);
+        Assert.Equal("أحمد علي", issue.RiderNameAr);
+    }
+
     private static ApplicationDbcontext CreateDbContext() => new(
         new DbContextOptionsBuilder<ApplicationDbcontext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
@@ -213,6 +297,62 @@ public class PlatformImportServiceTests
         }
 
         return stream.ToArray();
+    }
+
+    private static byte[] CreateKeetaPayPerOrderWorkbook()
+    {
+        using var stream = new MemoryStream();
+        using (var document = SpreadsheetDocument.Create(stream, SpreadsheetDocumentType.Workbook, true))
+        {
+            var workbookPart = document.AddWorkbookPart();
+            workbookPart.Workbook = new Workbook();
+            var sheets = workbookPart.Workbook.AppendChild(new Sheets());
+
+            AddSheet(workbookPart, sheets, 1, "تفاصيل الشركاء",
+                ["رسوم خدمة التوصيل", "مبلغ ضريبة القيمة المضافة", "مبلغ الفاتورة", "إجمالي المبلغ المستحق"],
+                ["80", "15", "100", "100"]);
+            AddSheet(workbookPart, sheets, 2, "تفاصيل سائق التوصيل",
+                ["معرّف سائق التوصيل", "الطلبات المُسلمة", "رسوم خدمة التوصيل", "دعم", "غرامة مُخالفة", "إجمالي المبلغ المستحق"],
+                ["KEETA-RIDER-1", "10", "80", "10", "-5", "85"]);
+            AddSheet(workbookPart, sheets, 3, "تفاصيل طلب السائق",
+                ["معرّف سائق التوصيل", "معرّف العمل", "المبلغ التفصيلي"],
+                ["KEETA-RIDER-1", "ORDER-1", "8.5"]);
+            workbookPart.Workbook.Save();
+        }
+
+        return stream.ToArray();
+    }
+
+    private static void AddSheet(
+        WorkbookPart workbookPart,
+        Sheets sheets,
+        uint sheetId,
+        string name,
+        IReadOnlyList<string> headers,
+        IReadOnlyList<string> values)
+    {
+        var worksheetPart = workbookPart.AddNewPart<WorksheetPart>();
+        worksheetPart.Worksheet = new Worksheet(new SheetData(
+            new Row(headers.Select((value, index) => InlineCell($"{ColumnName(index + 1)}1", value))) { RowIndex = 1 },
+            new Row(values.Select((value, index) => InlineCell($"{ColumnName(index + 1)}2", value))) { RowIndex = 2 }));
+        sheets.Append(new Sheet
+        {
+            Id = workbookPart.GetIdOfPart(worksheetPart),
+            SheetId = sheetId,
+            Name = name
+        });
+    }
+
+    private static string ColumnName(int column)
+    {
+        var name = string.Empty;
+        while (column > 0)
+        {
+            column--;
+            name = (char)('A' + column % 26) + name;
+            column /= 26;
+        }
+        return name;
     }
 
     private static Cell InlineCell(string reference, string value) => new()

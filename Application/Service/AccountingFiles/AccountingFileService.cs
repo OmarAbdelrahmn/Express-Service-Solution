@@ -184,7 +184,7 @@ public sealed class AccountingFileService(
             var content = await storage.OpenReadAsync(file.StorageLocator, cancellationToken);
             return Result.Success(new AccountingFileDownload(ToResponse(file), content));
         }
-        catch (Exception ex) when (ex is InvalidDataException or CryptographicException or IOException)
+        catch (Exception ex) when (ex is InvalidDataException or CryptographicException or IOException or InvalidOperationException)
         { return Result.Failure<AccountingFileDownload>(AccountingPlatformErrors.StorageUnavailable); }
     }
 
@@ -205,7 +205,7 @@ public sealed class AccountingFileService(
                 _ => false
             };
         }
-        catch (Exception ex) when (ex is InvalidDataException or CryptographicException or IOException) { return false; }
+        catch (Exception ex) when (ex is InvalidDataException or CryptographicException or IOException or InvalidOperationException) { return false; }
     }
 
     private async Task AppendAuditAsync(AccountingStoredFile file, string actorId, CancellationToken cancellationToken)

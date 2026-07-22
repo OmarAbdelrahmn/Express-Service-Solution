@@ -9,13 +9,29 @@ using Application.Service.FinancialAccess;
 using Domain;
 using Domain.Entities.AccountingCore;
 using Domain.Entities.Organization;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.Options;
 using Xunit;
 
 namespace Accounting.Tests;
 
 public class AccountingFileServiceTests
 {
+    [Fact]
+    public async Task EncryptedStorage_WithMissingKey_DefersFailureUntilAFileOperation()
+    {
+        var storage = new EncryptedPrivateAccountingFileStorage(
+            new TestWebHostEnvironment { WebRootPath = Path.GetTempPath() },
+            Options.Create(new AccountingStorageOptions { EncryptionKeyBase64 = string.Empty }));
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            storage.StoreAsync(1, new MemoryStream("evidence"u8.ToArray())));
+
+        Assert.Contains("EncryptionKeyBase64", exception.Message);
+    }
+
     [Fact]
     public async Task Upload_UsesContentIdentity_AndDownloadReturnsPrivateFile()
     {
@@ -150,5 +166,15 @@ public class AccountingFileServiceTests
         public Task<Result<FinancialUserAccessResponse>> GrantAsync(GrantFinancialUserAccessRequest request, string grantedBy, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<Result> RevokeAsync(string userId, int legalEntityId, string revokedBy, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<Result<IReadOnlyCollection<FinancialUserAccessResponse>>> GetForLegalEntityAsync(int legalEntityId, string requestedBy, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    }
+
+    private sealed class TestWebHostEnvironment : IWebHostEnvironment
+    {
+        public string EnvironmentName { get; set; } = "Test";
+        public string ApplicationName { get; set; } = "Accounting.Tests";
+        public string WebRootPath { get; set; } = string.Empty;
+        public IFileProvider WebRootFileProvider { get; set; } = new NullFileProvider();
+        public string ContentRootPath { get; set; } = Path.GetTempPath();
+        public IFileProvider ContentRootFileProvider { get; set; } = new NullFileProvider();
     }
 }

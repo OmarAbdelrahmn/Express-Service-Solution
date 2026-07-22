@@ -163,7 +163,83 @@ public class PlatformImportService(
         return Result.Success(ToResponse(template));
     }
 
-    public async Task<Result<PlatformImportBatchResponse>> UploadAsync(UploadPlatformImportRequest request, string fileName, string contentType, Stream content, string actorId, CancellationToken cancellationToken = default)
+    public Task<Result<PlatformImportBatchResponse>> UploadAsync(
+        UploadPlatformImportRequest request,
+        string fileName,
+        string contentType,
+        Stream content,
+        string actorId,
+        CancellationToken cancellationToken = default)
+        => UploadInternalAsync(request, fileName, contentType, content, actorId, null, cancellationToken);
+
+    public Task<Result<PlatformImportBatchResponse>> UploadAmazonAsync(
+        DirectPlatformImportRequest request,
+        string fileName,
+        string contentType,
+        Stream content,
+        string actorId,
+        CancellationToken cancellationToken = default)
+        => UploadDirectAsync(request, fileName, contentType, content, actorId, DirectImportProfiles.Amazon, cancellationToken);
+
+    public Task<Result<PlatformImportBatchResponse>> UploadHungerAsync(
+        DirectPlatformImportRequest request,
+        string fileName,
+        string contentType,
+        Stream content,
+        string actorId,
+        CancellationToken cancellationToken = default)
+        => UploadDirectAsync(request, fileName, contentType, content, actorId, DirectImportProfiles.Hunger, cancellationToken);
+
+    public Task<Result<PlatformImportBatchResponse>> UploadKeetaPayPerOrderAsync(
+        DirectPlatformImportRequest request,
+        string fileName,
+        string contentType,
+        Stream content,
+        string actorId,
+        CancellationToken cancellationToken = default)
+        => UploadDirectAsync(request, fileName, contentType, content, actorId, DirectImportProfiles.KeetaPayPerOrder, cancellationToken);
+
+    public Task<Result<PlatformImportBatchResponse>> UploadKeetaSegmentsAsync(
+        DirectPlatformImportRequest request,
+        string fileName,
+        string contentType,
+        Stream content,
+        string actorId,
+        CancellationToken cancellationToken = default)
+        => UploadDirectAsync(request, fileName, contentType, content, actorId, DirectImportProfiles.KeetaSegments, cancellationToken);
+
+    private Task<Result<PlatformImportBatchResponse>> UploadDirectAsync(
+        DirectPlatformImportRequest request,
+        string fileName,
+        string contentType,
+        Stream content,
+        string actorId,
+        DirectImportProfile profile,
+        CancellationToken cancellationToken)
+        => UploadInternalAsync(
+            new UploadPlatformImportRequest(
+                request.LegalEntityId,
+                request.PlatformAccountId,
+                null,
+                request.ExternalReference,
+                request.PeriodStart,
+                request.PeriodEnd,
+                request.SourceControlTotal),
+            fileName,
+            contentType,
+            content,
+            actorId,
+            profile,
+            cancellationToken);
+
+    private async Task<Result<PlatformImportBatchResponse>> UploadInternalAsync(
+        UploadPlatformImportRequest request,
+        string fileName,
+        string contentType,
+        Stream content,
+        string actorId,
+        DirectImportProfile? directProfile,
+        CancellationToken cancellationToken)
     {
         var access = await financialAccessService.EnsurePermissionAsync(actorId, request.LegalEntityId, FinancialPermission.Prepare, cancellationToken);
         if (access.IsFailure) return Result.Failure<PlatformImportBatchResponse>(access.Error);
@@ -229,30 +305,57 @@ public class PlatformImportService(
         try
         {
             await using var workbookStream = await storage.OpenReadAsync(file.StorageLocator, cancellationToken);
-            batch.SchemaFingerprint = await PreserveWorkbookAsync(batch, workbookStream, cancellationToken);
+            var selectedProfile = directProfile ?? GetDirectProfile(requestedTemplate?.AdapterKey);
+            batch.SchemaFingerprint = await PreserveWorkbookAsync(batch, workbookStream, selectedProfile?.IncludedSheetNames, cancellationToken);
 
-            var template = requestedTemplate ?? await dbcontext.PlatformImportTemplates
-                .AsNoTracking()
-                .Where(x => x.LegalEntityId == batch.LegalEntityId &&
-                            x.PlatformAccountId == batch.PlatformAccountId &&
-                            x.Status == PlatformTemplateStatus.Active &&
-                            x.SchemaFingerprint == batch.SchemaFingerprint &&
-                            x.EffectiveFrom <= batch.PeriodEnd &&
-                            (x.EffectiveTo == null || x.EffectiveTo >= batch.PeriodStart))
-                .OrderByDescending(x => x.EffectiveFrom)
-                .ThenByDescending(x => x.Version)
-                .ThenBy(x => x.Id)
-                .FirstOrDefaultAsync(cancellationToken);
-            if (template is null || !string.Equals(template.SchemaFingerprint, batch.SchemaFingerprint, StringComparison.OrdinalIgnoreCase))
+            PlatformImportTemplate? template;
+            if (directProfile is not null)
             {
-                batch.Issues.Add(new PlatformImportIssue { Severity = PlatformImportIssueSeverity.Blocking, Code = "SCHEMA_DRIFT", Message = $"Workbook fingerprint {batch.SchemaFingerprint} does not match an active certified template." });
-                batch.Status = PlatformImportStatus.NeedsResolution;
+                var mismatch = await GetProfileMismatchAsync(batch.Id, directProfile, cancellationToken);
+                if (mismatch is not null)
+                {
+                    batch.Issues.Add(new PlatformImportIssue
+                    {
+                        Severity = PlatformImportIssueSeverity.Blocking,
+                        Code = "WORKBOOK_PROFILE_MISMATCH",
+                        Message = mismatch
+                    });
+                    batch.Status = PlatformImportStatus.NeedsResolution;
+                    template = null;
+                }
+                else
+                {
+                    template = await GetOrCreateSystemTemplateAsync(batch, directProfile, actorId, cancellationToken);
+                    batch.TemplateId = template.Id;
+                    await NormalizeAsync(batch, template, cancellationToken);
+                    await RefreshReconciliationStateAsync(batch, cancellationToken);
+                }
             }
             else
             {
-                batch.TemplateId = template.Id;
-                await NormalizeAsync(batch, template, cancellationToken);
-                await RefreshReconciliationStateAsync(batch, cancellationToken);
+                template = requestedTemplate ?? await dbcontext.PlatformImportTemplates
+                    .AsNoTracking()
+                    .Where(x => x.LegalEntityId == batch.LegalEntityId &&
+                                x.PlatformAccountId == batch.PlatformAccountId &&
+                                x.Status == PlatformTemplateStatus.Active &&
+                                x.SchemaFingerprint == batch.SchemaFingerprint &&
+                                x.EffectiveFrom <= batch.PeriodEnd &&
+                                (x.EffectiveTo == null || x.EffectiveTo >= batch.PeriodStart))
+                    .OrderByDescending(x => x.EffectiveFrom)
+                    .ThenByDescending(x => x.Version)
+                    .ThenBy(x => x.Id)
+                    .FirstOrDefaultAsync(cancellationToken);
+                if (template is null || !string.Equals(template.SchemaFingerprint, batch.SchemaFingerprint, StringComparison.OrdinalIgnoreCase))
+                {
+                    batch.Issues.Add(new PlatformImportIssue { Severity = PlatformImportIssueSeverity.Blocking, Code = "SCHEMA_DRIFT", Message = $"بصمة الملف {batch.SchemaFingerprint} لا تطابق قالبًا نشطًا ومعتمدًا." });
+                    batch.Status = PlatformImportStatus.NeedsResolution;
+                }
+                else
+                {
+                    batch.TemplateId = template.Id;
+                    await NormalizeAsync(batch, template, cancellationToken);
+                    await RefreshReconciliationStateAsync(batch, cancellationToken);
+                }
             }
             await AppendAuditAsync(batch.LegalEntityId, "PlatformImport.Parsed", actorId, new { batch.Id, batch.SchemaFingerprint, batch.Status }, cancellationToken);
             await dbcontext.SaveChangesAsync(cancellationToken);
@@ -323,7 +426,7 @@ public class PlatformImportService(
             .Skip((pageNumber - 1) * pageSize)
             .Take(pageSize)
             .Select(x => new PlatformImportBatchProjection(
-                x.Id, x.LegalEntityId, x.PlatformAccountId, x.StoredFileId, x.TemplateId, x.ExternalReference, x.PeriodStart, x.PeriodEnd, x.ParserVersion, x.SchemaFingerprint, x.Status,
+                x.Id, x.LegalEntityId, x.PlatformAccountId, x.StoredFileId, x.TemplateId, x.Template == null ? null : x.Template.AdapterKey, x.ExternalReference, x.PeriodStart, x.PeriodEnd, x.ParserVersion, x.SchemaFingerprint, x.Status,
                 x.SourceControlTotal, x.NormalizedControlTotal, x.Sheets.Count, x.Sheets.SelectMany(s => s.Rows).Count(), x.Sheets.SelectMany(s => s.Rows).SelectMany(r => r.Cells).Count(), x.Facts.Count,
                 x.Issues.Count(i => i.Status == PlatformImportIssueStatus.Open && i.Severity == PlatformImportIssueSeverity.Blocking), x.RowVersion))
             .ToListAsync(cancellationToken);
@@ -342,7 +445,7 @@ public class PlatformImportService(
             .AsNoTracking()
             .Where(x => x.Id == id)
             .Select(x => new PlatformImportBatchProjection(
-                x.Id, x.LegalEntityId, x.PlatformAccountId, x.StoredFileId, x.TemplateId, x.ExternalReference, x.PeriodStart, x.PeriodEnd, x.ParserVersion, x.SchemaFingerprint, x.Status,
+                x.Id, x.LegalEntityId, x.PlatformAccountId, x.StoredFileId, x.TemplateId, x.Template == null ? null : x.Template.AdapterKey, x.ExternalReference, x.PeriodStart, x.PeriodEnd, x.ParserVersion, x.SchemaFingerprint, x.Status,
                 x.SourceControlTotal, x.NormalizedControlTotal, x.Sheets.Count, x.Sheets.SelectMany(s => s.Rows).Count(), x.Sheets.SelectMany(s => s.Rows).SelectMany(r => r.Cells).Count(), x.Facts.Count,
                 x.Issues.Count(i => i.Status == PlatformImportIssueStatus.Open && i.Severity == PlatformImportIssueSeverity.Blocking), x.RowVersion))
             .SingleAsync(cancellationToken);
@@ -409,7 +512,8 @@ public class PlatformImportService(
                 x.Override == null ? null : new PlatformFactOverrideResponse(x.Override.Id, x.Override.BooleanValue, x.Override.Reason, x.Override.CreatedBy, x.Override.CreatedAt)))
             .ToListAsync(cancellationToken);
 
-        return Result.Success(new PagedResponse<PlatformNormalizedFactResponse>(items, pageNumber, pageSize, totalCount));
+        var itemsWithRiders = await AttachRiderNamesAsync(items, cancellationToken);
+        return Result.Success(new PagedResponse<PlatformNormalizedFactResponse>(itemsWithRiders, pageNumber, pageSize, totalCount));
     }
 
     public async Task<Result<PagedResponse<PlatformImportRawRowResponse>>> GetRowsAsync(
@@ -491,6 +595,7 @@ public class PlatformImportService(
                     x.DataType))
                 .ToArrayAsync(cancellationToken);
         var cellsByRow = cells.ToLookup(x => x.PlatformImportRawRowId);
+        var ridersByRow = await GetRidersBySourceRowAsync(batchId, rowIds, cancellationToken);
         var items = rows
             .Select(row => new PlatformImportRawRowResponse(
                 row.Id,
@@ -501,7 +606,11 @@ public class PlatformImportService(
                 row.RowHash,
                 cellsByRow[row.Id]
                     .Select(cell => new PlatformImportRawCellResponse(cell.Id, cell.ColumnNumber, cell.CellReference, cell.RawValue, cell.DisplayValue, cell.Formula, cell.DataType))
-                    .ToArray()))
+                    .ToArray()) with
+            {
+                RiderIqamaNo = ridersByRow.GetValueOrDefault(row.Id)?.IqamaNo,
+                RiderNameAr = ridersByRow.GetValueOrDefault(row.Id)?.NameAr
+            })
             .ToArray();
 
         return Result.Success(new PagedResponse<PlatformImportRawRowResponse>(items, pageNumber, pageSize, totalCount));
@@ -515,7 +624,8 @@ public class PlatformImportService(
         if (access.IsFailure) return Result.Failure<IReadOnlyCollection<PlatformImportIssueResponse>>(access.Error);
         var issues = await dbcontext.PlatformImportIssues.AsNoTracking().Where(x => x.PlatformImportBatchId == batchId).OrderByDescending(x => x.Severity).ThenBy(x => x.Id)
             .Select(x => new PlatformImportIssueResponse(x.Id, x.Severity, x.Status, x.Code, x.Message, x.Resolution, x.SourceRawRowId)).ToListAsync(cancellationToken);
-        return Result.Success<IReadOnlyCollection<PlatformImportIssueResponse>>(issues);
+        var issuesWithRiders = await AttachIssueRidersAsync(batchId, issues, cancellationToken);
+        return Result.Success<IReadOnlyCollection<PlatformImportIssueResponse>>(issuesWithRiders);
     }
 
     public async Task<Result<PlatformImportIssueResponse>> ResolveIssueAsync(long issueId, ResolvePlatformImportIssueRequest request, string actorId, CancellationToken cancellationToken = default)
@@ -536,7 +646,8 @@ public class PlatformImportService(
         await RefreshReconciliationStateAsync(issue.PlatformImportBatch, cancellationToken);
         await AppendAuditAsync(issue.PlatformImportBatch.LegalEntityId, "PlatformImport.IssueResolved", actorId, new { issue.Id, issue.Code, issue.Status, issue.Resolution }, cancellationToken);
         await dbcontext.SaveChangesAsync(cancellationToken);
-        return Result.Success(ToResponse(issue));
+        var response = await AttachIssueRidersAsync(issue.PlatformImportBatchId, [ToResponse(issue)], cancellationToken);
+        return Result.Success(response.Single());
     }
 
     public async Task<Result<PlatformImportBatchResponse>> RemapWorkerAsync(Guid batchId, RemapPlatformWorkerRequest request, string actorId, CancellationToken cancellationToken = default)
@@ -579,7 +690,7 @@ public class PlatformImportService(
         foreach (var issue in identityIssues)
         {
             issue.Status = PlatformImportIssueStatus.Resolved;
-            issue.Resolution = $"Mapped {externalId} to rider {request.RiderIqamaNo} for {request.EffectiveFrom:yyyy-MM-dd} through {(request.EffectiveTo?.ToString("yyyy-MM-dd") ?? "open-ended")}: {request.Reason.Trim()}";
+            issue.Resolution = $"تم ربط المندوب الخارجي {externalId} بالمندوب ذي الإقامة {request.RiderIqamaNo} من {request.EffectiveFrom:yyyy-MM-dd} إلى {(request.EffectiveTo?.ToString("yyyy-MM-dd") ?? "مفتوح")}: {request.Reason.Trim()}";
             issue.ResolvedBy = actorId;
             issue.ResolvedAt = DateTime.UtcNow;
         }
@@ -614,7 +725,8 @@ public class PlatformImportService(
         dbcontext.PlatformFactOverrides.Add(factOverride);
         await AppendAuditAsync(fact.LegalEntityId, "PlatformImport.ValidityOverridden", actorId, new { fact.Id, fact.PlatformImportBatchId, fact.RiderIqamaNo, fact.ExternalWorkerId, request.IsValid, Reason = request.Reason.Trim() }, cancellationToken);
         await dbcontext.SaveChangesAsync(cancellationToken);
-        return Result.Success(ToResponse(fact));
+        var response = await AttachRiderNamesAsync([ToResponse(fact)], cancellationToken);
+        return Result.Success(response.Single());
     }
 
     public async Task<Result<PlatformImportBatchResponse>> ReprocessAsync(Guid batchId, ReprocessPlatformImportRequest request, string actorId, CancellationToken cancellationToken = default)
@@ -660,7 +772,8 @@ public class PlatformImportService(
             batch.ReviewedAt = null;
 
             await using var workbookStream = await storage.OpenReadAsync(batch.StoredFile.StorageLocator, cancellationToken);
-            batch.SchemaFingerprint = await PreserveWorkbookAsync(batch, workbookStream, cancellationToken);
+            var directProfile = GetDirectProfile(template.AdapterKey);
+            batch.SchemaFingerprint = await PreserveWorkbookAsync(batch, workbookStream, directProfile?.IncludedSheetNames, cancellationToken);
             if (!string.Equals(batch.SchemaFingerprint, template.SchemaFingerprint, StringComparison.OrdinalIgnoreCase))
             {
                 batch.Issues.Add(new PlatformImportIssue
@@ -686,10 +799,10 @@ public class PlatformImportService(
             if (transaction is not null) await transaction.RollbackAsync(cancellationToken);
             return Result.Failure<PlatformImportBatchResponse>(AccountingPlatformErrors.ConcurrencyConflict);
         }
-        catch (Exception ex) when (ex is OpenXmlPackageException or InvalidDataException or JsonException or IOException or CryptographicException)
+        catch (Exception ex) when (ex is OpenXmlPackageException or InvalidDataException or JsonException or IOException or CryptographicException or InvalidOperationException)
         {
             if (transaction is not null) await transaction.RollbackAsync(cancellationToken);
-            return Result.Failure<PlatformImportBatchResponse>(ex is IOException or CryptographicException
+            return Result.Failure<PlatformImportBatchResponse>(ex is IOException or CryptographicException or InvalidOperationException
                 ? AccountingPlatformErrors.StorageUnavailable
                 : AccountingPlatformErrors.InvalidFile);
         }
@@ -763,7 +876,7 @@ public class PlatformImportService(
             .SingleOrDefaultAsync(x => x.Id == batch.StoredFileId && x.Status == StoredFileStatus.Active, cancellationToken);
         if (file is null) return Result.Failure<AccountingFileDownloadResponse>(AccountingPlatformErrors.NotFound);
         try { return Result.Success(new AccountingFileDownloadResponse(await storage.OpenReadAsync(file.StorageLocator, cancellationToken), file.ContentType, file.OriginalFileName)); }
-        catch (Exception ex) when (ex is IOException or CryptographicException or InvalidDataException)
+        catch (Exception ex) when (ex is IOException or CryptographicException or InvalidDataException or InvalidOperationException)
         { return Result.Failure<AccountingFileDownloadResponse>(AccountingPlatformErrors.StorageUnavailable); }
     }
 
@@ -793,19 +906,28 @@ public class PlatformImportService(
         return await GetBatchAsync(id, actorId, ct);
     }
 
-    private async Task<string> PreserveWorkbookAsync(PlatformImportBatch batch, Stream content, CancellationToken ct)
+    private async Task<string> PreserveWorkbookAsync(
+        PlatformImportBatch batch,
+        Stream content,
+        IReadOnlySet<string>? includedSheetNames,
+        CancellationToken ct)
     {
         using var document = SpreadsheetDocument.Open(content, false);
         var workbookPart = document.WorkbookPart ?? throw new InvalidDataException("Workbook part is missing.");
         var sharedStrings = workbookPart.SharedStringTablePart?.SharedStringTable.Elements<SharedStringItem>().Select(x => x.InnerText).ToArray() ?? [];
         var fingerprintParts = new List<string>();
         var sheetIndex = 0;
+        var preservedSheetCount = 0;
         foreach (var sheet in workbookPart.Workbook.Sheets?.Elements<Sheet>() ?? [])
         {
             sheetIndex++;
+            var sheetName = sheet.Name?.Value ?? $"Sheet{sheetIndex}";
+            if (includedSheetNames is not null && !includedSheetNames.Contains(sheetName)) continue;
+
+            preservedSheetCount++;
             var worksheetPart = (WorksheetPart)workbookPart.GetPartById(sheet.Id!);
             var state = sheet.State?.Value;
-            var sheetEntity = new PlatformImportSheet { PlatformImportBatchId = batch.Id, SheetIndex = sheetIndex, Name = sheet.Name?.Value ?? $"Sheet{sheetIndex}", IsHidden = state == SheetStateValues.Hidden || state == SheetStateValues.VeryHidden };
+            var sheetEntity = new PlatformImportSheet { PlatformImportBatchId = batch.Id, SheetIndex = sheetIndex, Name = sheetName, IsHidden = state == SheetStateValues.Hidden || state == SheetStateValues.VeryHidden };
             dbcontext.PlatformImportSheets.Add(sheetEntity);
             await dbcontext.SaveChangesAsync(ct);
             fingerprintParts.Add($"S:{sheetEntity.Name.Trim().ToUpperInvariant()}:{sheetEntity.IsHidden}");
@@ -837,23 +959,134 @@ public class PlatformImportService(
             }
             await dbcontext.SaveChangesAsync(ct);
         }
-        if (sheetIndex == 0) throw new InvalidDataException("Workbook contains no sheets.");
+        if (preservedSheetCount == 0) throw new InvalidDataException("Workbook does not contain the required sheets.");
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join('\n', fingerprintParts))));
     }
+
+    private async Task<string?> GetProfileMismatchAsync(
+        Guid batchId,
+        DirectImportProfile profile,
+        CancellationToken cancellationToken)
+    {
+        var configuration = ExactConfigurations[profile.AdapterKey];
+        var sheets = await dbcontext.PlatformImportSheets
+            .AsNoTracking()
+            .Where(x => x.PlatformImportBatchId == batchId)
+            .ToListAsync(cancellationToken);
+
+        foreach (var requiredSheetName in configuration.SheetNames)
+        {
+            var sheet = sheets.SingleOrDefault(x => string.Equals(x.Name, requiredSheetName, StringComparison.Ordinal));
+            if (sheet is null) return $"This is not a {profile.DisplayName} workbook. Required sheet '{requiredSheetName}' is missing.";
+
+            var header = await dbcontext.PlatformImportRawRows
+                .AsNoTracking()
+                .Include(x => x.Cells)
+                .SingleOrDefaultAsync(x => x.PlatformImportSheetId == sheet.Id && x.RowNumber == configuration.HeaderRow, cancellationToken);
+            if (header is null) return $"This is not a {profile.DisplayName} workbook. Header row {configuration.HeaderRow} is missing from '{requiredSheetName}'.";
+
+            var headers = header.Cells
+                .Select(x => NormalizeHeader(x.DisplayValue))
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var requiredHeaders = configuration.Columns.Select(x => x.Header).Append(configuration.ExternalWorkerIdHeader);
+            var missingHeaders = requiredHeaders
+                .Where(x => !headers.Contains(NormalizeHeader(x)))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            if (missingHeaders.Length > 0)
+                return $"This is not a {profile.DisplayName} workbook. Missing columns in '{requiredSheetName}': {string.Join(", ", missingHeaders)}.";
+        }
+
+        if (ExactCompanyConfigurations.TryGetValue(profile.AdapterKey, out var companyConfiguration))
+        {
+            var companySheet = sheets.SingleOrDefault(x => string.Equals(x.Name, companyConfiguration.SheetName, StringComparison.Ordinal));
+            if (companySheet is null) return $"This is not a {profile.DisplayName} workbook. Required sheet '{companyConfiguration.SheetName}' is missing.";
+
+            var header = await dbcontext.PlatformImportRawRows
+                .AsNoTracking()
+                .Include(x => x.Cells)
+                .SingleOrDefaultAsync(x => x.PlatformImportSheetId == companySheet.Id && x.RowNumber == 1, cancellationToken);
+            var headers = header?.Cells
+                .Select(x => NormalizeHeader(x.DisplayValue))
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase) ?? [];
+            var missingHeaders = companyConfiguration.Columns
+                .Select(x => x.Header)
+                .Where(x => !headers.Contains(NormalizeHeader(x)))
+                .ToArray();
+            if (missingHeaders.Length > 0)
+                return $"This is not a {profile.DisplayName} workbook. Missing columns in '{companyConfiguration.SheetName}': {string.Join(", ", missingHeaders)}.";
+        }
+
+        return null;
+    }
+
+    private async Task<PlatformImportTemplate> GetOrCreateSystemTemplateAsync(
+        PlatformImportBatch batch,
+        DirectImportProfile profile,
+        string actorId,
+        CancellationToken cancellationToken)
+    {
+        var existing = await dbcontext.PlatformImportTemplates
+            .SingleOrDefaultAsync(x =>
+                x.LegalEntityId == batch.LegalEntityId &&
+                x.PlatformAccountId == batch.PlatformAccountId &&
+                x.AdapterKey == profile.AdapterKey &&
+                x.SchemaFingerprint == batch.SchemaFingerprint &&
+                x.Status == PlatformTemplateStatus.Active,
+                cancellationToken);
+        if (existing is not null) return existing;
+
+        var code = $"{profile.TemplateCode}-{batch.SchemaFingerprint[..12]}";
+        var version = (await dbcontext.PlatformImportTemplates
+            .Where(x => x.LegalEntityId == batch.LegalEntityId && x.PlatformAccountId == batch.PlatformAccountId && x.Code == code)
+            .MaxAsync(x => (int?)x.Version, cancellationToken) ?? 0) + 1;
+        var template = new PlatformImportTemplate
+        {
+            LegalEntityId = batch.LegalEntityId,
+            PlatformAccountId = batch.PlatformAccountId,
+            Code = code,
+            Version = version,
+            Name = profile.DisplayName,
+            AdapterKey = profile.AdapterKey,
+            SchemaFingerprint = batch.SchemaFingerprint,
+            ConfigurationJson = "{}",
+            Status = PlatformTemplateStatus.Active,
+            EffectiveFrom = DateOnly.MinValue,
+            CreatedBy = actorId,
+            ActivatedBy = actorId,
+            ActivatedAt = DateTime.UtcNow
+        };
+        dbcontext.PlatformImportTemplates.Add(template);
+        await AppendAuditAsync(batch.LegalEntityId, "PlatformImport.SystemTemplateCreated", actorId, new
+        {
+            template.Id,
+            template.Code,
+            template.AdapterKey,
+            template.SchemaFingerprint
+        }, cancellationToken);
+        return template;
+    }
+
+    private static DirectImportProfile? GetDirectProfile(string? adapterKey) =>
+        string.IsNullOrWhiteSpace(adapterKey)
+            ? null
+            : DirectImportProfiles.ByAdapter.GetValueOrDefault(adapterKey.Trim());
 
     private async Task NormalizeAsync(PlatformImportBatch batch, PlatformImportTemplate template, CancellationToken ct)
     {
         var exactConfiguration = ExactConfigurations.GetValueOrDefault(template.AdapterKey.Trim());
         if (!string.Equals(template.AdapterKey, "generic-tabular-v1", StringComparison.OrdinalIgnoreCase) && exactConfiguration is null)
         {
-            batch.Issues.Add(new PlatformImportIssue { Severity = PlatformImportIssueSeverity.Blocking, Code = "ADAPTER_NOT_INSTALLED", Message = $"The versioned adapter {template.AdapterKey} is not installed." });
+            batch.Issues.Add(new PlatformImportIssue { Severity = PlatformImportIssueSeverity.Blocking, Code = "ADAPTER_NOT_INSTALLED", Message = $"معالج الإصدار {template.AdapterKey} غير مثبت." });
             return;
         }
         var configuration = exactConfiguration ?? JsonSerializer.Deserialize<GenericTemplateConfiguration>(template.ConfigurationJson, JsonOptions) ?? throw new JsonException("Template configuration is empty.");
         var sheets = await dbcontext.PlatformImportSheets.AsNoTracking().Where(x => x.PlatformImportBatchId == batch.Id && (configuration.SheetNames.Count == 0 || configuration.SheetNames.Contains(x.Name))).OrderBy(x => x.SheetIndex).ToListAsync(ct);
         if (sheets.Count == 0)
         {
-            batch.Issues.Add(new PlatformImportIssue { Severity = PlatformImportIssueSeverity.Blocking, Code = "SHEET_MISSING", Message = "No configured source sheet was found." });
+            batch.Issues.Add(new PlatformImportIssue { Severity = PlatformImportIssueSeverity.Blocking, Code = "SHEET_MISSING", Message = "لم يتم العثور على ورقة مصدر مطابقة للإعدادات." });
             return;
         }
 
@@ -877,13 +1110,13 @@ public class PlatformImportService(
             var header = await dbcontext.PlatformImportRawRows.AsNoTracking().Include(x => x.Cells).SingleOrDefaultAsync(x => x.PlatformImportSheetId == sheet.Id && x.RowNumber == configuration.HeaderRow, ct);
             if (header is null)
             {
-                batch.Issues.Add(new PlatformImportIssue { Severity = PlatformImportIssueSeverity.Blocking, Code = "HEADER_MISSING", Message = $"Header row {configuration.HeaderRow} is missing in {sheet.Name}." });
+                batch.Issues.Add(new PlatformImportIssue { Severity = PlatformImportIssueSeverity.Blocking, Code = "HEADER_MISSING", Message = $"صف العناوين رقم {configuration.HeaderRow} غير موجود في ورقة {sheet.Name}." });
                 continue;
             }
             var columns = header.Cells.ToDictionary(x => NormalizeHeader(x.DisplayValue), x => x.ColumnNumber, StringComparer.OrdinalIgnoreCase);
             if (!columns.TryGetValue(NormalizeHeader(configuration.ExternalWorkerIdHeader), out var workerColumn))
             {
-                batch.Issues.Add(new PlatformImportIssue { Severity = PlatformImportIssueSeverity.Blocking, Code = "WORKER_COLUMN_MISSING", Message = $"Worker column {configuration.ExternalWorkerIdHeader} is missing in {sheet.Name}." });
+                batch.Issues.Add(new PlatformImportIssue { Severity = PlatformImportIssueSeverity.Blocking, Code = "WORKER_COLUMN_MISSING", Message = $"عمود المندوب {configuration.ExternalWorkerIdHeader} غير موجود في ورقة {sheet.Name}." });
                 continue;
             }
             var directIqamaColumn = !string.IsNullOrWhiteSpace(configuration.RiderIqamaHeader) && columns.TryGetValue(NormalizeHeader(configuration.RiderIqamaHeader), out var parsedIqamaColumn)
@@ -892,7 +1125,7 @@ public class PlatformImportService(
             var missingColumns = configuration.Columns.Where(x => !columns.ContainsKey(NormalizeHeader(x.Header))).Select(x => x.Header).ToArray();
             if (missingColumns.Length > 0)
             {
-                batch.Issues.Add(new PlatformImportIssue { Severity = PlatformImportIssueSeverity.Blocking, Code = "METRIC_COLUMN_MISSING", Message = $"Missing columns in {sheet.Name}: {string.Join(", ", missingColumns)}." });
+                batch.Issues.Add(new PlatformImportIssue { Severity = PlatformImportIssueSeverity.Blocking, Code = "METRIC_COLUMN_MISSING", Message = $"الأعمدة المطلوبة غير موجودة في ورقة {sheet.Name}: {string.Join(", ", missingColumns)}." });
                 continue;
             }
 
@@ -918,7 +1151,7 @@ public class PlatformImportService(
                         resolution = new IdentityResolution(directIqama, 1, "WorkbookIqama");
                     }
                     if (!riderIqama.HasValue)
-                        dbcontext.PlatformImportIssues.Add(new PlatformImportIssue { PlatformImportBatchId = batch.Id, SourceRawRowId = row.Id, Severity = PlatformImportIssueSeverity.Blocking, Code = resolution.MatchCount == 0 ? "IDENTITY_MISSING" : "IDENTITY_AMBIGUOUS", Message = $"Worker {workerId} has {resolution.MatchCount} effective identity matches on {factDate:yyyy-MM-dd}. Sources: {resolution.Source}." });
+                        dbcontext.PlatformImportIssues.Add(new PlatformImportIssue { PlatformImportBatchId = batch.Id, SourceRawRowId = row.Id, Severity = PlatformImportIssueSeverity.Blocking, Code = resolution.MatchCount == 0 ? "IDENTITY_MISSING" : "IDENTITY_AMBIGUOUS", Message = AccountingImportArabicText.IdentityIssueMessage(workerId, resolution.MatchCount, factDate, resolution.Source) });
 
                     foreach (var mapping in configuration.Columns)
                     {
@@ -927,7 +1160,7 @@ public class PlatformImportService(
                         var metricCode = NormalizeCode(mapping.MetricCode);
                         if (!CompensationService.AllowedMetrics.Contains(metricCode))
                         {
-                            dbcontext.PlatformImportIssues.Add(new PlatformImportIssue { PlatformImportBatchId = batch.Id, SourceRawRowId = row.Id, Severity = PlatformImportIssueSeverity.Blocking, Code = "METRIC_NOT_ALLOWED", Message = $"Metric {metricCode} is not allowed." });
+                            dbcontext.PlatformImportIssues.Add(new PlatformImportIssue { PlatformImportBatchId = batch.Id, SourceRawRowId = row.Id, Severity = PlatformImportIssueSeverity.Blocking, Code = "METRIC_NOT_ALLOWED", Message = $"القيمة المحاسبية {AccountingImportArabicText.Metric(metricCode)} ({metricCode}) غير مسموح بها." });
                             continue;
                         }
                         var fact = new PlatformNormalizedFact
@@ -942,7 +1175,7 @@ public class PlatformImportService(
                         else if (TryParseDecimal(cell.DisplayValue, out var numeric)) fact.NumericValue = numeric * (mapping.Multiplier ?? 1m);
                         else
                         {
-                            dbcontext.PlatformImportIssues.Add(new PlatformImportIssue { PlatformImportBatchId = batch.Id, SourceRawRowId = row.Id, Severity = PlatformImportIssueSeverity.Blocking, Code = "VALUE_INVALID", Message = $"Cell {cell.CellReference} is not a valid {mapping.DataType} value." });
+                            dbcontext.PlatformImportIssues.Add(new PlatformImportIssue { PlatformImportBatchId = batch.Id, SourceRawRowId = row.Id, Severity = PlatformImportIssueSeverity.Blocking, Code = "VALUE_INVALID", Message = $"الخلية {cell.CellReference} لا تحتوي على قيمة صالحة من النوع {mapping.DataType}." });
                             continue;
                         }
                         dbcontext.PlatformNormalizedFacts.Add(fact);
@@ -956,7 +1189,7 @@ public class PlatformImportService(
         var companyControlTotal = await NormalizeExactCompanySummaryAsync(batch, template.AdapterKey, ct);
         if (companyControlTotal.HasValue) batch.NormalizedControlTotal = companyControlTotal.Value;
         if (batch.SourceControlTotal.HasValue && decimal.Round(batch.SourceControlTotal.Value, 2) != decimal.Round(batch.NormalizedControlTotal ?? 0m, 2))
-            batch.Issues.Add(new PlatformImportIssue { Severity = PlatformImportIssueSeverity.Blocking, Code = "CONTROL_TOTAL_MISMATCH", Message = $"Source control total {batch.SourceControlTotal:0.00} differs from normalized total {batch.NormalizedControlTotal:0.00}." });
+            batch.Issues.Add(new PlatformImportIssue { Severity = PlatformImportIssueSeverity.Blocking, Code = "CONTROL_TOTAL_MISMATCH", Message = $"إجمالي المصدر {batch.SourceControlTotal:0.00} يختلف عن الإجمالي المحسوب {batch.NormalizedControlTotal:0.00}." });
     }
 
     private async Task RefreshReconciliationStateAsync(PlatformImportBatch batch, CancellationToken ct)
@@ -1111,13 +1344,78 @@ public class PlatformImportService(
     private static PlatformImportTemplateResponse ToResponse(PlatformImportTemplate x) => new(x.Id, x.LegalEntityId, x.PlatformAccountId, x.Code, x.Version, x.Name, x.AdapterKey, x.SchemaFingerprint, x.ConfigurationJson, x.Status, x.EffectiveFrom, x.EffectiveTo);
     private static PlatformImportIssueResponse ToResponse(PlatformImportIssue x) => new(x.Id, x.Severity, x.Status, x.Code, x.Message, x.Resolution, x.SourceRawRowId);
     private static PlatformImportBatchResponse ToResponse(PlatformImportBatchProjection x) => new(
-        x.Id, x.LegalEntityId, x.PlatformAccountId, x.StoredFileId, x.TemplateId, x.ExternalReference, x.PeriodStart, x.PeriodEnd, x.ParserVersion, x.SchemaFingerprint, x.Status,
+        x.Id, x.LegalEntityId, x.PlatformAccountId, x.StoredFileId, x.TemplateId, x.AdapterKey, x.ExternalReference, x.PeriodStart, x.PeriodEnd, x.ParserVersion, x.SchemaFingerprint, x.Status,
         x.SourceControlTotal, x.NormalizedControlTotal, x.SheetCount, x.RawRowCount, x.RawCellCount, x.FactCount, x.OpenBlockingIssueCount,
         Convert.ToBase64String(x.RowVersion));
     private static PlatformNormalizedFactResponse ToResponse(PlatformNormalizedFact x) => new(
         x.Id, x.PlatformImportBatchId, x.LegalEntityId, x.PlatformAccountId, x.WorkerCategory, x.SourceRawRowId, x.RiderIqamaNo, x.ExternalWorkerId,
         x.FactDate, x.Category, x.MetricCode, x.NumericValue, x.TextValue, x.BooleanValue, x.CurrencyCode, x.IsResolved, x.LineageJson,
         x.Override is null ? null : new PlatformFactOverrideResponse(x.Override.Id, x.Override.BooleanValue, x.Override.Reason, x.Override.CreatedBy, x.Override.CreatedAt));
+
+    private async Task<IReadOnlyList<PlatformNormalizedFactResponse>> AttachRiderNamesAsync(
+        IEnumerable<PlatformNormalizedFactResponse> facts,
+        CancellationToken cancellationToken)
+    {
+        var items = facts.ToArray();
+        var riders = await GetRiderDisplaysAsync(items.Where(x => x.RiderIqamaNo.HasValue).Select(x => x.RiderIqamaNo!.Value), cancellationToken);
+        return items.Select(fact => fact with
+        {
+            RiderNameAr = fact.RiderIqamaNo.HasValue && riders.TryGetValue(fact.RiderIqamaNo.Value, out var rider) ? rider.NameAr : null
+        }).ToArray();
+    }
+
+    private async Task<IReadOnlyCollection<PlatformImportIssueResponse>> AttachIssueRidersAsync(
+        Guid batchId,
+        IEnumerable<PlatformImportIssueResponse> issues,
+        CancellationToken cancellationToken)
+    {
+        var items = issues.ToArray();
+        var ridersByRow = await GetRidersBySourceRowAsync(batchId, items.Where(x => x.SourceRawRowId.HasValue).Select(x => x.SourceRawRowId!.Value).ToArray(), cancellationToken);
+        return items.Select(issue => issue.SourceRawRowId.HasValue && ridersByRow.TryGetValue(issue.SourceRawRowId.Value, out var rider)
+            ? issue with { RiderIqamaNo = rider.IqamaNo, RiderNameAr = rider.NameAr }
+            : issue).ToArray();
+    }
+
+    private async Task<Dictionary<long, RiderDisplay>> GetRidersBySourceRowAsync(
+        Guid batchId,
+        IReadOnlyCollection<long> sourceRowIds,
+        CancellationToken cancellationToken)
+    {
+        if (sourceRowIds.Count == 0) return [];
+
+        var matches = await dbcontext.PlatformNormalizedFacts
+            .AsNoTracking()
+            .Where(x => x.PlatformImportBatchId == batchId && x.SourceRawRowId.HasValue && sourceRowIds.Contains(x.SourceRawRowId.Value) && x.RiderIqamaNo.HasValue)
+            .Select(x => new { SourceRawRowId = x.SourceRawRowId!.Value, RiderIqamaNo = x.RiderIqamaNo!.Value })
+            .ToListAsync(cancellationToken);
+        var riderByRow = matches
+            .GroupBy(x => x.SourceRawRowId)
+            .ToDictionary(x => x.Key, x =>
+            {
+                var iqamas = x.Select(y => y.RiderIqamaNo).Distinct().ToArray();
+                return iqamas.Length == 1 ? iqamas[0] : 0;
+            });
+        var riders = await GetRiderDisplaysAsync(riderByRow.Values.Where(x => x > 0), cancellationToken);
+        return riderByRow
+            .Where(x => x.Value > 0)
+            .ToDictionary(x => x.Key, x => new RiderDisplay(x.Value, riders.GetValueOrDefault(x.Value)?.NameAr));
+    }
+
+    private async Task<Dictionary<long, RiderDisplay>> GetRiderDisplaysAsync(
+        IEnumerable<long> iqamas,
+        CancellationToken cancellationToken)
+    {
+        var values = iqamas.Distinct().ToArray();
+        if (values.Length == 0) return [];
+
+        var employees = await dbcontext.Employees
+            .AsNoTracking()
+            .Where(x => values.Contains(x.IqamaNo) && !x.IsDeleted)
+            .Select(x => new RiderDisplay(x.IqamaNo, x.NameAR))
+            .ToListAsync(cancellationToken);
+        return employees.ToDictionary(x => x.IqamaNo);
+    }
+
     private static bool MatchesRowVersion(string? supplied, byte[] actual)
     {
         if (supplied is null) return true;
@@ -1132,6 +1430,7 @@ public class PlatformImportService(
         int PlatformAccountId,
         Guid StoredFileId,
         Guid? TemplateId,
+        string? AdapterKey,
         string ExternalReference,
         DateOnly PeriodStart,
         DateOnly PeriodEnd,
@@ -1149,6 +1448,7 @@ public class PlatformImportService(
 
     private sealed record PlatformImportRawRowProjection(long Id, long SheetId, int SheetIndex, string SheetName, int RowNumber, string RowHash);
     private sealed record PlatformImportRawCellProjection(long PlatformImportRawRowId, long Id, int ColumnNumber, string CellReference, string? RawValue, string? DisplayValue, string? Formula, string DataType);
+    private sealed record RiderDisplay(long IqamaNo, string? NameAr);
 
     private async Task<decimal?> NormalizeExactCompanySummaryAsync(PlatformImportBatch batch, string adapterKey, CancellationToken ct)
     {
@@ -1156,7 +1456,7 @@ public class PlatformImportService(
         var sheet = await dbcontext.PlatformImportSheets.AsNoTracking().SingleOrDefaultAsync(x => x.PlatformImportBatchId == batch.Id && x.Name == configuration.SheetName, ct);
         if (sheet is null)
         {
-            batch.Issues.Add(new PlatformImportIssue { Severity = PlatformImportIssueSeverity.Blocking, Code = "COMPANY_SHEET_MISSING", Message = $"Required company summary sheet {configuration.SheetName} is missing." });
+            batch.Issues.Add(new PlatformImportIssue { Severity = PlatformImportIssueSeverity.Blocking, Code = "COMPANY_SHEET_MISSING", Message = $"ورقة ملخص الشركة المطلوبة {configuration.SheetName} غير موجودة." });
             return null;
         }
         var rows = await dbcontext.PlatformImportRawRows.AsNoTracking().Include(x => x.Cells).Where(x => x.PlatformImportSheetId == sheet.Id && (x.RowNumber == 1 || x.RowNumber == 2)).OrderBy(x => x.RowNumber).ToListAsync(ct);
@@ -1170,7 +1470,7 @@ public class PlatformImportService(
         {
             if (!columns.TryGetValue(NormalizeHeader(mapping.Header), out var column) || !values.TryGetValue(column, out var cell) || !TryParseDecimal(cell.DisplayValue, out var amount))
             {
-                batch.Issues.Add(new PlatformImportIssue { Severity = PlatformImportIssueSeverity.Blocking, Code = "COMPANY_VALUE_MISSING", Message = $"Required company value {mapping.Header} is missing or invalid in {configuration.SheetName}." });
+                batch.Issues.Add(new PlatformImportIssue { Severity = PlatformImportIssueSeverity.Blocking, Code = "COMPANY_VALUE_MISSING", Message = $"قيمة الشركة المطلوبة {mapping.Header} غير موجودة أو غير صالحة في ورقة {configuration.SheetName}." });
                 continue;
             }
             dbcontext.PlatformNormalizedFacts.Add(new PlatformNormalizedFact
@@ -1195,6 +1495,47 @@ public class PlatformImportService(
         public bool Covers(DateOnly date) => (!EffectiveFrom.HasValue || DateOnly.FromDateTime(EffectiveFrom.Value) <= date) && (!EffectiveTo.HasValue || DateOnly.FromDateTime(EffectiveTo.Value) >= date);
     }
     private sealed record IdentityResolution(long? RiderIqamaNo, int MatchCount, string Source);
+    private sealed record DirectImportProfile(
+        string AdapterKey,
+        string TemplateCode,
+        string DisplayName,
+        IReadOnlySet<string> IncludedSheetNames);
+
+    private static class DirectImportProfiles
+    {
+        public static readonly DirectImportProfile Amazon = new(
+            "amazon-anow-v1",
+            "SYSTEM-AMAZON-ANOW",
+            "Amazon ANOW monthly payment",
+            new HashSet<string>(["Sheet1"], StringComparer.Ordinal));
+
+        public static readonly DirectImportProfile Hunger = new(
+            "hunger-ftr-v1",
+            "SYSTEM-HUNGER-FTR",
+            "HungerStation FTR invoice",
+            new HashSet<string>(["WR", "RLVL"], StringComparer.Ordinal));
+
+        public static readonly DirectImportProfile KeetaPayPerOrder = new(
+            "keeta-pay-per-order-v1",
+            "SYSTEM-KEETA-PAY-PER-ORDER",
+            "Keeta pay-per-order invoice",
+            new HashSet<string>(["تفاصيل الشركاء", "تفاصيل سائق التوصيل"], StringComparer.Ordinal));
+
+        public static readonly DirectImportProfile KeetaSegments = new(
+            "keeta-segments-v1",
+            "SYSTEM-KEETA-SEGMENTS",
+            "Keeta segments invoice",
+            new HashSet<string>(["تفاصيل الشركاء", "تفاصيل سائق التوصيل"], StringComparer.Ordinal));
+
+        public static readonly IReadOnlyDictionary<string, DirectImportProfile> ByAdapter =
+            new Dictionary<string, DirectImportProfile>(StringComparer.OrdinalIgnoreCase)
+            {
+                [Amazon.AdapterKey] = Amazon,
+                [Hunger.AdapterKey] = Hunger,
+                [KeetaPayPerOrder.AdapterKey] = KeetaPayPerOrder,
+                [KeetaSegments.AdapterKey] = KeetaSegments
+            };
+    }
 
     private static readonly IReadOnlyDictionary<string, GenericTemplateConfiguration> ExactConfigurations = new Dictionary<string, GenericTemplateConfiguration>(StringComparer.OrdinalIgnoreCase)
     {

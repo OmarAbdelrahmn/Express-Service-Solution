@@ -1,12 +1,33 @@
+using Application.Contracts.Common;
 using FluentValidation;
 
 namespace Application.Contracts.Organization;
 
 public record CreateTenantRequest(string Code, string Name);
 public record CreateLegalEntityRequest(int TenantId, string Code, string LegalName, string BaseCurrencyCode, string? TaxRegistrationNumber);
+public record UpdateLegalEntityRequest(string Code, string LegalName, string BaseCurrencyCode, string? TaxRegistrationNumber, bool IsActive);
 public record CreateBranchRequest(int LegalEntityId, string Code, string Name);
 public record CreatePlatformAccountRequest(int LegalEntityId, string Code, string PlatformName, string? ExternalAccountReference);
+public record UpdatePlatformAccountRequest(string Code, string PlatformName, string? ExternalAccountReference, bool IsActive);
 public record CreateLegacyCompanyPlatformMappingRequest(int CompanyId, int PlatformAccountId, DateTime EffectiveFrom);
+
+public sealed record LegalEntityListFilter
+{
+    public int? TenantId { get; init; }
+    public bool? Active { get; init; }
+    public string? Search { get; init; }
+    public string? SortBy { get; init; }
+    public string? SortDirection { get; init; } = "asc";
+}
+
+public sealed record PlatformAccountListFilter
+{
+    public int LegalEntityId { get; init; }
+    public bool? Active { get; init; }
+    public string? Search { get; init; }
+    public string? SortBy { get; init; }
+    public string? SortDirection { get; init; } = "asc";
+}
 
 public record TenantResponse(int Id, string Code, string Name, bool IsActive);
 public record BranchResponse(int Id, string Code, string Name, bool IsActive);
@@ -36,6 +57,17 @@ public class CreateLegalEntityRequestValidator : AbstractValidator<CreateLegalEn
     }
 }
 
+public class UpdateLegalEntityRequestValidator : AbstractValidator<UpdateLegalEntityRequest>
+{
+    public UpdateLegalEntityRequestValidator()
+    {
+        RuleFor(x => x.Code).NotEmpty().MaximumLength(32);
+        RuleFor(x => x.LegalName).NotEmpty().MaximumLength(300);
+        RuleFor(x => x.BaseCurrencyCode).Length(3).Matches("^[A-Za-z]{3}$");
+        RuleFor(x => x.TaxRegistrationNumber).MaximumLength(64).When(x => x.TaxRegistrationNumber is not null);
+    }
+}
+
 public class CreateBranchRequestValidator : AbstractValidator<CreateBranchRequest>
 {
     public CreateBranchRequestValidator()
@@ -51,6 +83,16 @@ public class CreatePlatformAccountRequestValidator : AbstractValidator<CreatePla
     public CreatePlatformAccountRequestValidator()
     {
         RuleFor(x => x.LegalEntityId).GreaterThan(0);
+        RuleFor(x => x.Code).NotEmpty().MaximumLength(32);
+        RuleFor(x => x.PlatformName).NotEmpty().MaximumLength(100);
+        RuleFor(x => x.ExternalAccountReference).MaximumLength(128).When(x => x.ExternalAccountReference is not null);
+    }
+}
+
+public class UpdatePlatformAccountRequestValidator : AbstractValidator<UpdatePlatformAccountRequest>
+{
+    public UpdatePlatformAccountRequestValidator()
+    {
         RuleFor(x => x.Code).NotEmpty().MaximumLength(32);
         RuleFor(x => x.PlatformName).NotEmpty().MaximumLength(100);
         RuleFor(x => x.ExternalAccountReference).MaximumLength(128).When(x => x.ExternalAccountReference is not null);

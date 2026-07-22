@@ -12,6 +12,10 @@ public interface IPlatformImportService
     Task<Result<PlatformImportTemplateResponse>> ActivateTemplateAsync(Guid id, ActivatePlatformImportTemplateRequest request, string actorId, CancellationToken cancellationToken = default);
     Task<Result<PlatformImportTemplateResponse>> RetireTemplateAsync(Guid id, RetirePlatformImportTemplateRequest request, string actorId, CancellationToken cancellationToken = default);
     Task<Result<PlatformImportBatchResponse>> UploadAsync(UploadPlatformImportRequest request, string fileName, string contentType, Stream content, string actorId, CancellationToken cancellationToken = default);
+    Task<Result<PlatformImportBatchResponse>> UploadAmazonAsync(DirectPlatformImportRequest request, string fileName, string contentType, Stream content, string actorId, CancellationToken cancellationToken = default);
+    Task<Result<PlatformImportBatchResponse>> UploadHungerAsync(DirectPlatformImportRequest request, string fileName, string contentType, Stream content, string actorId, CancellationToken cancellationToken = default);
+    Task<Result<PlatformImportBatchResponse>> UploadKeetaPayPerOrderAsync(DirectPlatformImportRequest request, string fileName, string contentType, Stream content, string actorId, CancellationToken cancellationToken = default);
+    Task<Result<PlatformImportBatchResponse>> UploadKeetaSegmentsAsync(DirectPlatformImportRequest request, string fileName, string contentType, Stream content, string actorId, CancellationToken cancellationToken = default);
     Task<Result<PagedResponse<PlatformImportBatchResponse>>> GetBatchesAsync(PaginationRequest pagination, PlatformImportBatchListFilter filter, string actorId, CancellationToken cancellationToken = default);
     Task<Result<PlatformImportBatchResponse>> GetBatchAsync(Guid id, string actorId, CancellationToken cancellationToken = default);
     Task<Result<PagedResponse<PlatformNormalizedFactResponse>>> GetFactsAsync(Guid batchId, PaginationRequest pagination, PlatformNormalizedFactListFilter filter, string actorId, CancellationToken cancellationToken = default);
