@@ -223,6 +223,66 @@ public class PlatformImportServiceTests
     }
 
     [Fact]
+    public async Task DirectAmazonUpload_TreatsCompanySummaryRowAsCompanyFact()
+    {
+        await using var db = CreateDbContext();
+        db.Tenants.Add(new Tenant { Id = 1, Code = "T", Name = "Tenant" });
+        db.LegalEntities.Add(new LegalEntity { Id = 1, TenantId = 1, Code = "E", LegalName = "Entity", BaseCurrencyCode = "SAR" });
+        db.PlatformAccounts.Add(new PlatformAccount { Id = 1, LegalEntityId = 1, Code = "AMAZON", PlatformName = "Amazon" });
+        await db.SaveChangesAsync();
+        var service = new PlatformImportService(db, new AllowAllAccess(), new MemoryStorage());
+
+        var upload = await service.UploadAmazonAsync(
+            new DirectPlatformImportRequest(1, 1, "AMAZON-2026-07", new DateOnly(2026, 7, 1), new DateOnly(2026, 7, 31), 100m),
+            "amazon.xlsx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            new MemoryStream(CreateAmazonCompanyWorkbook()),
+            "accountant");
+
+        Assert.True(upload.IsSuccess);
+        Assert.Equal(PlatformImportStatus.Reconciled, upload.Value.Status);
+        Assert.Equal(0, upload.Value.OpenBlockingIssueCount);
+
+        var facts = await service.GetFactsAsync(
+            upload.Value.Id,
+            new PaginationRequest { PageNumber = 1, PageSize = 20 },
+            new PlatformNormalizedFactListFilter { SortBy = "id", SortDirection = "asc" },
+            "accountant");
+        Assert.All(facts.Value.Items, fact => Assert.Equal("Company", fact.WorkerCategory));
+        Assert.All(facts.Value.Items, fact => Assert.True(fact.IsResolved));
+        Assert.All(facts.Value.Items, fact => Assert.Equal("COMPANY", fact.ExternalWorkerId));
+
+        var issues = await service.GetIssuesAsync(upload.Value.Id, "accountant");
+        Assert.DoesNotContain(issues.Value, issue => issue.Code is "IDENTITY_MISSING" or "IDENTITY_AMBIGUOUS");
+    }
+
+    [Fact]
+    public async Task RejectedImport_CanBeUploadedAgainWithTheSameFileAndReference()
+    {
+        await using var db = CreateDbContext();
+        db.Tenants.Add(new Tenant { Id = 1, Code = "T", Name = "Tenant" });
+        db.LegalEntities.Add(new LegalEntity { Id = 1, TenantId = 1, Code = "E", LegalName = "Entity", BaseCurrencyCode = "SAR" });
+        db.PlatformAccounts.Add(new PlatformAccount { Id = 1, LegalEntityId = 1, Code = "AMAZON", PlatformName = "Amazon" });
+        await db.SaveChangesAsync();
+        var service = new PlatformImportService(db, new AllowAllAccess(), new MemoryStorage());
+        var workbook = CreateAmazonCompanyWorkbook();
+        var request = new DirectPlatformImportRequest(1, 1, "AMAZON-2026-07", new DateOnly(2026, 7, 1), new DateOnly(2026, 7, 31), 100m);
+
+        var first = await service.UploadAmazonAsync(request, "amazon.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", new MemoryStream(workbook), "accountant");
+        Assert.True(first.IsSuccess);
+        var rejected = await service.RejectAsync(first.Value.Id, new ReviewPlatformImportRequest("Incorrect source file"), "accountant");
+        Assert.True(rejected.IsSuccess);
+        Assert.Equal(PlatformImportStatus.Rejected, rejected.Value.Status);
+
+        var second = await service.UploadAmazonAsync(request, "amazon.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", new MemoryStream(workbook), "accountant");
+
+        Assert.True(second.IsSuccess);
+        Assert.NotEqual(first.Value.Id, second.Value.Id);
+        Assert.Equal(PlatformImportStatus.Reconciled, second.Value.Status);
+        Assert.Equal(2, await db.PlatformImportBatches.CountAsync());
+    }
+
+    [Fact]
     public async Task FactAndIssueResponses_ReturnRiderIqamaAndArabicName()
     {
         await using var db = CreateDbContext();
@@ -310,13 +370,30 @@ public class PlatformImportServiceTests
 
             AddSheet(workbookPart, sheets, 1, "تفاصيل الشركاء",
                 ["رسوم خدمة التوصيل", "مبلغ ضريبة القيمة المضافة", "مبلغ الفاتورة", "إجمالي المبلغ المستحق"],
-                ["80", "15", "100", "100"]);
+                ["80", "15", "100 ر.س.", "100 ر.س."]);
             AddSheet(workbookPart, sheets, 2, "تفاصيل سائق التوصيل",
                 ["معرّف سائق التوصيل", "الطلبات المُسلمة", "رسوم خدمة التوصيل", "دعم", "غرامة مُخالفة", "إجمالي المبلغ المستحق"],
-                ["KEETA-RIDER-1", "10", "80", "10", "-5", "85"]);
+                ["KEETA-RIDER-1", "-", "80", "10", "-5", "85 ر.س."]);
             AddSheet(workbookPart, sheets, 3, "تفاصيل طلب السائق",
                 ["معرّف سائق التوصيل", "معرّف العمل", "المبلغ التفصيلي"],
                 ["KEETA-RIDER-1", "ORDER-1", "8.5"]);
+            workbookPart.Workbook.Save();
+        }
+
+        return stream.ToArray();
+    }
+
+    private static byte[] CreateAmazonCompanyWorkbook()
+    {
+        using var stream = new MemoryStream();
+        using (var document = SpreadsheetDocument.Create(stream, SpreadsheetDocumentType.Workbook, true))
+        {
+            var workbookPart = document.AddWorkbookPart();
+            workbookPart.Workbook = new Workbook();
+            var sheets = workbookPart.Workbook.AppendChild(new Sheets());
+            AddSheet(workbookPart, sheets, 1, "Sheet1",
+                ["Row Labels", "Grand Total", "Working Days", "Amount", "Incentive Amount", "EID", "EID OT Amount"],
+                ["COMPANY", "10", "20", "100", "0", "0", "0"]);
             workbookPart.Workbook.Save();
         }
 

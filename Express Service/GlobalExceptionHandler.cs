@@ -33,6 +33,10 @@ public sealed class GlobalExceptionHandler(ILogger<GlobalExceptionHandler> logge
         };
 
         problem.Extensions["correlationId"] = httpContext.TraceIdentifier;
+        problem.Extensions["exceptionType"] = exception.GetType().FullName;
+        problem.Extensions["exceptionMessage"] = exception.Message;
+        if (exception.InnerException is not null)
+            problem.Extensions["innerExceptionMessage"] = exception.InnerException.Message;
 
         httpContext.Response.StatusCode = StatusCodes.Status500InternalServerError;
         await httpContext.Response.WriteAsJsonAsync(problem, cancellationToken);

@@ -76,6 +76,8 @@ public record PlatformImportIssueResponse(long Id, PlatformImportIssueSeverity S
     public string MessageAr => AccountingImportArabicText.IssueMessage(Code, Message);
     public long? RiderIqamaNo { get; init; }
     public string? RiderNameAr { get; init; }
+    public bool IsCompany { get; init; }
+    public bool IsUnrecognizedRider => !IsCompany && !RiderIqamaNo.HasValue;
 }
 public record PlatformImportBatchResponse(Guid Id, int LegalEntityId, int PlatformAccountId, Guid StoredFileId, Guid? TemplateId, string? AdapterKey, string ExternalReference, DateOnly PeriodStart, DateOnly PeriodEnd, string ParserVersion, string SchemaFingerprint, PlatformImportStatus Status, decimal? SourceControlTotal, decimal? NormalizedControlTotal, int SheetCount, int RawRowCount, int RawCellCount, int FactCount, int OpenBlockingIssueCount, string RowVersion)
 {
@@ -87,6 +89,8 @@ public record PlatformNormalizedFactResponse(long Id, Guid PlatformImportBatchId
     public string WorkerCategoryAr => AccountingImportArabicText.WorkerCategory(WorkerCategory);
     public string CategoryNameAr => AccountingImportArabicText.FactCategory(Category);
     public string MetricNameAr => AccountingImportArabicText.Metric(MetricCode);
+    public bool IsCompany => string.Equals(WorkerCategory, "Company", StringComparison.OrdinalIgnoreCase) || string.Equals(ExternalWorkerId, "COMPANY", StringComparison.OrdinalIgnoreCase);
+    public bool IsUnrecognizedRider => !IsCompany && !RiderIqamaNo.HasValue;
     public string? RiderNameAr { get; init; }
 }
 public record PlatformImportRawCellResponse(long Id, int ColumnNumber, string CellReference, string? RawValue, string? DisplayValue, string? Formula, string DataType);

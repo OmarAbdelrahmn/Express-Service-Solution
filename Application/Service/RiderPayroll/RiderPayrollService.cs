@@ -72,10 +72,19 @@ public class RiderPayrollService(
     {
         var access = await financialAccessService.EnsurePermissionAsync(actorId, request.LegalEntityId, FinancialPermission.Prepare, cancellationToken);
         if (access.IsFailure) return Result.Failure<RiderPayrollRunResponse>(access.Error);
-        if (request.PeriodEnd < request.PeriodStart ||
-            !await dbcontext.LegalEntities.AnyAsync(x => x.Id == request.LegalEntityId && x.IsActive, cancellationToken) ||
-            !await dbcontext.Currencies.AnyAsync(x => x.Code == request.CurrencyCode.Trim().ToUpper() && x.IsActive, cancellationToken))
-            return Result.Failure<RiderPayrollRunResponse>(AccountingPlatformErrors.InvalidRequest);
+        if (request.PeriodEnd < request.PeriodStart)
+            return Result.Failure<RiderPayrollRunResponse>(AccountingPlatformErrors.PayrollPeriodInvalid);
+
+        var legalEntity = await dbcontext.LegalEntities.AsNoTracking()
+            .SingleOrDefaultAsync(x => x.Id == request.LegalEntityId, cancellationToken);
+        if (legalEntity is null || !legalEntity.IsActive)
+            return Result.Failure<RiderPayrollRunResponse>(AccountingPlatformErrors.PayrollLegalEntityNotFound);
+
+        var currencyCode = request.CurrencyCode.Trim().ToUpperInvariant();
+        var currency = await dbcontext.Currencies.AsNoTracking()
+            .SingleOrDefaultAsync(x => x.Code == currencyCode, cancellationToken);
+        if (currency is null || !currency.IsActive)
+            return Result.Failure<RiderPayrollRunResponse>(AccountingPlatformErrors.PayrollCurrencyNotFound);
         if (await dbcontext.RiderPayrollRuns.AnyAsync(x => x.LegalEntityId == request.LegalEntityId && x.PeriodStart == request.PeriodStart && x.PeriodEnd == request.PeriodEnd, cancellationToken))
             return Result.Failure<RiderPayrollRunResponse>(AccountingPlatformErrors.Duplicate);
 
@@ -85,7 +94,7 @@ public class RiderPayrollService(
             RunNumber = $"RPR-{request.PeriodEnd:yyyyMM}-{Guid.NewGuid():N}"[..25].ToUpperInvariant(),
             PeriodStart = request.PeriodStart,
             PeriodEnd = request.PeriodEnd,
-            CurrencyCode = request.CurrencyCode.Trim().ToUpperInvariant(),
+            CurrencyCode = currencyCode,
             CreatedBy = actorId
         };
         dbcontext.RiderPayrollRuns.Add(run);

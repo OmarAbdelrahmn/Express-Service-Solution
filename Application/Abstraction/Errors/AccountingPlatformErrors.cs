@@ -9,6 +9,9 @@ public static class AccountingPlatformErrors
     public static readonly Error InvalidState = new("Accounting.InvalidState", "The record cannot make this state transition.", StatusCodes.Status409Conflict);
     public static readonly Error ConcurrencyConflict = new("Accounting.ConcurrencyConflict", "The record was changed by another request. Refresh and retry.", StatusCodes.Status409Conflict);
     public static readonly Error InvalidRequest = new("Accounting.InvalidRequest", "The request violates an accounting rule.", StatusCodes.Status422UnprocessableEntity);
+    public static readonly Error PayrollLegalEntityNotFound = new("Payroll.LegalEntityNotFound", "The selected legal entity does not exist or is inactive.", StatusCodes.Status422UnprocessableEntity);
+    public static readonly Error PayrollCurrencyNotFound = new("Payroll.CurrencyNotFound", "The selected payroll currency does not exist or is inactive.", StatusCodes.Status422UnprocessableEntity);
+    public static readonly Error PayrollPeriodInvalid = new("Payroll.PeriodInvalid", "The payroll period end date must be on or after the start date.", StatusCodes.Status422UnprocessableEntity);
     public static readonly Error IdempotencyKeyRequired = new("Accounting.IdempotencyKeyRequired", "The Idempotency-Key header is required.", StatusCodes.Status400BadRequest);
     public static readonly Error PolicyOverlap = new("Compensation.PolicyOverlap", "An active compensation policy overlaps this effective period.", StatusCodes.Status409Conflict);
     public static readonly Error UnsupportedMetric = new("Compensation.UnsupportedMetric", "A rule references a metric that is not on the normalized metric allowlist.", StatusCodes.Status422UnprocessableEntity);

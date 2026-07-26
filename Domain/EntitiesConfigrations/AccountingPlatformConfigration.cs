@@ -52,8 +52,9 @@ public class PlatformImportBatchConfigration : IEntityTypeConfiguration<Platform
         e.Property(x => x.CreatedBy).IsRequired().HasMaxLength(450);
         e.Property(x => x.ReviewedBy).HasMaxLength(450);
         e.Property(x => x.RowVersion).IsRowVersion();
-        e.HasIndex(x => new { x.LegalEntityId, x.PlatformAccountId, x.ExternalReference }).IsUnique();
-        e.HasIndex(x => new { x.LegalEntityId, x.PlatformAccountId, x.StoredFileId }).IsUnique();
+        // A rejected import is a historical attempt and must not block a corrected re-upload.
+        e.HasIndex(x => new { x.LegalEntityId, x.PlatformAccountId, x.ExternalReference }).IsUnique().HasFilter("[Status] <> 6");
+        e.HasIndex(x => new { x.LegalEntityId, x.PlatformAccountId, x.StoredFileId }).IsUnique().HasFilter("[Status] <> 6");
         e.HasOne(x => x.LegalEntity).WithMany().HasForeignKey(x => x.LegalEntityId).OnDelete(DeleteBehavior.Restrict);
         e.HasOne(x => x.PlatformAccount).WithMany().HasForeignKey(x => x.PlatformAccountId).OnDelete(DeleteBehavior.Restrict);
         e.HasOne(x => x.StoredFile).WithMany().HasForeignKey(x => x.StoredFileId).OnDelete(DeleteBehavior.Restrict);
@@ -136,7 +137,12 @@ public class PlatformWorkerIdentityConfigration : IEntityTypeConfiguration<Platf
 {
     public void Configure(EntityTypeBuilder<PlatformWorkerIdentity> e)
     {
-        e.ToTable("PlatformWorkerIdentities", t => t.HasCheckConstraint("CK_PlatformWorkerIdentities_Dates", "[EffectiveTo] IS NULL OR [EffectiveTo] >= [EffectiveFrom]"));
+        e.ToTable("PlatformWorkerIdentities", t =>
+        {
+            t.HasCheckConstraint("CK_PlatformWorkerIdentities_Dates", "[EffectiveTo] IS NULL OR [EffectiveTo] >= [EffectiveFrom]");
+            // SQL Server rejects OUTPUT without INTO when this table's overlap trigger is enabled.
+            t.UseSqlOutputClause(false);
+        });
         e.Property(x => x.ExternalWorkerId).IsRequired().HasMaxLength(128);
         e.Property(x => x.Reason).HasMaxLength(1000);
         e.Property(x => x.CreatedBy).IsRequired().HasMaxLength(450);
@@ -162,7 +168,13 @@ public class CompensationPolicyVersionConfigration : IEntityTypeConfiguration<Co
 {
     public void Configure(EntityTypeBuilder<CompensationPolicyVersion> e)
     {
-        e.ToTable("CompensationPolicyVersions", t => t.HasCheckConstraint("CK_CompensationPolicyVersions_Dates", "[EffectiveTo] IS NULL OR [EffectiveTo] >= [EffectiveFrom]"));
+        // SQL Server has TR_CompensationPolicyVersions_NoActiveOverlap on this table.
+        // Disable EF Core's OUTPUT clause so inserts/updates work with that trigger.
+        e.ToTable("CompensationPolicyVersions", t =>
+        {
+            t.HasCheckConstraint("CK_CompensationPolicyVersions_Dates", "[EffectiveTo] IS NULL OR [EffectiveTo] >= [EffectiveFrom]");
+            t.UseSqlOutputClause(false);
+        });
         e.Property(x => x.WorkerCategory).IsRequired().HasMaxLength(64);
         e.Property(x => x.Code).IsRequired().HasMaxLength(64);
         e.Property(x => x.Name).IsRequired().HasMaxLength(200);

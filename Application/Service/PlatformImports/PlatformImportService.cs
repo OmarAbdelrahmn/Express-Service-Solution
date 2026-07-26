@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Application.Abstraction;
 using Application.Abstraction.Errors;
 using Application.Contracts.Common;
@@ -280,7 +281,7 @@ public class PlatformImportService(
             dbcontext.AccountingStoredFiles.Add(file);
             await dbcontext.SaveChangesAsync(cancellationToken);
         }
-        else if (await dbcontext.PlatformImportBatches.AnyAsync(x => x.LegalEntityId == request.LegalEntityId && x.PlatformAccountId == request.PlatformAccountId && x.StoredFileId == file.Id, cancellationToken))
+        else if (await dbcontext.PlatformImportBatches.AnyAsync(x => x.LegalEntityId == request.LegalEntityId && x.PlatformAccountId == request.PlatformAccountId && x.StoredFileId == file.Id && x.Status != PlatformImportStatus.Rejected, cancellationToken))
         {
             return Result.Failure<PlatformImportBatchResponse>(AccountingPlatformErrors.Duplicate);
         }
@@ -624,6 +625,16 @@ public class PlatformImportService(
         if (access.IsFailure) return Result.Failure<IReadOnlyCollection<PlatformImportIssueResponse>>(access.Error);
         var issues = await dbcontext.PlatformImportIssues.AsNoTracking().Where(x => x.PlatformImportBatchId == batchId).OrderByDescending(x => x.Severity).ThenBy(x => x.Id)
             .Select(x => new PlatformImportIssueResponse(x.Id, x.Severity, x.Status, x.Code, x.Message, x.Resolution, x.SourceRawRowId)).ToListAsync(cancellationToken);
+        var issueRowIds = issues.Where(x => x.SourceRawRowId.HasValue).Select(x => x.SourceRawRowId!.Value).ToArray();
+        var companyRowIds = issueRowIds.Length == 0
+            ? []
+            : (await dbcontext.PlatformNormalizedFacts.AsNoTracking()
+                .Where(x => x.PlatformImportBatchId == batchId && x.SourceRawRowId.HasValue && issueRowIds.Contains(x.SourceRawRowId.Value) &&
+                    (x.WorkerCategory == "Company" || x.ExternalWorkerId == "COMPANY"))
+                .Select(x => x.SourceRawRowId!.Value)
+                .Distinct()
+                .ToListAsync(cancellationToken)).ToHashSet();
+        issues = issues.Select(x => x with { IsCompany = x.SourceRawRowId.HasValue && companyRowIds.Contains(x.SourceRawRowId.Value) }).ToList();
         var issuesWithRiders = await AttachIssueRidersAsync(batchId, issues, cancellationToken);
         return Result.Success<IReadOnlyCollection<PlatformImportIssueResponse>>(issuesWithRiders);
     }
@@ -662,6 +673,8 @@ public class PlatformImportService(
             return Result.Failure<PlatformImportBatchResponse>(AccountingPlatformErrors.InvalidRequest);
 
         var externalId = request.ExternalWorkerId.Trim();
+        if (IsCompanySummaryWorkerId(externalId))
+            return Result.Failure<PlatformImportBatchResponse>(AccountingPlatformErrors.InvalidRequest);
         var end = request.EffectiveTo ?? DateOnly.MaxValue;
         var overlaps = await dbcontext.PlatformWorkerIdentities.AnyAsync(x =>
             x.LegalEntityId == batch.LegalEntityId && x.PlatformAccountId == batch.PlatformAccountId && x.ExternalWorkerId == externalId &&
@@ -1142,15 +1155,18 @@ public class PlatformImportService(
                     var workerId = byColumn.GetValueOrDefault(workerColumn)?.DisplayValue?.Trim() ?? string.Empty;
                     if (string.IsNullOrWhiteSpace(workerId)) continue;
                     var factDate = ParseFactDate(configuration, columns, byColumn, batch.PeriodEnd);
-                    var resolution = ResolveIdentity(workerId, factDate, identities, shiftSubstitutions, hungerSubstitutions, workingHistory, currentRiders);
+                    var isCompanySummary = IsCompanySummaryWorkerId(workerId);
+                    var resolution = isCompanySummary
+                        ? new IdentityResolution(null, 1, "CompanySummary")
+                        : ResolveIdentity(workerId, factDate, identities, shiftSubstitutions, hungerSubstitutions, workingHistory, currentRiders);
                     long? riderIqama = resolution.RiderIqamaNo;
-                    if (!riderIqama.HasValue && resolution.MatchCount == 0 && directIqamaColumn.HasValue &&
+                    if (!isCompanySummary && !riderIqama.HasValue && resolution.MatchCount == 0 && directIqamaColumn.HasValue &&
                         long.TryParse(byColumn.GetValueOrDefault(directIqamaColumn.Value)?.DisplayValue?.Trim(), out var directIqama) && activeEmployeeIqamas.Contains(directIqama))
                     {
                         riderIqama = directIqama;
                         resolution = new IdentityResolution(directIqama, 1, "WorkbookIqama");
                     }
-                    if (!riderIqama.HasValue)
+                    if (!isCompanySummary && !riderIqama.HasValue)
                         dbcontext.PlatformImportIssues.Add(new PlatformImportIssue { PlatformImportBatchId = batch.Id, SourceRawRowId = row.Id, Severity = PlatformImportIssueSeverity.Blocking, Code = resolution.MatchCount == 0 ? "IDENTITY_MISSING" : "IDENTITY_AMBIGUOUS", Message = AccountingImportArabicText.IdentityIssueMessage(workerId, resolution.MatchCount, factDate, resolution.Source) });
 
                     foreach (var mapping in configuration.Columns)
@@ -1166,8 +1182,8 @@ public class PlatformImportService(
                         var fact = new PlatformNormalizedFact
                         {
                             PlatformImportBatchId = batch.Id, LegalEntityId = batch.LegalEntityId, PlatformAccountId = batch.PlatformAccountId, SourceRawRowId = row.Id,
-                            WorkerCategory = configuration.WorkerCategory, RiderIqamaNo = riderIqama, ExternalWorkerId = workerId, FactDate = factDate, Category = mapping.Category, MetricCode = metricCode,
-                            CurrencyCode = string.IsNullOrWhiteSpace(mapping.CurrencyCode) ? "SAR" : NormalizeCode(mapping.CurrencyCode), IsResolved = riderIqama.HasValue,
+                            WorkerCategory = isCompanySummary ? "Company" : configuration.WorkerCategory, RiderIqamaNo = riderIqama, ExternalWorkerId = isCompanySummary ? "COMPANY" : workerId, FactDate = factDate, Category = mapping.Category, MetricCode = metricCode,
+                            CurrencyCode = string.IsNullOrWhiteSpace(mapping.CurrencyCode) ? "SAR" : NormalizeCode(mapping.CurrencyCode), IsResolved = isCompanySummary || riderIqama.HasValue,
                             LineageJson = JsonSerializer.Serialize(new { Sheet = sheet.Name, row.RowNumber, cell.CellReference, IdentitySource = resolution.Source }, JsonOptions)
                         };
                         if (string.Equals(mapping.DataType, "boolean", StringComparison.OrdinalIgnoreCase)) fact.BooleanValue = ParseBoolean(cell.DisplayValue);
@@ -1288,9 +1304,23 @@ public class PlatformImportService(
 
     private static bool TryParseDecimal(string? value, out decimal result)
     {
-        var normalized = new string((value ?? string.Empty).Where(x => char.IsDigit(x) || x is '-' or '.' or ',').ToArray()).Replace(",", string.Empty);
-        return decimal.TryParse(normalized, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out result) || decimal.TryParse(value, out result);
+        var normalized = NormalizeDigits(value);
+        if (normalized.Trim() is "-" or "–" or "—")
+        {
+            result = 0m;
+            return true;
+        }
+        var match = Regex.Match(normalized, @"[-+]?\d[\d,]*(?:\.\d+)?");
+        if (match.Success && decimal.TryParse(match.Value.Replace(",", string.Empty), System.Globalization.NumberStyles.Number | System.Globalization.NumberStyles.AllowLeadingSign, System.Globalization.CultureInfo.InvariantCulture, out result))
+            return true;
+        return decimal.TryParse(value, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out result) || decimal.TryParse(value, out result);
     }
+    private static string NormalizeDigits(string? value) => new((value ?? string.Empty).Select(c => c switch
+    {
+        >= '\u0660' and <= '\u0669' => (char)('0' + c - '\u0660'),
+        >= '\u06F0' and <= '\u06F9' => (char)('0' + c - '\u06F0'),
+        _ => c
+    }).ToArray());
     private static bool? ParseBoolean(string? value) => value?.Trim().ToUpperInvariant() switch
     {
         "1" or "TRUE" or "YES" or "VALID" or "صالح" => true,
@@ -1301,6 +1331,12 @@ public class PlatformImportService(
     private static string SafeFileName(string value) => Path.GetFileName(value).Length <= 260 ? Path.GetFileName(value) : Path.GetFileName(value)[..260];
     private static string NormalizeCode(string value) => value.Trim().ToUpperInvariant();
     private static string NormalizeHeader(string? value) => string.Join(' ', (value ?? string.Empty).Trim().ToUpperInvariant().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+    private static bool IsCompanySummaryWorkerId(string value)
+    {
+        var normalized = NormalizeHeader(value);
+        return normalized is "COMPANY" or "COMPANY TOTAL" or "TOTAL COMPANY" or "TOTAL" or "GRAND TOTAL" or
+            "الشركة" or "إجمالي الشركة" or "الإجمالي" or "إجمالي" or "المجموع" or "المجموع الكلي";
+    }
     private static IdentityResolution ResolveIdentity(
         string workerId,
         DateOnly factDate,
