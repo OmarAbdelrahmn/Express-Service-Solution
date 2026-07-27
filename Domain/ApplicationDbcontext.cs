@@ -6,6 +6,7 @@ using Domain.Entities.Organization;
 using Domain.Entities.AccountingCore;
 using Domain.Entities.FinancialOperations;
 using Domain.Entities.AccountingPlatform;
+using Domain.Entities.Vacation;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using System.Diagnostics.CodeAnalysis;
@@ -101,6 +102,11 @@ public class ApplicationDbcontext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<RiderPaymentBatch> RiderPaymentBatches { get; set; }
     public DbSet<RiderPaymentBatchLine> RiderPaymentBatchLines { get; set; }
     public DbSet<HousingCashUserAccess> HousingCashUserAccesses { get; set; }
+    public DbSet<VacationUserRoleAssignment> VacationUserRoleAssignments { get; set; }
+    public DbSet<VacationRequest> VacationRequests { get; set; }
+    public DbSet<VacationApprovalDecision> VacationApprovalDecisions { get; set; }
+    public DbSet<VacationDateChangeRequest> VacationDateChangeRequests { get; set; }
+    public DbSet<VacationCancellationRequest> VacationCancellationRequests { get; set; }
     public required DbSet<Employees> Employees { get; set; }
     public required DbSet<EmployeeDocuments> EmployeeDocuments { get; set; }
     public required DbSet<Housing> Housings { get; set; }

@@ -49,6 +49,7 @@ using Application.Service.Transfer;
 using Application.Service.TransporterShifts;
 using Application.Service.User;
 using Application.Service.VehiclePermission;
+using Application.Service.Vacation;
 using Application.Service.Wallet;
 using DocumentFormat.OpenXml.Office2016.Drawing.ChartDrawing;
 using Asp.Versioning;
@@ -123,6 +124,8 @@ public static class ApplicationDependencies
         Services.AddScoped<IEscapedEmployeeService, EscapedEmployeeService>();
         Services.AddScoped<IPetrolService, PetrolService>();
         Services.AddScoped<IVehiclePermissionRenewalJob, VehiclePermissionRenewalJob>();
+        Services.AddScoped<IVacationService, VacationService>();
+        Services.AddScoped<IVacationLifecycleJob, VacationLifecycleJob>();
         Services.AddScoped<IGeminiService, GeminiService>();
         Services.AddScoped<IEmailWarmupJob, EmailWarmupJob>();
         Services.AddScoped<IOrderService, OrderService>();

@@ -2663,7 +2663,7 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
         var response = pendingOps.Select(op => new PendingVehicleOperationResponse(
             op.Id,
             op.RiderIqamaNo ?? 2536361732,
-            op.Rider.Employee.NameEN,
+            op.Rider?.Employee.NameEN,
             op.VehicleNumber,
             op.VehiclePlateNumber,
             op.VehicleStatusType.ToString(),

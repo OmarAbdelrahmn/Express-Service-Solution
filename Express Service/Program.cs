@@ -2,6 +2,7 @@ using Application.EmailWarmup;
 using Application.Service.DailyReport;
 using Application.Service.AccountingOutbox;
 using Application.Service.VehiclePermission;
+using Application.Service.Vacation;
 using Express_Service;
 using Hangfire;
 
@@ -108,6 +109,15 @@ RecurringJob.AddOrUpdate<IVehiclePermissionRenewalJob>(
     "vehicle-permission-renewal",
     x => x.RunAsync(CancellationToken.None),
     "0 12 * * *",                          // same time: noon daily
+    new RecurringJobOptions
+    {
+        TimeZone = TimeZoneInfo.FindSystemTimeZoneById("Arab Standard Time")
+    });
+
+RecurringJob.AddOrUpdate<IVacationLifecycleJob>(
+    "vacation-lifecycle",
+    job => job.RunAsync(CancellationToken.None),
+    "5 0 * * *",
     new RecurringJobOptions
     {
         TimeZone = TimeZoneInfo.FindSystemTimeZoneById("Arab Standard Time")
