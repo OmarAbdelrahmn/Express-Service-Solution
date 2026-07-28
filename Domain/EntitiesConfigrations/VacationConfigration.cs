@@ -25,6 +25,7 @@ public class VacationRequestConfigration : IEntityTypeConfiguration<VacationRequ
         e.Property(x => x.RequestedByUserId).IsRequired().HasMaxLength(450);
         e.Property(x => x.RequestedByName).IsRequired().HasMaxLength(200);
         e.Property(x => x.Status).HasConversion<int>();
+        e.Property(x => x.HrStatus).HasConversion<int>();
         e.Property(x => x.CancelledByUserId).HasMaxLength(450);
         e.Property(x => x.CancelledByName).HasMaxLength(200);
         e.Property(x => x.CancellationReason).HasMaxLength(1000);
@@ -32,6 +33,28 @@ public class VacationRequestConfigration : IEntityTypeConfiguration<VacationRequ
         e.HasIndex(x => new { x.RiderId, x.Status, x.StartDate, x.EndDate });
         e.HasIndex(x => new { x.Status, x.RequestedAt });
         e.HasOne(x => x.Rider).WithMany().HasForeignKey(x => x.RiderId).OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+public class VacationHrDocumentConfigration : IEntityTypeConfiguration<VacationHrDocument>
+{
+    public void Configure(EntityTypeBuilder<VacationHrDocument> e)
+    {
+        e.ToTable("VacationHrDocuments");
+        e.Property(x => x.Type).HasConversion<int>();
+        e.Property(x => x.OriginalFileName).IsRequired().HasMaxLength(260);
+        e.Property(x => x.StoredRelativePath).IsRequired().HasMaxLength(1000);
+        e.Property(x => x.ContentType).IsRequired().HasMaxLength(100);
+        e.Property(x => x.UploadedByUserId).IsRequired().HasMaxLength(450);
+        e.Property(x => x.UploadedByName).IsRequired().HasMaxLength(200);
+        e.Property(x => x.SupersededByUserId).HasMaxLength(450);
+        e.Property(x => x.SupersededReason).HasMaxLength(1000);
+        e.HasIndex(x => new { x.VacationRequestId, x.Type, x.Version }).IsUnique();
+        e.HasIndex(x => new { x.VacationRequestId, x.Type, x.IsSuperseded });
+        e.HasOne(x => x.VacationRequest)
+            .WithMany(x => x.HrDocuments)
+            .HasForeignKey(x => x.VacationRequestId)
+            .OnDelete(DeleteBehavior.Cascade);
     }
 }
 

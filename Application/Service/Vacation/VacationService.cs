@@ -9,7 +9,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Application.Service.Vacation;
 
-public class VacationService(ApplicationDbcontext dbcontext) : IVacationService
+public class VacationService(ApplicationDbcontext dbcontext, IVacationDocumentStorage? documentStorage = null) : IVacationService
 {
     private static readonly VacationRequestStatus[] OverlapStatuses =
     [
@@ -167,8 +167,15 @@ public class VacationService(ApplicationDbcontext dbcontext) : IVacationService
         {
             if (!Enum.IsDefined(query.Stage.Value))
                 return Result.Failure<VacationPagedResponse>(new Error("Vacation.InvalidRole", "Vacation stage is invalid.", 400));
-            var expected = StatusForRole(query.Stage.Value);
-            source = source.Where(x => x.Status == expected);
+            if (query.Stage.Value == VacationRole.HR)
+                source = source.Where(x => x.FullyApprovedAt != null &&
+                                           (x.HrStatus == VacationHrStatus.AwaitingTicket ||
+                                            x.HrStatus == VacationHrStatus.AwaitingExitReentryVisa));
+            else
+            {
+                var expected = StatusForRole(query.Stage.Value);
+                source = source.Where(x => x.Status == expected);
+            }
         }
         if (query.RiderId.HasValue)
             source = source.Where(x => x.RiderId == query.RiderId.Value);
@@ -186,7 +193,10 @@ public class VacationService(ApplicationDbcontext dbcontext) : IVacationService
     {
         var roles = await dbcontext.VacationUserRoleAssignments.AsNoTracking()
             .Where(x => x.UserId == actorUserId).Select(x => x.Role).ToListAsync(cancellationToken);
-        var statuses = roles.Select(StatusForRole).ToList();
+        var statuses = roles
+            .Where(x => x is VacationRole.Operation or VacationRole.Accountant or VacationRole.Administration)
+            .Select(StatusForRole)
+            .ToList();
         if (statuses.Count == 0)
             return Result.Success<IReadOnlyCollection<VacationRequestResponse>>([]);
 
@@ -199,6 +209,23 @@ public class VacationService(ApplicationDbcontext dbcontext) : IVacationService
         return Result.Success<IReadOnlyCollection<VacationRequestResponse>>(items.Select(ToResponse).ToList());
     }
 
+    public async Task<Result<IReadOnlyCollection<VacationRequestResponse>>> GetHrInboxAsync(string actorUserId, CancellationToken cancellationToken = default)
+    {
+        if (!await IsAssignedAsync(actorUserId, VacationRole.HR, cancellationToken))
+            return Result.Failure<IReadOnlyCollection<VacationRequestResponse>>(VacationErrors.AccessDenied);
+
+        var items = await RequestsQuery().AsNoTracking()
+            .Where(x => x.FullyApprovedAt != null &&
+                        (x.HrStatus == VacationHrStatus.AwaitingTicket ||
+                         x.HrStatus == VacationHrStatus.AwaitingExitReentryVisa) &&
+                        !x.DateChangeRequests.Any(a => a.Status == VacationAmendmentStatus.Pending) &&
+                        !x.CancellationRequests.Any(a => a.Status == VacationAmendmentStatus.Pending))
+            .OrderBy(x => x.StartDate)
+            .ThenBy(x => x.RequestedAt)
+            .ToListAsync(cancellationToken);
+        return Result.Success<IReadOnlyCollection<VacationRequestResponse>>(items.Select(ToResponse).ToList());
+    }
+
     public async Task<Result<VacationRequestResponse>> GetDetailAsync(string actorUserId, bool isOversightUser, Guid id, CancellationToken cancellationToken = default)
     {
         var vacation = await RequestsQuery().AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
@@ -207,7 +234,8 @@ public class VacationService(ApplicationDbcontext dbcontext) : IVacationService
         if (!isOversightUser)
         {
             var role = RoleForStatus(vacation.Status);
-            var allowed = role.HasValue && await IsAssignedAsync(actorUserId, role.Value, cancellationToken);
+            var allowed = (role.HasValue && await IsAssignedAsync(actorUserId, role.Value, cancellationToken)) ||
+                          (vacation.FullyApprovedAt.HasValue && await IsAssignedAsync(actorUserId, VacationRole.HR, cancellationToken));
             if (!allowed)
                 return Result.Failure<VacationRequestResponse>(VacationErrors.AccessDenied);
         }
@@ -247,6 +275,7 @@ public class VacationService(ApplicationDbcontext dbcontext) : IVacationService
             if (request.Decision == VacationDecision.Rejected)
             {
                 vacation.Status = VacationRequestStatus.Rejected;
+                vacation.HrStatus = VacationHrStatus.Closed;
             }
             else if (role == VacationRole.Operation)
             {
@@ -260,9 +289,13 @@ public class VacationService(ApplicationDbcontext dbcontext) : IVacationService
             {
                 vacation.FullyApprovedAt = RiyadhNow();
                 if (RiyadhToday() > vacation.EndDate)
+                {
                     vacation.Status = VacationRequestStatus.Expired;
+                    vacation.HrStatus = VacationHrStatus.Closed;
+                }
                 else
                 {
+                    vacation.HrStatus = VacationHrStatus.AwaitingTicket;
                     vacation.Status = VacationRequestStatus.Approved;
                     await ApplyEffectiveDatesAsync(vacation, actorUserId, actorName, cancellationToken);
                 }
@@ -294,6 +327,7 @@ public class VacationService(ApplicationDbcontext dbcontext) : IVacationService
         {
             var amendment = await dbcontext.VacationDateChangeRequests
                 .Include(x => x.VacationRequest).ThenInclude(x => x.Rider).ThenInclude(x => x.Employee)
+                .Include(x => x.VacationRequest.HrDocuments)
                 .SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
             if (amendment is null)
                 return Result.Failure<VacationDateChangeResponse>(new Error("Vacation.DateChangeNotFound", "Vacation date change request was not found.", 404));
@@ -310,6 +344,7 @@ public class VacationService(ApplicationDbcontext dbcontext) : IVacationService
             if (request.Decision == VacationDecision.Approved)
             {
                 var vacation = amendment.VacationRequest;
+                var previousEndDate = vacation.EndDate;
                 if (!CanAmend(vacation.Status))
                     return Result.Failure<VacationDateChangeResponse>(VacationErrors.InvalidState);
                 if (vacation.Status != VacationRequestStatus.Active && amendment.ProposedStartDate < RiyadhToday())
@@ -319,6 +354,8 @@ public class VacationService(ApplicationDbcontext dbcontext) : IVacationService
 
                 vacation.StartDate = amendment.ProposedStartDate;
                 vacation.EndDate = amendment.ProposedEndDate;
+                if (vacation.FullyApprovedAt.HasValue && amendment.ProposedEndDate > previousEndDate)
+                    InvalidateExitReentryVisa(vacation, actorUserId, request.Reason.Trim());
                 if (vacation.Status is VacationRequestStatus.Approved or VacationRequestStatus.Active)
                     await ApplyEffectiveDatesAsync(vacation, actorUserId, actorName, cancellationToken);
             }
@@ -392,6 +429,7 @@ public class VacationService(ApplicationDbcontext dbcontext) : IVacationService
                 .Include(x => x.DateChangeRequests)
                 .Include(x => x.CancellationRequests)
                 .Include(x => x.Decisions)
+                .Include(x => x.HrDocuments)
                 .SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
             if (vacation is null)
                 return Result.Failure<VacationRequestResponse>(VacationErrors.NotFound);
@@ -417,6 +455,137 @@ public class VacationService(ApplicationDbcontext dbcontext) : IVacationService
             await transaction.RollbackAsync(cancellationToken);
             return Result.Failure<VacationRequestResponse>(VacationErrors.ConcurrentUpdate);
         }
+    }
+
+    public async Task<Result<VacationHrUploadResponse>> UploadHrDocumentAsync(
+        string actorUserId,
+        Guid id,
+        VacationHrDocumentType type,
+        bool completed,
+        string fileName,
+        string contentType,
+        long fileSize,
+        Stream content,
+        CancellationToken cancellationToken = default)
+    {
+        if (!await IsAssignedAsync(actorUserId, VacationRole.HR, cancellationToken))
+            return Result.Failure<VacationHrUploadResponse>(VacationErrors.AccessDenied);
+        if (!Enum.IsDefined(type) || fileSize <= 0 || fileSize > VacationDocumentStorage.MaximumFileSize || documentStorage is null)
+            return Result.Failure<VacationHrUploadResponse>(VacationErrors.InvalidDocument);
+        var safeFileName = Path.GetFileName(fileName.Replace('\\', '/'));
+        if (string.IsNullOrWhiteSpace(safeFileName) || safeFileName.Length > 260)
+            return Result.Failure<VacationHrUploadResponse>(VacationErrors.InvalidDocument);
+
+        var vacation = await LoadVacationForUpdateAsync(id, cancellationToken);
+        if (vacation is null)
+            return Result.Failure<VacationHrUploadResponse>(VacationErrors.NotFound);
+        if (!vacation.FullyApprovedAt.HasValue ||
+            vacation.Status is VacationRequestStatus.Rejected or VacationRequestStatus.Cancelled or VacationRequestStatus.Expired ||
+            vacation.HrStatus == VacationHrStatus.Closed)
+            return Result.Failure<VacationHrUploadResponse>(VacationErrors.HrNotReady);
+        if (await HasPendingAmendmentAsync(vacation.Id, cancellationToken))
+            return Result.Failure<VacationHrUploadResponse>(VacationErrors.WorkflowPaused);
+
+        var ticketCompleted = HasCurrentCompletedDocument(vacation, VacationHrDocumentType.Ticket);
+        if (type == VacationHrDocumentType.ExitReentryVisa && !ticketCompleted)
+            return Result.Failure<VacationHrUploadResponse>(VacationErrors.TicketRequired);
+
+        var actorName = await GetUserNameAsync(actorUserId, cancellationToken);
+        var now = RiyadhNow();
+        var previous = vacation.HrDocuments
+            .Where(x => x.Type == type && !x.IsSuperseded)
+            .OrderByDescending(x => x.Version)
+            .FirstOrDefault();
+        var document = new VacationHrDocument
+        {
+            VacationRequestId = vacation.Id,
+            Type = type,
+            Version = vacation.HrDocuments.Where(x => x.Type == type).Select(x => x.Version).DefaultIfEmpty(0).Max() + 1,
+            OriginalFileName = safeFileName,
+            UploadedByUserId = actorUserId,
+            UploadedByName = actorName,
+            UploadedAt = now,
+            IsCompleted = completed,
+            CompletedAt = completed ? now : null
+        };
+
+        StoredVacationDocument stored;
+        try
+        {
+            stored = await documentStorage.SaveAsync(
+                vacation.Id,
+                document.Id,
+                type == VacationHrDocumentType.Ticket ? "ticket" : "exit-reentry-visa",
+                safeFileName,
+                content,
+                cancellationToken);
+        }
+        catch (InvalidDataException)
+        {
+            return Result.Failure<VacationHrUploadResponse>(VacationErrors.InvalidDocument);
+        }
+
+        document.StoredRelativePath = stored.RelativePath;
+        document.ContentType = stored.ContentType;
+        document.FileSize = stored.Length;
+        if (previous is not null)
+        {
+            previous.IsSuperseded = true;
+            previous.SupersededAt = now;
+            previous.SupersededByUserId = actorUserId;
+            previous.SupersededReason = "Replaced by a newer HR document.";
+        }
+        vacation.HrDocuments.Add(document);
+        dbcontext.VacationHrDocuments.Add(document);
+        RefreshHrStatus(vacation);
+
+        try
+        {
+            await dbcontext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException)
+        {
+            await documentStorage.DeleteAsync(stored.RelativePath, cancellationToken);
+            return Result.Failure<VacationHrUploadResponse>(VacationErrors.ConcurrentUpdate);
+        }
+        catch
+        {
+            await documentStorage.DeleteAsync(stored.RelativePath, CancellationToken.None);
+            throw;
+        }
+
+        return Result.Success(new VacationHrUploadResponse(ToResponse(vacation), ToResponse(document)));
+    }
+
+    public async Task<Result<VacationDocumentFileResponse>> OpenHrDocumentAsync(
+        string actorUserId,
+        long memberIqamaNo,
+        bool isOversightUser,
+        Guid vacationRequestId,
+        Guid documentId,
+        CancellationToken cancellationToken = default)
+    {
+        var document = await dbcontext.VacationHrDocuments.AsNoTracking()
+            .Include(x => x.VacationRequest).ThenInclude(x => x.Rider).ThenInclude(x => x.Employee)
+            .SingleOrDefaultAsync(x => x.Id == documentId && x.VacationRequestId == vacationRequestId, cancellationToken);
+        if (document is null)
+            return Result.Failure<VacationDocumentFileResponse>(VacationErrors.DocumentNotFound);
+
+        var allowed = isOversightUser || await IsAssignedAsync(actorUserId, VacationRole.HR, cancellationToken);
+        if (!allowed && memberIqamaNo != 0)
+        {
+            var housingId = await GetManagedHousingIdAsync(memberIqamaNo, cancellationToken);
+            allowed = housingId.HasValue && document.VacationRequest.Rider.Employee.HousingId == housingId.Value;
+        }
+        if (!allowed)
+            return Result.Failure<VacationDocumentFileResponse>(VacationErrors.AccessDenied);
+        if (documentStorage is null)
+            return Result.Failure<VacationDocumentFileResponse>(VacationErrors.DocumentNotFound);
+
+        var stream = await documentStorage.OpenReadAsync(document.StoredRelativePath, cancellationToken);
+        return stream is null
+            ? Result.Failure<VacationDocumentFileResponse>(VacationErrors.DocumentNotFound)
+            : Result.Success(new VacationDocumentFileResponse(stream, document.ContentType, document.OriginalFileName, document.FileSize));
     }
 
     public async Task<Result<IReadOnlyCollection<VacationRoleAssignmentResponse>>> GetRoleAssignmentsAsync(CancellationToken cancellationToken = default)
@@ -459,6 +628,7 @@ public class VacationService(ApplicationDbcontext dbcontext) : IVacationService
             if (vacation.Status is VacationRequestStatus.PendingOperation or VacationRequestStatus.PendingAccountant or VacationRequestStatus.PendingAdministration)
             {
                 vacation.Status = VacationRequestStatus.Expired;
+                vacation.HrStatus = VacationHrStatus.Closed;
                 continue;
             }
             await ApplyEffectiveDatesAsync(vacation, "VacationWorkflow", "Vacation Workflow", cancellationToken);
@@ -472,6 +642,7 @@ public class VacationService(ApplicationDbcontext dbcontext) : IVacationService
         .Include(x => x.Decisions)
         .Include(x => x.DateChangeRequests)
         .Include(x => x.CancellationRequests)
+        .Include(x => x.HrDocuments)
         .AsSplitQuery();
 
     private async Task<VacationRequest?> LoadVacationForUpdateAsync(Guid id, CancellationToken cancellationToken) => await dbcontext.VacationRequests
@@ -479,6 +650,7 @@ public class VacationService(ApplicationDbcontext dbcontext) : IVacationService
         .Include(x => x.Decisions)
         .Include(x => x.DateChangeRequests)
         .Include(x => x.CancellationRequests)
+        .Include(x => x.HrDocuments)
         .SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
 
     private async Task<Result<VacationRequest>> GetMemberVacationForUpdateAsync(long managerIqamaNo, Guid id, CancellationToken cancellationToken)
@@ -540,6 +712,7 @@ public class VacationService(ApplicationDbcontext dbcontext) : IVacationService
             throw new InvalidOperationException("Vacation request cannot be cancelled in its current state.");
         var wasActive = vacation.Status == VacationRequestStatus.Active;
         vacation.Status = VacationRequestStatus.Cancelled;
+        vacation.HrStatus = VacationHrStatus.Closed;
         vacation.CancelledAt = RiyadhNow();
         vacation.CancelledByUserId = actorUserId;
         vacation.CancelledByName = actorName;
@@ -593,6 +766,45 @@ public class VacationService(ApplicationDbcontext dbcontext) : IVacationService
         VacationRequestStatus.PendingAdministration => VacationRole.Administration,
         _ => null
     };
+
+    private static bool HasCurrentCompletedDocument(VacationRequest vacation, VacationHrDocumentType type) =>
+        vacation.HrDocuments.Any(x => x.Type == type && !x.IsSuperseded && x.IsCompleted);
+
+    private static void RefreshHrStatus(VacationRequest vacation)
+    {
+        if (vacation.Status is VacationRequestStatus.Rejected or VacationRequestStatus.Cancelled or VacationRequestStatus.Expired)
+        {
+            vacation.HrStatus = VacationHrStatus.Closed;
+            return;
+        }
+
+        if (!vacation.FullyApprovedAt.HasValue)
+        {
+            vacation.HrStatus = VacationHrStatus.PendingApproval;
+            return;
+        }
+
+        var ticketCompleted = HasCurrentCompletedDocument(vacation, VacationHrDocumentType.Ticket);
+        var visaCompleted = HasCurrentCompletedDocument(vacation, VacationHrDocumentType.ExitReentryVisa);
+        vacation.HrStatus = !ticketCompleted
+            ? VacationHrStatus.AwaitingTicket
+            : !visaCompleted
+                ? VacationHrStatus.AwaitingExitReentryVisa
+                : VacationHrStatus.Completed;
+    }
+
+    private static void InvalidateExitReentryVisa(VacationRequest vacation, string actorUserId, string masterReason)
+    {
+        var now = RiyadhNow();
+        foreach (var visa in vacation.HrDocuments.Where(x => x.Type == VacationHrDocumentType.ExitReentryVisa && !x.IsSuperseded))
+        {
+            visa.IsSuperseded = true;
+            visa.SupersededAt = now;
+            visa.SupersededByUserId = actorUserId;
+            visa.SupersededReason = "Return date was extended. A new exit/re-entry visa is required. Master reason: " + masterReason;
+        }
+        RefreshHrStatus(vacation);
+    }
     private static DateTime RiyadhNow() => DateTime.UtcNow.AddHours(3);
     private static DateOnly RiyadhToday() => DateOnly.FromDateTime(RiyadhNow());
     private static Error RequiredReasonError() => new("Vacation.ReasonRequired", "A decision reason is required.", 400);
@@ -601,5 +813,19 @@ public class VacationService(ApplicationDbcontext dbcontext) : IVacationService
     private static VacationDecisionResponse ToResponse(VacationApprovalDecision decision) => new(decision.Role, decision.Decision, decision.Reason, decision.DecidedByUserId, decision.DecidedByName, decision.DecidedAt);
     private static VacationDateChangeResponse ToResponse(VacationDateChangeRequest amendment) => new(amendment.Id, amendment.PreviousStartDate, amendment.PreviousEndDate, amendment.ProposedStartDate, amendment.ProposedEndDate, amendment.Reason, amendment.RequestedByUserId, amendment.RequestedByName, amendment.RequestedAt, amendment.Status, amendment.ResolvedByUserId, amendment.ResolvedByName, amendment.ResolutionReason, amendment.ResolvedAt);
     private static VacationCancellationResponse ToResponse(VacationCancellationRequest cancellation) => new(cancellation.Id, cancellation.Reason, cancellation.RequestedByUserId, cancellation.RequestedByName, cancellation.RequestedAt, cancellation.Status, cancellation.ResolvedByUserId, cancellation.ResolvedByName, cancellation.ResolutionReason, cancellation.ResolvedAt);
-    private static VacationRequestResponse ToResponse(VacationRequest vacation) => new(vacation.Id, ToResponse(vacation.Rider), vacation.StartDate, vacation.EndDate, vacation.Status, RoleForStatus(vacation.Status), vacation.RequestedByUserId, vacation.RequestedByName, vacation.RequestedAt, vacation.FullyApprovedAt, vacation.ActivatedAt, vacation.CompletedAt, vacation.CancelledAt, vacation.CancelledByUserId, vacation.CancelledByName, vacation.CancellationReason, vacation.Decisions.OrderBy(x => x.Role).Select(ToResponse).ToList(), vacation.DateChangeRequests.OrderByDescending(x => x.RequestedAt).Select(ToResponse).ToList(), vacation.CancellationRequests.OrderByDescending(x => x.RequestedAt).Select(ToResponse).ToList());
+    private static VacationHrDocumentResponse ToResponse(VacationHrDocument document)
+    {
+        var baseUrl = $"/api/vacation-requests/{document.VacationRequestId}/documents/{document.Id}";
+        return new VacationHrDocumentResponse(document.Id, document.Type, document.Version, document.OriginalFileName, document.ContentType, document.FileSize, document.UploadedByUserId, document.UploadedByName, document.UploadedAt, document.IsCompleted, document.CompletedAt, document.IsSuperseded, document.SupersededAt, document.SupersededReason, baseUrl + "/stream", baseUrl + "/download");
+    }
+    private static VacationRequestResponse ToResponse(VacationRequest vacation)
+    {
+        var documents = vacation.HrDocuments.OrderByDescending(x => x.UploadedAt).Select(ToResponse).ToList();
+        var hr = new VacationHrResponse(
+            vacation.HrStatus,
+            HasCurrentCompletedDocument(vacation, VacationHrDocumentType.Ticket),
+            HasCurrentCompletedDocument(vacation, VacationHrDocumentType.ExitReentryVisa),
+            documents);
+        return new VacationRequestResponse(vacation.Id, ToResponse(vacation.Rider), vacation.StartDate, vacation.EndDate, vacation.Status, RoleForStatus(vacation.Status), vacation.RequestedByUserId, vacation.RequestedByName, vacation.RequestedAt, vacation.FullyApprovedAt, vacation.ActivatedAt, vacation.CompletedAt, vacation.CancelledAt, vacation.CancelledByUserId, vacation.CancelledByName, vacation.CancellationReason, vacation.Decisions.OrderBy(x => x.Role).Select(ToResponse).ToList(), vacation.DateChangeRequests.OrderByDescending(x => x.RequestedAt).Select(ToResponse).ToList(), vacation.CancellationRequests.OrderByDescending(x => x.RequestedAt).Select(ToResponse).ToList(), hr);
+    }
 }

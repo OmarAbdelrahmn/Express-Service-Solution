@@ -55,4 +55,38 @@ public class VacationRequestsController(IVacationService service) : ControllerBa
         var result = await service.DirectCancelAsync(actor, id, request, cancellationToken);
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
+
+    [HttpGet("{id:guid}/documents/{documentId:guid}/stream")]
+    public async Task<IActionResult> StreamDocument(Guid id, Guid documentId, CancellationToken cancellationToken)
+    {
+        var actor = User.GetUserId();
+        if (string.IsNullOrWhiteSpace(actor)) return Unauthorized();
+        var result = await service.OpenHrDocumentAsync(
+            actor,
+            User.GetUserIqamaNo(),
+            User.IsInRole("Master") || User.IsInRole("Admin"),
+            id,
+            documentId,
+            cancellationToken);
+        if (result.IsFailure) return result.ToProblem();
+        Response.Headers["X-Content-Type-Options"] = "nosniff";
+        return File(result.Value.Content, result.Value.ContentType, enableRangeProcessing: true);
+    }
+
+    [HttpGet("{id:guid}/documents/{documentId:guid}/download")]
+    public async Task<IActionResult> DownloadDocument(Guid id, Guid documentId, CancellationToken cancellationToken)
+    {
+        var actor = User.GetUserId();
+        if (string.IsNullOrWhiteSpace(actor)) return Unauthorized();
+        var result = await service.OpenHrDocumentAsync(
+            actor,
+            User.GetUserIqamaNo(),
+            User.IsInRole("Master") || User.IsInRole("Admin"),
+            id,
+            documentId,
+            cancellationToken);
+        if (result.IsFailure) return result.ToProblem();
+        Response.Headers["X-Content-Type-Options"] = "nosniff";
+        return File(result.Value.Content, result.Value.ContentType, result.Value.FileName, enableRangeProcessing: true);
+    }
 }

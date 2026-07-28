@@ -12,6 +12,7 @@ public interface IVacationService
     Task<Result<VacationCancellationResponse>> RequestCancellationAsync(string actorUserId, long managerIqamaNo, Guid vacationRequestId, CreateVacationCancellationRequest request, CancellationToken cancellationToken = default);
     Task<Result<VacationPagedResponse>> GetAllAsync(VacationRequestQuery query, CancellationToken cancellationToken = default);
     Task<Result<IReadOnlyCollection<VacationRequestResponse>>> GetInboxAsync(string actorUserId, CancellationToken cancellationToken = default);
+    Task<Result<IReadOnlyCollection<VacationRequestResponse>>> GetHrInboxAsync(string actorUserId, CancellationToken cancellationToken = default);
     Task<Result<VacationRequestResponse>> GetDetailAsync(string actorUserId, bool isOversightUser, Guid id, CancellationToken cancellationToken = default);
     Task<Result<VacationRequestResponse>> DecideAsync(string actorUserId, Guid id, VacationDecisionRequest request, CancellationToken cancellationToken = default);
     Task<Result<IReadOnlyCollection<VacationDateChangeResponse>>> GetDateChangesAsync(CancellationToken cancellationToken = default);
@@ -19,6 +20,8 @@ public interface IVacationService
     Task<Result<IReadOnlyCollection<VacationCancellationResponse>>> GetCancellationsAsync(CancellationToken cancellationToken = default);
     Task<Result<VacationCancellationResponse>> ResolveCancellationAsync(string actorUserId, Guid id, ResolveVacationAmendmentRequest request, CancellationToken cancellationToken = default);
     Task<Result<VacationRequestResponse>> DirectCancelAsync(string actorUserId, Guid id, DirectVacationCancellationRequest request, CancellationToken cancellationToken = default);
+    Task<Result<VacationHrUploadResponse>> UploadHrDocumentAsync(string actorUserId, Guid id, Domain.Entities.Vacation.VacationHrDocumentType type, bool completed, string fileName, string contentType, long fileSize, Stream content, CancellationToken cancellationToken = default);
+    Task<Result<VacationDocumentFileResponse>> OpenHrDocumentAsync(string actorUserId, long memberIqamaNo, bool isOversightUser, Guid vacationRequestId, Guid documentId, CancellationToken cancellationToken = default);
     Task<Result<IReadOnlyCollection<VacationRoleAssignmentResponse>>> GetRoleAssignmentsAsync(CancellationToken cancellationToken = default);
     Task<Result<IReadOnlyCollection<VacationRoleAssignmentResponse>>> SetRolesAsync(string grantedByUserId, string userId, SetVacationRolesRequest request, CancellationToken cancellationToken = default);
     Task ReconcileAsync(CancellationToken cancellationToken = default);

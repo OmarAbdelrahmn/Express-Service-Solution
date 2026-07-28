@@ -4,7 +4,8 @@ public enum VacationRole
 {
     Operation = 1,
     Accountant = 2,
-    Administration = 3
+    Administration = 3,
+    HR = 4
 }
 
 public enum VacationRequestStatus
@@ -34,6 +35,21 @@ public enum VacationAmendmentStatus
     Superseded = 4
 }
 
+public enum VacationHrStatus
+{
+    PendingApproval = 0,
+    AwaitingTicket = 1,
+    AwaitingExitReentryVisa = 2,
+    Completed = 3,
+    Closed = 4
+}
+
+public enum VacationHrDocumentType
+{
+    Ticket = 1,
+    ExitReentryVisa = 2
+}
+
 /// <summary>Vacation-only authorization; it deliberately does not modify ASP.NET Identity roles.</summary>
 public class VacationUserRoleAssignment
 {
@@ -55,6 +71,7 @@ public class VacationRequest
     public DateTime RequestedAt { get; set; } = DateTime.UtcNow.AddHours(3);
     public VacationRequestStatus Status { get; set; } = VacationRequestStatus.PendingOperation;
     public DateTime? FullyApprovedAt { get; set; }
+    public VacationHrStatus HrStatus { get; set; } = VacationHrStatus.PendingApproval;
     public DateTime? ActivatedAt { get; set; }
     public DateTime? CompletedAt { get; set; }
     public DateTime? CancelledAt { get; set; }
@@ -67,6 +84,7 @@ public class VacationRequest
     public ICollection<VacationApprovalDecision> Decisions { get; set; } = [];
     public ICollection<VacationDateChangeRequest> DateChangeRequests { get; set; } = [];
     public ICollection<VacationCancellationRequest> CancellationRequests { get; set; } = [];
+    public ICollection<VacationHrDocument> HrDocuments { get; set; } = [];
 }
 
 public class VacationApprovalDecision
@@ -115,5 +133,31 @@ public class VacationCancellationRequest
     public string? ResolvedByName { get; set; }
     public string? ResolutionReason { get; set; }
     public DateTime? ResolvedAt { get; set; }
+    public VacationRequest VacationRequest { get; set; } = null!;
+}
+
+/// <summary>
+/// Versioned HR artifact. Replaced ticket/visa files remain immutable audit history
+/// while the latest non-superseded row represents the current task file.
+/// </summary>
+public class VacationHrDocument
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid VacationRequestId { get; set; }
+    public VacationHrDocumentType Type { get; set; }
+    public int Version { get; set; }
+    public string OriginalFileName { get; set; } = string.Empty;
+    public string StoredRelativePath { get; set; } = string.Empty;
+    public string ContentType { get; set; } = string.Empty;
+    public long FileSize { get; set; }
+    public string UploadedByUserId { get; set; } = string.Empty;
+    public string UploadedByName { get; set; } = string.Empty;
+    public DateTime UploadedAt { get; set; } = DateTime.UtcNow.AddHours(3);
+    public bool IsCompleted { get; set; }
+    public DateTime? CompletedAt { get; set; }
+    public bool IsSuperseded { get; set; }
+    public DateTime? SupersededAt { get; set; }
+    public string? SupersededByUserId { get; set; }
+    public string? SupersededReason { get; set; }
     public VacationRequest VacationRequest { get; set; } = null!;
 }

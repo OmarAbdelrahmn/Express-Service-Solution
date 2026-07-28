@@ -32,4 +32,6 @@ Master manages role assignments through:
 - `GET /api/vacation-access`
 - `PUT /api/vacation-access/users/{userId}` — `{ "roles": [1, 2] }`
 
-Role values are `1` Operation, `2` Accountant, and `3` Administration. One user may hold more than one vacation role.
+Role values are `1` Operation, `2` Accountant, `3` Administration, and `4` HR. One user may hold more than one vacation role.
+
+The HR ticket/visa frontend contract, multipart requests, response fields, statuses, and document-view rules are documented in [vacation-hr-frontend-contract.md](vacation-hr-frontend-contract.md).

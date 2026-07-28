@@ -107,6 +107,7 @@ public class ApplicationDbcontext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<VacationApprovalDecision> VacationApprovalDecisions { get; set; }
     public DbSet<VacationDateChangeRequest> VacationDateChangeRequests { get; set; }
     public DbSet<VacationCancellationRequest> VacationCancellationRequests { get; set; }
+    public DbSet<VacationHrDocument> VacationHrDocuments { get; set; }
     public required DbSet<Employees> Employees { get; set; }
     public required DbSet<EmployeeDocuments> EmployeeDocuments { get; set; }
     public required DbSet<Housing> Housings { get; set; }

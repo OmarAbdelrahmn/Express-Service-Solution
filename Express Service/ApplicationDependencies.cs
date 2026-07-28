@@ -126,6 +126,7 @@ public static class ApplicationDependencies
         Services.AddScoped<IVehiclePermissionRenewalJob, VehiclePermissionRenewalJob>();
         Services.AddScoped<IVacationService, VacationService>();
         Services.AddScoped<IVacationLifecycleJob, VacationLifecycleJob>();
+        Services.AddSingleton<IVacationDocumentStorage, VacationDocumentStorage>();
         Services.AddScoped<IGeminiService, GeminiService>();
         Services.AddScoped<IEmailWarmupJob, EmailWarmupJob>();
         Services.AddScoped<IOrderService, OrderService>();
