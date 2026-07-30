@@ -146,8 +146,7 @@ RecurringJob.AddOrUpdate<IAbsentReportJob>(
 
 app.Use(async (context, next) =>
 {
-    if (context.Request.Path.StartsWithSegments("/uploads", StringComparison.OrdinalIgnoreCase) ||
-        context.Request.Path.StartsWithSegments("/vacation-documents", StringComparison.OrdinalIgnoreCase))
+    if (context.Request.Path.StartsWithSegments("/vacation-documents", StringComparison.OrdinalIgnoreCase))
     {
         context.Response.StatusCode = StatusCodes.Status404NotFound;
         return;
