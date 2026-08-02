@@ -4,11 +4,17 @@ All endpoints require a bearer token. Vacation permissions are independent of Id
 
 ## Member (`Member` Identity role)
 
-- `POST /api/member/vacation-requests` — `{ "riderId": 1, "startDate": "2026-08-01", "endDate": "2026-08-10" }`.
+- `POST /api/member/vacation-requests` — `{ "riderId": 1, "startDate": "2026-08-01", "endDate": "2026-08-10", "memberNotes": "Flight details shared by the rider" }`. `memberNotes` is optional, limited to 1,000 characters, and is displayed to the vacation approvers/supervisor on every vacation-request response.
 - `GET /api/member/vacation-requests` — all vacation history for riders in the member's housing.
 - `GET /api/member/vacation-riders?fromDate=2026-08-01&toDate=2026-08-31` — approved or active vacation riders; both dates are optional and default to today.
 - `POST /api/member/vacation-requests/{id}/date-change` — `{ "startDate": "2026-08-02", "endDate": "2026-08-11", "reason": "Flight changed" }`.
 - `POST /api/member/vacation-requests/{id}/cancellation` — `{ "reason": "Rider remains available" }`.
+
+## Frontend response change: member notes
+
+Every response that contains a `VacationRequestResponse` now includes `memberNotes` next to the vacation dates. It is the optional note entered by the housing member for the rider's supervisor/approvers; it is `null` when no note was supplied.
+
+This applies to the create response and to the member request list, approval inbox, HR inbox, vacation detail, and Master/Admin vacation list responses. Display it as read-only in all supervisor/approval views.
 
 ## Approval inbox
 

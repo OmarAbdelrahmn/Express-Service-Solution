@@ -12,6 +12,24 @@ namespace Accounting.Tests;
 public class VacationServiceTests
 {
     [Fact]
+    public async Task CreateVacation_PersistsMemberNotes_AndReturnsThemInVacationResponses()
+    {
+        await using var db = CreateDbContext();
+        await SeedAsync(db);
+        var service = new VacationService(db);
+        var start = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3)).AddDays(2);
+
+        var created = await service.CreateForMemberAsync(
+            "member", 100, new CreateVacationRequest(1, start, start.AddDays(3), "  Rider requested an early flight.  "));
+        var memberRequests = await service.GetMemberRequestsAsync(100);
+
+        Assert.True(created.IsSuccess);
+        Assert.Equal("Rider requested an early flight.", created.Value.MemberNotes);
+        Assert.Equal(created.Value.MemberNotes, memberRequests.Value.Single().MemberNotes);
+        Assert.Equal(created.Value.MemberNotes, (await db.VacationRequests.SingleAsync()).MemberNotes);
+    }
+
+    [Fact]
     public async Task SequentialApproval_AllowsOneMultiRoleUser_ThenSchedulesVacation()
     {
         await using var db = CreateDbContext();

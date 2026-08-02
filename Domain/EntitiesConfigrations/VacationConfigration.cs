@@ -22,6 +22,7 @@ public class VacationRequestConfigration : IEntityTypeConfiguration<VacationRequ
     public void Configure(EntityTypeBuilder<VacationRequest> e)
     {
         e.ToTable("VacationRequests", t => t.HasCheckConstraint("CK_VacationRequests_DateRange", "[EndDate] >= [StartDate]"));
+        e.Property(x => x.MemberNotes).HasMaxLength(1000);
         e.Property(x => x.RequestedByUserId).IsRequired().HasMaxLength(450);
         e.Property(x => x.RequestedByName).IsRequired().HasMaxLength(200);
         e.Property(x => x.Status).HasConversion<int>();

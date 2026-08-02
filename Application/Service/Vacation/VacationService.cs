@@ -45,6 +45,7 @@ public class VacationService(ApplicationDbcontext dbcontext, IVacationDocumentSt
             RiderId = rider.Id,
             StartDate = request.StartDate,
             EndDate = request.EndDate,
+            MemberNotes = string.IsNullOrWhiteSpace(request.MemberNotes) ? null : request.MemberNotes.Trim(),
             RequestedByUserId = actorUserId,
             RequestedByName = actorName,
             RequestedAt = RiyadhNow(),
@@ -826,6 +827,6 @@ public class VacationService(ApplicationDbcontext dbcontext, IVacationDocumentSt
             HasCurrentCompletedDocument(vacation, VacationHrDocumentType.Ticket),
             HasCurrentCompletedDocument(vacation, VacationHrDocumentType.ExitReentryVisa),
             documents);
-        return new VacationRequestResponse(vacation.Id, ToResponse(vacation.Rider), vacation.StartDate, vacation.EndDate, vacation.Status, RoleForStatus(vacation.Status), vacation.RequestedByUserId, vacation.RequestedByName, vacation.RequestedAt, vacation.FullyApprovedAt, vacation.ActivatedAt, vacation.CompletedAt, vacation.CancelledAt, vacation.CancelledByUserId, vacation.CancelledByName, vacation.CancellationReason, vacation.Decisions.OrderBy(x => x.Role).Select(ToResponse).ToList(), vacation.DateChangeRequests.OrderByDescending(x => x.RequestedAt).Select(ToResponse).ToList(), vacation.CancellationRequests.OrderByDescending(x => x.RequestedAt).Select(ToResponse).ToList(), hr);
+        return new VacationRequestResponse(vacation.Id, ToResponse(vacation.Rider), vacation.StartDate, vacation.EndDate, vacation.MemberNotes, vacation.Status, RoleForStatus(vacation.Status), vacation.RequestedByUserId, vacation.RequestedByName, vacation.RequestedAt, vacation.FullyApprovedAt, vacation.ActivatedAt, vacation.CompletedAt, vacation.CancelledAt, vacation.CancelledByUserId, vacation.CancelledByName, vacation.CancellationReason, vacation.Decisions.OrderBy(x => x.Role).Select(ToResponse).ToList(), vacation.DateChangeRequests.OrderByDescending(x => x.RequestedAt).Select(ToResponse).ToList(), vacation.CancellationRequests.OrderByDescending(x => x.RequestedAt).Select(ToResponse).ToList(), hr);
     }
 }

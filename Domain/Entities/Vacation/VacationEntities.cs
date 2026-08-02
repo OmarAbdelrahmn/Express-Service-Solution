@@ -66,6 +66,7 @@ public class VacationRequest
     public int RiderId { get; set; }
     public DateOnly StartDate { get; set; }
     public DateOnly EndDate { get; set; }
+    public string? MemberNotes { get; set; }
     public string RequestedByUserId { get; set; } = string.Empty;
     public string RequestedByName { get; set; } = string.Empty;
     public DateTime RequestedAt { get; set; } = DateTime.UtcNow.AddHours(3);
