@@ -20,7 +20,7 @@ public record VacationRequestQuery(
     int Page = 1,
     int PageSize = 50);
 
-public record VacationRiderResponse(int RiderId, long IqamaNo, string NameAR, string NameEN, string? WorkingId, int? HousingId, string? HousingName);
+public record VacationRiderResponse(int RiderId, long IqamaNo, string NameAR, string NameEN, string? WorkingId, int? HousingId, string? HousingName, string? PassportNo, DateOnly? PassportEnd, DateOnly IqamaEndM, DateOnly IqamaEndH);
 public record VacationDecisionResponse(VacationRole Role, VacationDecision Decision, string Reason, string UserId, string UserName, DateTime DecidedAt);
 public record VacationDateChangeResponse(Guid Id, DateOnly PreviousStartDate, DateOnly PreviousEndDate, DateOnly ProposedStartDate, DateOnly ProposedEndDate, string Reason, string RequestedByUserId, string RequestedByName, DateTime RequestedAt, VacationAmendmentStatus Status, string? ResolvedByUserId, string? ResolvedByName, string? ResolutionReason, DateTime? ResolvedAt);
 public record VacationCancellationResponse(Guid Id, string Reason, string RequestedByUserId, string RequestedByName, DateTime RequestedAt, VacationAmendmentStatus Status, string? ResolvedByUserId, string? ResolvedByName, string? ResolutionReason, DateTime? ResolvedAt);

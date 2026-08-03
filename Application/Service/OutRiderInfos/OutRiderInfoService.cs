@@ -18,6 +18,7 @@ public class OutRiderInfoService(ApplicationDbcontext db) : IOutRiderInfoService
             return Result.Failure<OutRiderInfoResponse>(validation);
 
         var riderId = request.RiderId.Trim();
+        var name = NormalizeName(request.Name);
         var phoneNumber = request.PhoneNumber.Trim();
 
         if (await db.OutRiderInfos.AnyAsync(r => r.RiderId == riderId, cancellationToken))
@@ -26,6 +27,7 @@ public class OutRiderInfoService(ApplicationDbcontext db) : IOutRiderInfoService
         var record = new OutRiderInfo
         {
             RiderId = riderId,
+            Name = name,
             PhoneNumber = phoneNumber,
             CreatedAt = DateTime.UtcNow.AddHours(3),
             CreatedBy = createdBy
@@ -52,6 +54,7 @@ public class OutRiderInfoService(ApplicationDbcontext db) : IOutRiderInfoService
 
     public async Task<Result<List<OutRiderInfoResponse>>> GetAsync(
         string? riderId,
+        string? name,
         string? phoneNumber,
         CancellationToken cancellationToken = default)
     {
@@ -59,6 +62,9 @@ public class OutRiderInfoService(ApplicationDbcontext db) : IOutRiderInfoService
 
         if (!string.IsNullOrWhiteSpace(riderId))
             query = query.Where(r => r.RiderId == riderId.Trim());
+
+        if (!string.IsNullOrWhiteSpace(name))
+            query = query.Where(r => r.Name == name.Trim());
 
         if (!string.IsNullOrWhiteSpace(phoneNumber))
             query = query.Where(r => r.PhoneNumber == phoneNumber.Trim());
@@ -68,6 +74,7 @@ public class OutRiderInfoService(ApplicationDbcontext db) : IOutRiderInfoService
             .Select(r => new OutRiderInfoResponse(
                 r.Id,
                 r.RiderId,
+                r.Name,
                 r.PhoneNumber,
                 r.CreatedAt,
                 r.CreatedBy))
@@ -96,6 +103,7 @@ public class OutRiderInfoService(ApplicationDbcontext db) : IOutRiderInfoService
             return Result.Failure<OutRiderInfoResponse>(Duplicate(riderId));
 
         record.RiderId = riderId;
+        record.Name = NormalizeName(request.Name);
         record.PhoneNumber = request.PhoneNumber.Trim();
 
         await db.SaveChangesAsync(cancellationToken);
@@ -147,6 +155,9 @@ public class OutRiderInfoService(ApplicationDbcontext db) : IOutRiderInfoService
     private static Error NotFound() =>
         new("OutRiderInfo.NotFound", "Out rider info record was not found.", 404);
 
+    private static string? NormalizeName(string? name) =>
+        string.IsNullOrWhiteSpace(name) ? null : name.Trim();
+
     private static OutRiderInfoResponse Map(OutRiderInfo r) =>
-        new(r.Id, r.RiderId, r.PhoneNumber, r.CreatedAt, r.CreatedBy);
+        new(r.Id, r.RiderId, r.Name, r.PhoneNumber, r.CreatedAt, r.CreatedBy);
 }

@@ -14,6 +14,9 @@ public class OutRiderInfoConfigration : IEntityTypeConfiguration<OutRiderInfo>
             .IsRequired()
             .HasMaxLength(50);
 
+        builder.Property(r => r.Name)
+            .HasMaxLength(100);
+
         builder.Property(r => r.PhoneNumber)
             .IsRequired()
             .HasMaxLength(30);

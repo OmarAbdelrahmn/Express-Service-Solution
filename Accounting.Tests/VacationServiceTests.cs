@@ -25,6 +25,10 @@ public class VacationServiceTests
 
         Assert.True(created.IsSuccess);
         Assert.Equal("Rider requested an early flight.", created.Value.MemberNotes);
+        Assert.Equal(200, created.Value.Rider.IqamaNo);
+        Assert.Equal("P123456", created.Value.Rider.PassportNo);
+        Assert.Equal(new DateOnly(2031, 1, 1), created.Value.Rider.PassportEnd);
+        Assert.Equal(new DateOnly(2030, 1, 1), created.Value.Rider.IqamaEndM);
         Assert.Equal(created.Value.MemberNotes, memberRequests.Value.Single().MemberNotes);
         Assert.Equal(created.Value.MemberNotes, (await db.VacationRequests.SingleAsync()).MemberNotes);
     }
@@ -170,6 +174,8 @@ public class VacationServiceTests
             IqamaNo = 200,
             IqamaEndM = new DateOnly(2030, 1, 1),
             IqamaEndH = new DateOnly(2030, 1, 1),
+            PassportNo = "P123456",
+            PassportEnd = new DateOnly(2031, 1, 1),
             Sponsor = "Sponsor",
             JobTitle = "Rider",
             NameAR = "Rider AR",

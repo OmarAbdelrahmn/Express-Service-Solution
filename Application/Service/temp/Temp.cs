@@ -1,4 +1,5 @@
 ﻿using Application.Abstraction;
+using Application.Service.Empolyee;
 using ClosedXML.Excel;
 using Domain;
 using Domain.Entities;
@@ -39,7 +40,7 @@ public class Temp(ApplicationDbcontext dbcontext) : ITemp
             var rowCount = worksheet.LastRowUsed()?.RowNumber() ?? 0;
             int skippedCount = 0;
             var exitReturnNotes = new List<string>();
-            var directUpdateItems = new List<(long IqamaNo, DateOnly? NewIqamaEndH, long? NewSponsorNo, string? NewJobTitle)>();
+            var directUpdateItems = new List<(long IqamaNo, DateOnly? NewIqamaEndH, long? NewSponsorNo, string? NewJobTitle, string? NewStatus)>();
             int excelValidRowCount = 0;
 
             // Track all IqamaNo values from Excel
@@ -107,6 +108,7 @@ public class Temp(ApplicationDbcontext dbcontext) : ITemp
                 DateOnly? directIqamaEndH = null;
                 long? directSponsorNo = null;
                 string? directJobTitle = null;
+                string? directStatus = null;
 
                 if (newIqamaEndH.HasValue && HasChanged(existingEmployee.IqamaEndH, newIqamaEndH.Value))
                 {
@@ -126,26 +128,31 @@ public class Temp(ApplicationDbcontext dbcontext) : ITemp
                     needsDirect = true;
                 }
 
-                if (needsDirect)
-                    directUpdateItems.Add((IqamaNo, directIqamaEndH, directSponsorNo, directJobTitle));
-
-                // ExitReturn vs Status mismatch note (no DB change)
+                // خروج وعودة controls the employee status directly:
+                // نعم = إجازة, لا = معطل.
                 if (!string.IsNullOrWhiteSpace(exitReturnValue))
                 {
                     bool excelSaysVacation = exitReturnValue.Equals("نعم", StringComparison.OrdinalIgnoreCase);
+                    bool excelSaysNoExitReturn = exitReturnValue.Equals("لا", StringComparison.OrdinalIgnoreCase);
                     bool dbIsVacation = existingEmployee.Status?.Equals("vacation", StringComparison.OrdinalIgnoreCase) == true;
 
-                    if (excelSaysVacation != dbIsVacation)
+                    if ((excelSaysVacation || excelSaysNoExitReturn) && excelSaysVacation != dbIsVacation)
                     {
+                        directStatus = excelSaysVacation ? EmployeeStatus.Vacation : EmployeeStatus.Disable;
+                        needsDirect = true;
+
                         string message = excelSaysVacation
-                            ? $"في Excel 'خروج وعودة = نعم' لكن حالته في النظام اخرى وليست إجازة."
-                            : $"في Excel 'خروج وعودة = لا' لكن حالته في النظام مسجلة كـ 'إجازة'.";
+                            ? $"تم تغيير الحالة في النظام من '{existingEmployee.Status}' إلى 'إجازة' لأن خروج وعودة في Excel = نعم."
+                            : $"تم تغيير الحالة في النظام من 'إجازة' إلى 'معطل' لأن خروج وعودة في Excel = لا.";
 
                         exitReturnNotes.Add(
                             $"({existingEmployee.NameAR}): {message}"
                         );
                     }
                 }
+
+                if (needsDirect)
+                    directUpdateItems.Add((IqamaNo, directIqamaEndH, directSponsorNo, directJobTitle, directStatus));
 
 
                 if (HasChanged(existingEmployee.PassportEnd, newPassportEnd))
@@ -166,7 +173,7 @@ public class Temp(ApplicationDbcontext dbcontext) : ITemp
                 {
                     tempUpdates.Add(tempUpdateExisting);
                 }
-                else
+                else if (!needsDirect)
                 {
                     skippedCount++;
                 }
@@ -229,6 +236,22 @@ public class Temp(ApplicationDbcontext dbcontext) : ITemp
                     {
                         changedFields.Add($"المهنة: '{emp.JobTitle}' ← '{item.NewJobTitle}'");
                         emp.JobTitle = item.NewJobTitle;
+                    }
+
+                    if (item.NewStatus != null)
+                    {
+                        changedFields.Add($"الحالة: '{emp.Status}' ← '{item.NewStatus}'");
+                        dbcontext.EmployeeStatusLogs.Add(new EmployeeStatusLog
+                        {
+                            EmployeeIqamaNo = emp.IqamaNo,
+                            OldStatus = emp.Status,
+                            NewStatus = item.NewStatus,
+                            ChangedBy = uploadedBy,
+                            ChangedAt = DateTime.UtcNow.AddHours(3),
+                            Reason = "تحديث تلقائي من ملف Excel بناءً على خروج وعودة.",
+                            ChangeSource = "ExcelImport"
+                        });
+                        emp.Status = item.NewStatus;
                     }
 
                     emp.UpdatedAt = DateTime.UtcNow.AddHours(3);
@@ -567,13 +590,13 @@ public record BulkUploadResult(
     int TotalInDB,                                      // Employees in DB with sponsor الخدمة السريعة
     int TotalInExcel,                                   // Valid rows found in Excel
     int TotalPendingApproval,                           // Temp records needing review (PassportNo/End)
-    List<DirectUpdateInfo> DirectlyUpdated,             // IqamaEndH / SponsorNo / JobTitle applied immediately
+    List<DirectUpdateInfo> DirectlyUpdated,             // IqamaEndH / SponsorNo / JobTitle / Status applied immediately
     int SkippedRows,
     DateTime UploadedAt,
     string Message,
     List<EmployeeRowInfo> EmployeesInExcelNotInDB,
     List<EmployeeRowInfo> EmployeesInDBNotInExcel,
-    List<string> ExitReturnNotes                        // خروج وعودة vs status mismatches
+    List<string> ExitReturnNotes                        // Arabic notes for status updates caused by خروج وعودة
 );
 
 public record DirectUpdateInfo(

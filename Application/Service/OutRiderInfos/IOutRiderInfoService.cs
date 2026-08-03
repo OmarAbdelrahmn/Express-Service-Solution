@@ -16,6 +16,7 @@ public interface IOutRiderInfoService
 
     Task<Result<List<OutRiderInfoResponse>>> GetAsync(
         string? riderId,
+        string? name,
         string? phoneNumber,
         CancellationToken cancellationToken = default);
 

@@ -33,10 +33,11 @@ public class OutRiderInfoController(IOutRiderInfoService service) : ControllerBa
     [HttpGet]
     public async Task<IActionResult> Get(
         [FromQuery] string? riderId,
+        [FromQuery] string? name,
         [FromQuery] string? phoneNumber,
         CancellationToken cancellationToken)
     {
-        var result = await service.GetAsync(riderId, phoneNumber, cancellationToken);
+        var result = await service.GetAsync(riderId, name, phoneNumber, cancellationToken);
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
 
