@@ -36,6 +36,7 @@ public record OutageShiftPerformanceResponse(
     int Id,
     int OutRiderInfoId,
     string RiderId,
+    string? Name,
     DateOnly ShiftDate,
     int AcceptedOrders,
     int RejectedOrders,

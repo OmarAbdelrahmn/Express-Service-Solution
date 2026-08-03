@@ -50,7 +50,7 @@ public class OutageShiftPerformanceService(ApplicationDbcontext db) : IOutageShi
         await db.OutageShiftPerformances.AddAsync(record, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
 
-        return Result.Success(Map(record, outRiderInfo.RiderId));
+        return Result.Success(Map(record, outRiderInfo.RiderId, outRiderInfo.Name));
     }
 
     public async Task<Result<OutageShiftPerformanceImportResponse>> ImportAsync(
@@ -198,6 +198,7 @@ public class OutageShiftPerformanceService(ApplicationDbcontext db) : IOutageShi
                     s.Id,
                     s.OutRiderInfoId,
                     s.OutRiderInfo.RiderId,
+                    s.OutRiderInfo.Name,
                     s.ShiftDate,
                     s.AcceptedOrders,
                     s.RejectedOrders,
@@ -261,7 +262,7 @@ public class OutageShiftPerformanceService(ApplicationDbcontext db) : IOutageShi
             record.WorkingHours = request.WorkingHours;
 
             await db.SaveChangesAsync(cancellationToken);
-            return Result.Success(Map(record, outRiderInfo.RiderId));
+            return Result.Success(Map(record, outRiderInfo.RiderId, outRiderInfo.Name));
         }
         catch (Exception ex)
         {
@@ -338,6 +339,7 @@ public class OutageShiftPerformanceService(ApplicationDbcontext db) : IOutageShi
             s.Id,
             s.OutRiderInfoId,
             s.OutRiderInfo.RiderId,
+            s.OutRiderInfo.Name,
             s.ShiftDate,
             s.AcceptedOrders,
             s.RejectedOrders,
@@ -345,11 +347,15 @@ public class OutageShiftPerformanceService(ApplicationDbcontext db) : IOutageShi
             s.UploadedAt,
             s.UploadedBy);
 
-    private static OutageShiftPerformanceResponse Map(OutageShiftPerformance s, string riderId) =>
+    private static OutageShiftPerformanceResponse Map(
+        OutageShiftPerformance s,
+        string riderId,
+        string? name) =>
         new(
             s.Id,
             s.OutRiderInfoId,
             riderId,
+            name,
             s.ShiftDate,
             s.AcceptedOrders,
             s.RejectedOrders,
