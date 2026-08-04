@@ -25,6 +25,41 @@ public class KeetaBreakService(ApplicationDbcontext dbcontext) : IKeetaBreakServ
         return Result.Success(configurations.Select(ToConfigurationResponse).ToList());
     }
 
+    public async Task<Result> DeleteConfigurationVersionAsync(int version, CancellationToken cancellationToken = default)
+    {
+        var configuration = await dbcontext.KeetaBreakConfigurations
+            .Include(x => x.ShiftDefinitions)
+            .Include(x => x.ShiftPatterns)
+            .SingleOrDefaultAsync(x => x.Version == version, cancellationToken);
+        if (configuration is null) return Result.Failure(KeetaBreakErrors.NotFound);
+
+        var batches = await dbcontext.KeetaBreakBatches
+            .Where(x => x.ConfigurationId == configuration.Id)
+            .ToListAsync(cancellationToken);
+        var batchIds = batches.Select(x => x.Id).ToList();
+        var riders = await dbcontext.KeetaBreakImportedRiders.Where(x => batchIds.Contains(x.BatchId)).ToListAsync(cancellationToken);
+        var assignments = await dbcontext.KeetaBreakAssignments.Where(x => batchIds.Contains(x.BatchId)).ToListAsync(cancellationToken);
+
+        await using var transaction = await dbcontext.Database.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            dbcontext.KeetaBreakAssignments.RemoveRange(assignments);
+            dbcontext.KeetaBreakImportedRiders.RemoveRange(riders);
+            dbcontext.KeetaBreakBatches.RemoveRange(batches);
+            dbcontext.KeetaBreakShiftPatterns.RemoveRange(configuration.ShiftPatterns);
+            dbcontext.KeetaBreakShiftDefinitions.RemoveRange(configuration.ShiftDefinitions);
+            dbcontext.KeetaBreakConfigurations.Remove(configuration);
+            await dbcontext.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
+        catch (DbUpdateException)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            return Result.Failure(KeetaBreakErrors.CannotDelete);
+        }
+        return Result.Success();
+    }
+
     public async Task<Result<KeetaBreakConfigurationResponse>> CreateConfigurationAsync(CreateKeetaBreakConfigurationRequest request, string actorId, CancellationToken cancellationToken = default)
     {
         if (request.EffectiveTo < request.EffectiveFrom || request.BreakPercentage is < 0 or > 100 || request.Shifts.Count == 0 || request.ShiftPatterns.Count == 0 || request.Shifts.Any(x => string.IsNullOrWhiteSpace(x.ShiftKey) || x.MinimumRiders < 0 || x.MaximumRiders < x.MinimumRiders) || request.Shifts.Select(x => NormalizeShiftKey(x.ShiftKey)).Distinct(StringComparer.Ordinal).Count() != request.Shifts.Count)

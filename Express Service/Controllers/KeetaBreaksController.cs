@@ -30,4 +30,11 @@ public class KeetaBreaksController(IKeetaBreakService service) : ControllerBase
         var result = await task;
         return result.IsSuccess ? new OkObjectResult(result.Value) : result.ToProblem();
     }
+
+    [HttpDelete("configurations/{version:int}")]
+    public async Task<IActionResult> DeleteConfigurationVersion(int version, CancellationToken cancellationToken)
+    {
+        var result = await service.DeleteConfigurationVersionAsync(version, cancellationToken);
+        return result.IsSuccess ? NoContent() : result.ToProblem();
+    }
 }

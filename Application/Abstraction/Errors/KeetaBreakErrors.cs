@@ -12,4 +12,5 @@ public static class KeetaBreakErrors
     public static readonly Error NoConfiguration = new("KeetaBreak.NoConfiguration", "لا يوجد إعداد شفتات فعّال يغطي فترة الاستيراد كاملة.", StatusCodes.Status409Conflict);
     public static readonly Error ValidationFailed = new("KeetaBreak.ValidationFailed", "تعذر اعتماد جدول الراحات لأن السعة أو الحدود تغيرت. حدّث البيانات وأنشئ المسودة من جديد.", StatusCodes.Status409Conflict);
     public static readonly Error ConcurrentUpdate = new("KeetaBreak.ConcurrentUpdate", "تم تعديل جدول الراحات بواسطة مستخدم آخر. حدّث الصفحة وحاول مرة أخرى.", StatusCodes.Status409Conflict);
+    public static readonly Error CannotDelete = new("KeetaBreak.CannotDelete", "تعذر حذف هذا الإصدار من إعدادات الراحات لارتباطه ببيانات أخرى.", StatusCodes.Status409Conflict);
 }
