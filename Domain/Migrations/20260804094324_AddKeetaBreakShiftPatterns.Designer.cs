@@ -4,6 +4,7 @@ using Domain;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Domain.Migrations
 {
     [DbContext(typeof(ApplicationDbcontext))]
-    partial class ApplicationDbcontextModelSnapshot : ModelSnapshot
+    [Migration("20260804094324_AddKeetaBreakShiftPatterns")]
+    partial class AddKeetaBreakShiftPatterns
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -5058,9 +5061,6 @@ namespace Domain.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 
-                    b.Property<int>("RiderCount")
-                        .HasColumnType("int");
-
                     b.Property<string>("ShiftKeysJson")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
@@ -5070,10 +5070,7 @@ namespace Domain.Migrations
                     b.HasIndex("ConfigurationId", "PatternKey")
                         .IsUnique();
 
-                    b.ToTable("KeetaBreakShiftPatterns", null, t =>
-                        {
-                            t.HasCheckConstraint("CK_KeetaBreakShiftPatterns_RiderCount", "[RiderCount] > 0");
-                        });
+                    b.ToTable("KeetaBreakShiftPatterns", (string)null);
                 });
 
             modelBuilder.Entity("Domain.Entities.Keeta.KeetaDriverShift", b =>

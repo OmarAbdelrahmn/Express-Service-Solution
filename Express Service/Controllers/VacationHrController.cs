@@ -26,7 +26,7 @@ public class VacationHrController(IVacationService service) : ControllerBase
     [RequestSizeLimit(VacationDocumentStorage.MaximumFileSize + 1024 * 1024)]
     public Task<IActionResult> UploadTicket(
         Guid id,
-        [FromForm] IFormFile file,
+        IFormFile file,
         [FromForm] bool completed,
         CancellationToken cancellationToken) =>
         Upload(id, VacationHrDocumentType.Ticket, file, completed, cancellationToken);
@@ -36,7 +36,7 @@ public class VacationHrController(IVacationService service) : ControllerBase
     [RequestSizeLimit(VacationDocumentStorage.MaximumFileSize + 1024 * 1024)]
     public Task<IActionResult> UploadExitReentryVisa(
         Guid id,
-        [FromForm] IFormFile file,
+        IFormFile file,
         [FromForm] bool completed,
         CancellationToken cancellationToken) =>
         Upload(id, VacationHrDocumentType.ExitReentryVisa, file, completed, cancellationToken);

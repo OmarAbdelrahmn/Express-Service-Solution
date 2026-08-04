@@ -45,7 +45,7 @@ public class PlatformImportsController(IPlatformImportService service) : Control
         [FromForm] DateOnly periodStart,
         [FromForm] DateOnly periodEnd,
         [FromForm] decimal? sourceControlTotal,
-        [FromForm] IFormFile file,
+        IFormFile file,
         CancellationToken ct)
         => UploadDirect(legalEntityId, platformAccountId, externalReference, periodStart, periodEnd, sourceControlTotal, file, service.UploadAmazonAsync, ct);
 
@@ -58,7 +58,7 @@ public class PlatformImportsController(IPlatformImportService service) : Control
         [FromForm] DateOnly periodStart,
         [FromForm] DateOnly periodEnd,
         [FromForm] decimal? sourceControlTotal,
-        [FromForm] IFormFile file,
+        IFormFile file,
         CancellationToken ct)
         => UploadDirect(legalEntityId, platformAccountId, externalReference, periodStart, periodEnd, sourceControlTotal, file, service.UploadHungerAsync, ct);
 
@@ -71,7 +71,7 @@ public class PlatformImportsController(IPlatformImportService service) : Control
         [FromForm] DateOnly periodStart,
         [FromForm] DateOnly periodEnd,
         [FromForm] decimal? sourceControlTotal,
-        [FromForm] IFormFile file,
+        IFormFile file,
         CancellationToken ct)
         => UploadDirect(legalEntityId, platformAccountId, externalReference, periodStart, periodEnd, sourceControlTotal, file, service.UploadKeetaPayPerOrderAsync, ct);
 
@@ -84,7 +84,7 @@ public class PlatformImportsController(IPlatformImportService service) : Control
         [FromForm] DateOnly periodStart,
         [FromForm] DateOnly periodEnd,
         [FromForm] decimal? sourceControlTotal,
-        [FromForm] IFormFile file,
+        IFormFile file,
         CancellationToken ct)
         => UploadDirect(legalEntityId, platformAccountId, externalReference, periodStart, periodEnd, sourceControlTotal, file, service.UploadKeetaSegmentsAsync, ct);
 

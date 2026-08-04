@@ -29,6 +29,7 @@ using Application.Service.FinancialAccess;
 using Application.Service.FinancialOperations;
 using Application.Service.Compensation;
 using Application.Service.PlatformImports;
+using Application.Service.KeetaBreaks;
 using Application.Service.RiderPayroll;
 using Application.Service.AccountingStorage;
 using Application.Service.AccountingPosting;
@@ -89,6 +90,7 @@ public static class ApplicationDependencies
         Services.AddScoped<IFinancialOperationsService, FinancialOperationsService>();
         Services.AddScoped<ICompensationService, CompensationService>();
         Services.AddScoped<IPlatformImportService, PlatformImportService>();
+        Services.AddScoped<IKeetaBreakService, KeetaBreakService>();
         Services.AddSingleton<IPrivateAccountingFileStorage, EncryptedPrivateAccountingFileStorage>();
         Services.AddScoped<IAccountingFileService, AccountingFileService>();
         Services.AddScoped<IAccountingPostingService, AccountingPostingService>();
@@ -212,7 +214,13 @@ public static class ApplicationDependencies
     public static IServiceCollection AddSwagger(this IServiceCollection Services)
     {
         Services
-            .AddSwaggerGen();
+            .AddSwaggerGen(options =>
+            {
+                // Several application layers contain DTOs with the same short name.
+                // Use the full type name to prevent schema ID collisions when Swagger
+                // generates the production document.
+                options.CustomSchemaIds(type => type.FullName?.Replace("+", ".") ?? type.Name);
+            });
         return Services;
     }
 
@@ -300,7 +308,7 @@ public static class ApplicationDependencies
             options.Password.RequireLowercase = true;
             options.Password.RequireUppercase = true;
             options.Password.RequireNonAlphanumeric = true;
-            options.User.RequireUniqueEmail = true;
+            options.User.RequireUniqueEmail = false;
 
 
         });

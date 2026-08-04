@@ -27,7 +27,7 @@ public class AccountingFilesController(IAccountingFileService service) : Control
 
     [HttpPost]
     [RequestSizeLimit(104_857_600)]
-    public async Task<IActionResult> Upload([FromForm] int legalEntityId, [FromForm] DateTime? retainUntil, [FromForm] IFormFile file, CancellationToken cancellationToken)
+    public async Task<IActionResult> Upload([FromForm] int legalEntityId, [FromForm] DateTime? retainUntil, IFormFile file, CancellationToken cancellationToken)
     {
         var actor = User.GetUserId();
         if (string.IsNullOrWhiteSpace(actor)) return Unauthorized();

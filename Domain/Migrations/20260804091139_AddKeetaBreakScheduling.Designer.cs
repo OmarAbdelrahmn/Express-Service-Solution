@@ -4,6 +4,7 @@ using Domain;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Domain.Migrations
 {
     [DbContext(typeof(ApplicationDbcontext))]
-    partial class ApplicationDbcontextModelSnapshot : ModelSnapshot
+    [Migration("20260804091139_AddKeetaBreakScheduling")]
+    partial class AddKeetaBreakScheduling
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -5042,40 +5045,6 @@ namespace Domain.Migrations
                         });
                 });
 
-            modelBuilder.Entity("Domain.Entities.Keeta.KeetaBreakShiftPattern", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
-
-                    b.Property<Guid>("ConfigurationId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("PatternKey")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<int>("RiderCount")
-                        .HasColumnType("int");
-
-                    b.Property<string>("ShiftKeysJson")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ConfigurationId", "PatternKey")
-                        .IsUnique();
-
-                    b.ToTable("KeetaBreakShiftPatterns", null, t =>
-                        {
-                            t.HasCheckConstraint("CK_KeetaBreakShiftPatterns_RiderCount", "[RiderCount] > 0");
-                        });
-                });
-
             modelBuilder.Entity("Domain.Entities.Keeta.KeetaDriverShift", b =>
                 {
                     b.Property<int>("Id")
@@ -8791,17 +8760,6 @@ namespace Domain.Migrations
                     b.Navigation("Configuration");
                 });
 
-            modelBuilder.Entity("Domain.Entities.Keeta.KeetaBreakShiftPattern", b =>
-                {
-                    b.HasOne("Domain.Entities.Keeta.KeetaBreakConfiguration", "Configuration")
-                        .WithMany("ShiftPatterns")
-                        .HasForeignKey("ConfigurationId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Configuration");
-                });
-
             modelBuilder.Entity("Domain.Entities.Keeta.KeetaDriverShift", b =>
                 {
                     b.HasOne("Domain.Entities.RiderDetails", "Rider")
@@ -9524,8 +9482,6 @@ namespace Domain.Migrations
             modelBuilder.Entity("Domain.Entities.Keeta.KeetaBreakConfiguration", b =>
                 {
                     b.Navigation("ShiftDefinitions");
-
-                    b.Navigation("ShiftPatterns");
                 });
 
             modelBuilder.Entity("Domain.Entities.Keeta.KeetaDriverShift", b =>

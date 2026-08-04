@@ -153,6 +153,12 @@ public class ApplicationDbcontext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<MaintenanceInterval> MaintenanceIntervals { get; set; }
     public DbSet<KeetaDriverShift> KeetaDriverShifts { get; set; }
     public DbSet<KeetaShiftSlot> KeetaShiftSlots{ get; set; }
+    public DbSet<KeetaBreakConfiguration> KeetaBreakConfigurations { get; set; }
+    public DbSet<KeetaBreakShiftDefinition> KeetaBreakShiftDefinitions { get; set; }
+    public DbSet<KeetaBreakShiftPattern> KeetaBreakShiftPatterns { get; set; }
+    public DbSet<KeetaBreakBatch> KeetaBreakBatches { get; set; }
+    public DbSet<KeetaBreakImportedRider> KeetaBreakImportedRiders { get; set; }
+    public DbSet<KeetaBreakAssignment> KeetaBreakAssignments { get; set; }
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplyConfigurationsFromAssembly(Assembly.GetExecutingAssembly());
