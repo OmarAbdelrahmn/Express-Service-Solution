@@ -22,7 +22,8 @@ public record RiderRequest
     string? WorkingId,
     string? TshirtSize,
     string? LicenseNumber,
-    string? CompanyName
+    string? CompanyName,
+    bool? IsFreelancer            // ← add
     );
 public record URiderRequest
 (
@@ -46,7 +47,8 @@ public record URiderRequest
     string? TshirtSize,
     string? LicenseNumber,
     string? CompanyName,
-    int? HousingId
+    int? HousingId,
+    bool? IsFreelancer            // ← add
     );
 
 public record EMTOR
@@ -55,5 +57,6 @@ public record EMTOR
     string? TshirtSize,
     string? LicenseNumber,
     string? CompanyName,
-    string? VehicleNumber
+    string? VehicleNumber,
+    bool? IsFreelancer            // ← add
     );

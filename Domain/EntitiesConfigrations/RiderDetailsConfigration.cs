@@ -17,5 +17,8 @@ public class RiderDetailsConfigration : IEntityTypeConfiguration<RiderDetails>
 
         builder.HasIndex(rd => rd.CompanyId);
 
+        builder.Property(rd => rd.IsFreelancer)
+            .HasDefaultValue(false);
+
     }
 }

@@ -212,7 +212,8 @@ public class RiderService(ApplicationDbcontext dbcontext, IRiderWorkingIdHistory
                     WorkingId = Request.WorkingId,
                     TshirtSize = Request.TshirtSize,
                     LicenseNumber = Request.LicenseNumber,
-                    CompanyId = company.Id
+                    CompanyId = company.Id,
+                    IsFreelancer = Request.IsFreelancer ?? false   // ← add
                 };
 
                 await dbcontext.Employees.AddAsync(employee);
@@ -490,6 +491,9 @@ public class RiderService(ApplicationDbcontext dbcontext, IRiderWorkingIdHistory
                 if (!string.IsNullOrWhiteSpace(request.LicenseNumber))
                     employee.RiderDetails.LicenseNumber = request.LicenseNumber;
 
+                if (request.IsFreelancer.HasValue)                              // ← add
+                    employee.RiderDetails.IsFreelancer = request.IsFreelancer;   // ← add
+
                 // Mark entity as modified to ensure EF tracks changes
                 dbcontext.Entry(employee.RiderDetails).State = EntityState.Modified;
             }
@@ -524,7 +528,8 @@ public class RiderService(ApplicationDbcontext dbcontext, IRiderWorkingIdHistory
                     WorkingId = request.WorkingId,
                     TshirtSize = request.TshirtSize,
                     LicenseNumber = request.LicenseNumber,
-                    CompanyId = company.Id
+                    CompanyId = company.Id,
+                    IsFreelancer = request.IsFreelancer ?? false   // ← add
                 };
 
                 finalWorkingId = request.WorkingId;
@@ -877,7 +882,8 @@ public class RiderService(ApplicationDbcontext dbcontext, IRiderWorkingIdHistory
                 WorkingId = request.WorkingId,
                 TshirtSize = request.TshirtSize,
                 LicenseNumber = request.LicenseNumber,
-                CompanyId = company.Id
+                CompanyId = company.Id,
+                IsFreelancer = request.IsFreelancer ?? false   // ← add
             };
 
             await dbcontext.RiderDetails.AddAsync(riderDetails);
@@ -977,7 +983,8 @@ public class RiderService(ApplicationDbcontext dbcontext, IRiderWorkingIdHistory
             IsOutage: employee.EscapedDetails?.IsOutage == true,
             ReportedAt: employee.EscapedDetails?.ReportedAt,
             DateOfOutage: employee.EscapedDetails?.DateOfOutage,
-            UpdatedAd: employee.UpdatedAt
+            UpdatedAd: employee.UpdatedAt,
+            IsFreelancer: employee.RiderDetails?.IsFreelancer ?? false   // ← add
         );
     }
 }

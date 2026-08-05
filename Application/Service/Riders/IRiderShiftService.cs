@@ -110,7 +110,8 @@ public record RiderShiftResponse(
     DateTime CreatedAt,
     bool IsSubstitution,
     string? OriginalWorkingId,
-    int? HousingId
+    int? HousingId,
+    bool? IsFreelancer          // ← add
 );
 
 

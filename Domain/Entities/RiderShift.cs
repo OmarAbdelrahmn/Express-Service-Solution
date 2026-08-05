@@ -11,6 +11,7 @@ public class RiderShift
     public int RealRejectedDailyOrders { get; set; }
     public int? HousingId { get; set; }
     public float WorkingHours { get; set; }
+    public bool? IsFreelancer { get; set; }   // ← add this
     public int CompanyId { get; set; }
     public string ShiftStatus { get; set; } = string.Empty;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow.AddHours(3);

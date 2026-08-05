@@ -219,7 +219,6 @@ public class RiderShiftService(ApplicationDbcontext dbcontext, IRiderWorkingIdHi
                     var realRejectedOrders = Math.Max(0, shiftData.RejectedDailyOrders!.Value - rejectionThreshold);
                     var (hasRejectionProblem, penaltyAmount) = CalculateRejectionPenalty(realRejectedOrders);
 
-                    // Create shift
                     var shift = new RiderShift
                     {
                         RiderId = riderWhoWorked.Id,
@@ -233,6 +232,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext, IRiderWorkingIdHi
                         WorkingHours = shiftData.WorkingHours!.Value,
                         CompanyId = CompanyId,
                         ShiftStatus = shiftStatus,
+                        IsFreelancer = riderWhoWorked.IsFreelancer,
                         CreatedAt = DateTime.UtcNow.AddHours(3),
                         Rider = null
                     };
@@ -822,6 +822,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext, IRiderWorkingIdHi
                             WorkingHours = temp.NewWorkingHours,
                             CompanyId = temp.CompanyId,
                             ShiftStatus = temp.NewShiftStatus,
+                            IsFreelancer = temp?.Rider?.IsFreelancer,
                             CreatedAt = DateTime.UtcNow.AddHours(3)
                         };
 
@@ -1145,6 +1146,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext, IRiderWorkingIdHi
                 ShiftStatus = shiftStatus.ToString(),
                 RealRejectedDailyOrders = realRejectedOrders,
                 StackedDeliveries = request.StackedDeliveries,
+                IsFreelancer = riderDetails.IsFreelancer,
                 CreatedAt = DateTime.UtcNow.AddHours(3)
             };
 
@@ -1153,25 +1155,26 @@ public class RiderShiftService(ApplicationDbcontext dbcontext, IRiderWorkingIdHi
             await transaction.CommitAsync(cancellationToken);
 
             var response = new RiderShiftResponse(
-                shift.RiderId,
-                shift.WorkingId,
-                shift.ShiftDate,
-                shift.AcceptedDailyOrders,
-                shift.RejectedDailyOrders,
-                shift.RealRejectedDailyOrders,
-                shift.StackedDeliveries,
-                shift.WorkingHours,
-                shift.CompanyId,
-                riderDetails.Company.Name,
-                riderDetails.Employee.NameEN,
-                shiftStatus,
-                hasRejectionProblem,
-                penaltyAmount,
-                shift.CreatedAt,
-                isSubstitution,
-                originalWorkingId,
-                shift.HousingId
-            );
+                            shift.RiderId,
+                            shift.WorkingId,
+                            shift.ShiftDate,
+                            shift.AcceptedDailyOrders,
+                            shift.RejectedDailyOrders,
+                            shift.RealRejectedDailyOrders,
+                            shift.StackedDeliveries,
+                            shift.WorkingHours,
+                            shift.CompanyId,
+                            riderDetails.Company.Name,
+                            riderDetails.Employee.NameEN,
+                            shiftStatus,
+                            hasRejectionProblem,
+                            penaltyAmount,
+                            shift.CreatedAt,
+                            isSubstitution,
+                            originalWorkingId,
+                            shift.HousingId,
+                            shift.IsFreelancer
+                        );
 
             return Result.Success(response);
         }
@@ -1507,26 +1510,28 @@ public class RiderShiftService(ApplicationDbcontext dbcontext, IRiderWorkingIdHi
         var (hasRejectionProblem, penaltyAmount) = CalculateRejectionPenalty(shift.RealRejectedDailyOrders);
 
         return new RiderShiftResponse(
-            shift.RiderId,
-            shift.WorkingId,
-            shift.ShiftDate,
-            shift.AcceptedDailyOrders,
-            shift.RejectedDailyOrders,
-            shift.RealRejectedDailyOrders,
-            shift.StackedDeliveries,  // ADD THIS in appropriate position
-            shift.WorkingHours,
-            shift.CompanyId,
-            shift.Company?.Name ?? "Unknown", // Null-safe access
-            shift.Rider?.Employee?.NameAR ?? "Unknown", // Null-safe access
-            shiftStatus.ToString(),
-            hasRejectionProblem,
-            penaltyAmount,
-            shift.CreatedAt,
-            false,
-            null,
-            shift.HousingId
-        );
+                    shift.RiderId,
+                    shift.WorkingId,
+                    shift.ShiftDate,
+                    shift.AcceptedDailyOrders,
+                    shift.RejectedDailyOrders,
+                    shift.RealRejectedDailyOrders,
+                    shift.StackedDeliveries,  // ADD THIS in appropriate position
+                    shift.WorkingHours,
+                    shift.CompanyId,
+                    shift.Company?.Name ?? "Unknown", // Null-safe access
+                    shift.Rider?.Employee?.NameAR ?? "Unknown", // Null-safe access
+                    shiftStatus.ToString(),
+                    hasRejectionProblem,
+                    penaltyAmount,
+                    shift.CreatedAt,
+                    false,
+                    null,
+                    shift.HousingId,
+                    shift.IsFreelancer
+                );
     }
+    
 
     public async Task<Result<List<RiderShiftResponse>>> GetRiderShiftsByDateOptimizedAsync(
         DateOnly shiftDate,
@@ -1824,6 +1829,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext, IRiderWorkingIdHi
                             HousingId = currentRiderDirect.Employee.HousingId,
                             CompanyId = currentRiderDirect.CompanyId,
                             ShiftStatus = newStatus,
+                            IsFreelancer = currentRiderDirect.IsFreelancer,
                             CreatedAt = DateTime.UtcNow.AddHours(3)
                         };
 
@@ -1945,6 +1951,7 @@ public class RiderShiftService(ApplicationDbcontext dbcontext, IRiderWorkingIdHi
                             HousingId = currentRider.Employee.HousingId,
                             CompanyId = currentRider.CompanyId,
                             ShiftStatus = newStatus,
+                            IsFreelancer = currentRider.IsFreelancer,
                             CreatedAt = DateTime.UtcNow.AddHours(3)
                         };
 

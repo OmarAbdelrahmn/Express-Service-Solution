@@ -255,6 +255,7 @@ public record RiderResponse(
     bool IsOutage,
     DateTime? ReportedAt,
     DateTime? DateOfOutage,
-    DateTime? UpdatedAd
+    DateTime? UpdatedAd,
+    bool? IsFreelancer          // ← add
     );
 

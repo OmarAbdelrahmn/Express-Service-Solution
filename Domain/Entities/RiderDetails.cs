@@ -15,4 +15,6 @@ public class RiderDetails
 
     public string? VehicleNumber { get; set; }
     public Vehicle? Vehicle { get; set; }
+
+    public bool? IsFreelancer { get; set; }   
 }

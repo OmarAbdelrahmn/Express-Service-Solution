@@ -2363,36 +2363,50 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                 ? (int)Math.Ceiling((decimal)currentDayOfMonth / lastDayOfMonth * cfg.FullMonthTargetOrders)
                 : cfg.FullMonthTargetOrders;
 
-            // ── fetch shifts ─────────────────────────────────────────────
+            // ── fetch freelancer riders for Company 2 ─────────────────────
+            var riders = await _dbcontext.RiderDetails
+                .Include(r => r.Employee)
+                    .ThenInclude(e => e.Housing)
+                .Where(r => r.CompanyId == 2 && r.IsFreelancer != true && r.Employee.IsDeleted != true && !r.Employee.IsEmployee && r.Employee.Status.ToLower() == "enable")
+                .AsNoTracking()
+                .ToListAsync(cancellationToken);
+
+            if (!riders.Any())
+                return Result.Failure<MonthlyRiderValidationReport>(
+                    new Error($"No freelancer riders found for Company 2", "no_data", 404));
+
+            var riderIds = riders.Select(r => r.Id).ToList();
+
+            // ── fetch their shifts within the period ──────────────────────
             var shifts = await _dbcontext.RiderShifts
-                .Include(s => s.Rider)
-                    .ThenInclude(r => r.Employee)
-                        .ThenInclude(e => e.Housing)
-                .Where(s => s.CompanyId == 2 &&
+                .Where(s => riderIds.Contains(s.RiderId) &&
+                            s.CompanyId == 2 &&
                             s.ShiftDate >= startDate &&
                             s.ShiftDate <= endDate)
                 .AsNoTracking()
                 .ToListAsync(cancellationToken);
 
-            if (!shifts.Any())
-                return Result.Failure<MonthlyRiderValidationReport>(
-                    new Error($"No shifts found for Company 2 in {year}-{month:D2}", "no_data", 404));
+            var shiftsByRider = shifts
+                .GroupBy(s => s.RiderId)
+                .ToDictionary(g => g.Key, g => g.OrderBy(s => s.ShiftDate).ToList());
 
-            // ── validate each rider ──────────────────────────────────────
-            var riderGroups = shifts.GroupBy(s => s.RiderId);
+            // ── validate every freelancer rider, even ones with zero shifts ─
             var validationResults = new List<RiderMonthlyValidation>();
 
-            foreach (var group in riderGroups)
+            foreach (var rider in riders)
             {
-                var rider = group.First().Rider;
-                if (rider?.Employee == null) continue;
+                if (rider.Employee == null) continue;
+
+                var riderShifts = shiftsByRider.TryGetValue(rider.Id, out var list)
+                    ? list
+                    : new List<RiderShift>();
 
                 var workedPreviousMonth = await DidRiderWorkInPreviousMonthAsync(
                     rider.Id, 2, startDate, cancellationToken);
 
                 var validation = ValidateRider(
                     rider,
-                    group.OrderBy(s => s.ShiftDate).ToList(),
+                    riderShifts,
                     year,
                     month,
                     currentDayOfMonth,
