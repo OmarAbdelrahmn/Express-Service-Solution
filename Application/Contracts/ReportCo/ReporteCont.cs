@@ -45,6 +45,7 @@ public record Company2RiderStackedDetail(
     DateOnly? MaxStackedDate,
     decimal StackedPercentage,
     decimal AverageStackedPerShift,
+    bool IsFreelancer,
     int Rank
 );
 

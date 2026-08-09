@@ -52,11 +52,83 @@ public class VacationServiceTests
         var administration = await service.DecideAsync("administrator", created.Value.Id, new VacationDecisionRequest(VacationDecision.Approved, "Administration approved"));
 
         Assert.True(created.IsSuccess);
+        Assert.Equal(VacationRequestStatus.PendingOperation, created.Value.Status);
         Assert.Equal(VacationRequestStatus.PendingAccountant, operation.Value.Status);
         Assert.Equal(VacationRequestStatus.PendingAdministration, accountant.Value.Status);
         Assert.Equal(VacationRequestStatus.Approved, administration.Value.Status);
         Assert.Equal(VacationHrStatus.AwaitingTicket, administration.Value.Hr.Status);
         Assert.Equal(3, administration.Value.Decisions.Count);
+    }
+
+    [Fact]
+    public async Task KeetaRider_RequiresKeetaManagerApprovalBeforeOperation()
+    {
+        await using var db = CreateDbContext();
+        await SeedAsync(db);
+        var rider = await db.RiderDetails.SingleAsync(x => x.Id == 1);
+        rider.CompanyId = 2;
+        db.VacationUserRoleAssignments.AddRange(
+            new VacationUserRoleAssignment { UserId = "keeta-manager", Role = VacationRole.KeetaManager, GrantedBy = "master" },
+            new VacationUserRoleAssignment { UserId = "reviewer", Role = VacationRole.Operation, GrantedBy = "master" },
+            new VacationUserRoleAssignment { UserId = "reviewer", Role = VacationRole.Accountant, GrantedBy = "master" },
+            new VacationUserRoleAssignment { UserId = "administrator", Role = VacationRole.Administration, GrantedBy = "master" });
+        await db.SaveChangesAsync();
+        var service = new VacationService(db);
+        var start = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3)).AddDays(3);
+
+        var created = await service.CreateForMemberAsync("member", 100, new CreateVacationRequest(1, start, start.AddDays(4)));
+        var keetaInbox = await service.GetInboxAsync("keeta-manager");
+        var operationInboxBeforeKeetaApproval = await service.GetInboxAsync("reviewer");
+        var operationDecisionBeforeKeetaApproval = await service.DecideAsync(
+            "reviewer", created.Value.Id, new VacationDecisionRequest(VacationDecision.Approved, "Operation attempted early"));
+        var keetaStage = await service.GetAllAsync(new VacationRequestQuery(Stage: VacationRole.KeetaManager));
+        var keetaDecision = await service.DecideAsync(
+            "keeta-manager", created.Value.Id, new VacationDecisionRequest(VacationDecision.Approved, "Keeta approved"));
+        var operationInboxAfterKeetaApproval = await service.GetInboxAsync("reviewer");
+        await service.DecideAsync("reviewer", created.Value.Id, new VacationDecisionRequest(VacationDecision.Approved, "Operations approved"));
+        await service.DecideAsync("reviewer", created.Value.Id, new VacationDecisionRequest(VacationDecision.Approved, "Accounting approved"));
+        var administration = await service.DecideAsync(
+            "administrator", created.Value.Id, new VacationDecisionRequest(VacationDecision.Approved, "Administration approved"));
+
+        Assert.True(created.IsSuccess);
+        Assert.Equal(VacationRequestStatus.PendingKeetaManager, created.Value.Status);
+        Assert.Equal(VacationRole.KeetaManager, created.Value.CurrentRole);
+        Assert.Single(keetaInbox.Value);
+        Assert.Empty(operationInboxBeforeKeetaApproval.Value);
+        Assert.True(operationDecisionBeforeKeetaApproval.IsFailure);
+        Assert.Equal("Vacation.AccessDenied", operationDecisionBeforeKeetaApproval.Error.Code);
+        Assert.Single(keetaStage.Value.Items);
+        Assert.Equal(VacationRequestStatus.PendingOperation, keetaDecision.Value.Status);
+        Assert.Equal(VacationRole.Operation, keetaDecision.Value.CurrentRole);
+        Assert.Single(operationInboxAfterKeetaApproval.Value);
+        Assert.Equal(VacationRequestStatus.Approved, administration.Value.Status);
+        Assert.Equal(
+            [VacationRole.KeetaManager, VacationRole.Operation, VacationRole.Accountant, VacationRole.Administration],
+            administration.Value.Decisions.Select(x => x.Role).ToArray());
+    }
+
+    [Fact]
+    public async Task KeetaManagerRejection_RejectsVacationAtFirstStage()
+    {
+        await using var db = CreateDbContext();
+        await SeedAsync(db);
+        var rider = await db.RiderDetails.SingleAsync(x => x.Id == 1);
+        rider.CompanyId = 2;
+        db.VacationUserRoleAssignments.Add(
+            new VacationUserRoleAssignment { UserId = "keeta-manager", Role = VacationRole.KeetaManager, GrantedBy = "master" });
+        await db.SaveChangesAsync();
+        var service = new VacationService(db);
+        var start = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3)).AddDays(3);
+
+        var created = await service.CreateForMemberAsync("member", 100, new CreateVacationRequest(1, start, start.AddDays(2)));
+        var rejected = await service.DecideAsync(
+            "keeta-manager", created.Value.Id, new VacationDecisionRequest(VacationDecision.Rejected, "Keeta rejected"));
+
+        Assert.True(rejected.IsSuccess);
+        Assert.Equal(VacationRequestStatus.Rejected, rejected.Value.Status);
+        Assert.Null(rejected.Value.CurrentRole);
+        Assert.Equal(VacationHrStatus.Closed, rejected.Value.Hr.Status);
+        Assert.Equal(VacationRole.KeetaManager, rejected.Value.Decisions.Single().Role);
     }
 
     [Fact]
@@ -164,11 +236,14 @@ public class VacationServiceTests
         db.ApplicationUsers.AddRange(
             new ApplicationUser { Id = "member", UserName = "100", FullName = "Housing Member" },
             new ApplicationUser { Id = "reviewer", UserName = "reviewer", FullName = "Reviewer" },
+            new ApplicationUser { Id = "keeta-manager", UserName = "keeta-manager", FullName = "Keeta Manager" },
             new ApplicationUser { Id = "administrator", UserName = "administrator", FullName = "Administrator" },
             new ApplicationUser { Id = "hr", UserName = "hr", FullName = "HR User" },
             new ApplicationUser { Id = "master", UserName = "master", FullName = "Master" });
         db.Housings.Add(new Housing { Id = 1, Name = "Housing", Address = "Riyadh", Capacity = 10, ManagerIqamaNo = 100 });
-        db.Companies.Add(new Company { Id = 1, Name = "Company" });
+        db.Companies.AddRange(
+            new Company { Id = 1, Name = "Company" },
+            new Company { Id = 2, Name = "Keeta" });
         db.Employees.Add(new Employees
         {
             IqamaNo = 200,

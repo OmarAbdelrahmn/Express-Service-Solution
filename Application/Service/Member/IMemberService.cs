@@ -550,7 +550,8 @@ public record RiderRejectionDetail(
     int TotalRejections,
     int TotalRealRejections,
     decimal RejectionRate,
-    decimal RealRejectionRate
+    decimal RealRejectionRate,
+    bool IsFreelancer = false
 );
 
 public record RejectionTotals(

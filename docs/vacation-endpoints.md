@@ -19,7 +19,14 @@ This applies to the create response and to the member request list, approval inb
 ## Approval inbox
 
 - `GET /api/vacation-requests/inbox` returns requests currently actionable by the caller's vacation assignments.
-- `POST /api/vacation-requests/{id}/decisions` — `{ "decision": 1, "reason": "Approved after roster review" }`. `1` is approved and `2` is rejected. The server selects the current Operation, Accountant, or Administration stage.
+- `POST /api/vacation-requests/{id}/decisions` — `{ "decision": 1, "reason": "Approved after roster review" }`. `1` is approved and `2` is rejected. The server selects the current Keeta Manager, Operation, Accountant, or Administration stage.
+
+The approval sequence is conditional on the rider's company when the request is created:
+
+- `RiderDetails.CompanyId == 2`: Keeta Manager -> Operation -> Accountant -> Administration.
+- every other company: Operation -> Accountant -> Administration.
+
+The selected sequence is represented by the vacation status and does not change if the rider's company is edited after the request starts. `PendingKeetaManager` is status value `10`; its `currentRole` is `5`.
 
 ## Admin and Master oversight
 
@@ -38,6 +45,6 @@ Master manages role assignments through:
 - `GET /api/vacation-access`
 - `PUT /api/vacation-access/users/{userId}` — `{ "roles": [1, 2] }`
 
-Role values are `1` Operation, `2` Accountant, `3` Administration, and `4` HR. One user may hold more than one vacation role.
+Role values are `1` Operation, `2` Accountant, `3` Administration, `4` HR, and `5` Keeta Manager. One user may hold more than one vacation role.
 
 The HR ticket/visa frontend contract, multipart requests, response fields, statuses, and document-view rules are documented in [vacation-hr-frontend-contract.md](vacation-hr-frontend-contract.md).

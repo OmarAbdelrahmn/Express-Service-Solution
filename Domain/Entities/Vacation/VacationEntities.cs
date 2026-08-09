@@ -5,7 +5,8 @@ public enum VacationRole
     Operation = 1,
     Accountant = 2,
     Administration = 3,
-    HR = 4
+    HR = 4,
+    KeetaManager = 5
 }
 
 public enum VacationRequestStatus
@@ -18,7 +19,8 @@ public enum VacationRequestStatus
     Completed = 6,
     Rejected = 7,
     Cancelled = 8,
-    Expired = 9
+    Expired = 9,
+    PendingKeetaManager = 10
 }
 
 public enum VacationDecision

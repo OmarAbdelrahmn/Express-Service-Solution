@@ -1,6 +1,6 @@
 # Vacation HR frontend contract
 
-This contract extends the rider vacation workflow after Operation, Accountant, and Administration have all approved. All endpoints require the normal bearer token. `HR` is a vacation-only assignment and does not change the user's Identity login roles.
+This contract extends the rider vacation workflow after all required approvals are complete. Company `2` riders require Keeta Manager approval before Operation, Accountant, and Administration; other riders require Operation, Accountant, and Administration. All endpoints require the normal bearer token. `HR` is a vacation-only assignment and does not change the user's Identity login roles.
 
 ## Workflow displayed to the user
 
@@ -27,12 +27,13 @@ The normal vacation status remains:
 | `7` | `Rejected` |
 | `8` | `Cancelled` |
 | `9` | `Expired` |
+| `10` | `PendingKeetaManager` |
 
 Once Administration approves, `fullyApprovedAt` is populated and `hr.status` becomes `1`. The request appears in the HR inbox.
 
 ## HR role assignment
 
-Master assigns HR through the existing vacation-access API. The same user may also hold Operation, Accountant, or Administration.
+Master assigns vacation roles through the existing vacation-access API. The same user may hold more than one role.
 
 ```http
 PUT /api/vacation-access/users/{userId}
@@ -43,7 +44,7 @@ Content-Type: application/json
 }
 ```
 
-Role values: `1` Operation, `2` Accountant, `3` Administration, `4` HR. The call replaces all vacation roles for that user.
+Role values: `1` Operation, `2` Accountant, `3` Administration, `4` HR, `5` Keeta Manager. The call replaces all vacation roles for that user.
 
 ## HR inbox
 
@@ -220,6 +221,6 @@ Errors use Problem Details. Read `title` as the stable error code and `detail` a
 | `403` | `Vacation.AccessDenied` | User lacks HR/document/housing access |
 | `404` | `Vacation.NotFound` | Vacation request not found |
 | `404` | `Vacation.DocumentNotFound` | Document row or physical file not found |
-| `409` | `Vacation.HrNotReady` | Three approvals are not complete or request is closed |
+| `409` | `Vacation.HrNotReady` | All required approvals are not complete or request is closed |
 | `409` | `Vacation.TicketRequired` | Visa task attempted before ticket completion |
 | `409` | `Vacation.ConcurrentUpdate` | Another user changed the request; refresh and retry |

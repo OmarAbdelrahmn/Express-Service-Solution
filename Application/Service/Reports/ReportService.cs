@@ -1213,6 +1213,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                     MaxStackedDate: maxStackedDate,
                     StackedPercentage: stackedPercentage,
                     AverageStackedPerShift: avgStackedPerShiftRider,
+                    IsFreelancer: rider.IsFreelancer ?? false,
                     Rank: 0 // Will be assigned after sorting
                 ));
             }
@@ -2894,6 +2895,20 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
             // Calculate on-time delivery rate
             var totalOnTimeDeliveries = 0;
 
+            var riders = shifts
+                .Where(s => s.Rider != null)
+                .GroupBy(s => s.RiderId)
+                .Select(g =>
+                {
+                    var rider = g.First().Rider!;
+                    return new Company2DailySummaryRider(
+                        RiderId: rider.Id,
+                        WorkingId: rider.WorkingId ?? "0",
+                        IsFreelancer: rider.IsFreelancer ?? false);
+                })
+                .OrderBy(r => r.RiderId)
+                .ToList();
+
             var report = new Company2DailySummaryReport(
                 ReportDate: reportDate,
                 PeriodStart: monthStart,
@@ -2901,7 +2916,8 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                 TotalOrdersDelivered: totalOrders,
                 AverageWorkingHours: avgWorkingHours,
                 TotalShifts: totalShifts,
-                TotalRiders: shifts.Select(s => s.RiderId).Distinct().Count()
+                TotalRiders: shifts.Select(s => s.RiderId).Distinct().Count(),
+                Riders: riders
             );
 
             return Result.Success(report);
@@ -3088,7 +3104,8 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                     OrderCount: s.AcceptedDailyOrders,
                     WorkingHours: s.WorkingHours,
                     HousingGroup: s.Housing?.Name ?? "غير محدد",
-                    DriverAppConnectionTime: s.CreatedAt
+                    DriverAppConnectionTime: s.CreatedAt,
+                    IsFreelancer: s.Rider?.IsFreelancer ?? false
                 ))
                 .OrderByDescending(r => r.OrderCount)
                 .ToList();
@@ -3127,7 +3144,14 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
         int TotalOrdersDelivered,
         float AverageWorkingHours,
         int TotalShifts,
-        int TotalRiders
+        int TotalRiders,
+        List<Company2DailySummaryRider> Riders
+    );
+
+    public record Company2DailySummaryRider(
+        int RiderId,
+        string WorkingId,
+        bool IsFreelancer
     );
 
     public record Company2CumulativeRiderReport(
@@ -3173,6 +3197,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
         float WorkingHours,
         string HousingGroup,
         DateTime DriverAppConnectionTime,
+        bool IsFreelancer,
         int Rank = 0
     );
     // Records for Validation Results
@@ -3854,7 +3879,8 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                     TotalRejections: totalRejections,
                     TotalRealRejections: totalRealRejections,
                     RejectionRate: rejectionRate,
-                    RealRejectionRate: realRejectionRate
+                    RealRejectionRate: realRejectionRate,
+                    IsFreelancer: rider.IsFreelancer ?? false
                 ));
             }
 
@@ -3967,7 +3993,8 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                     TotalRejections: totalRejections,
                     TotalRealRejections: totalRealRejections,
                     RejectionRate: rejectionRate,
-                    RealRejectionRate: realRejectionRate
+                    RealRejectionRate: realRejectionRate,
+                    IsFreelancer: rider.IsFreelancer ?? false
                 ));
             }
 

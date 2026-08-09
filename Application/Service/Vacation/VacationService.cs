@@ -11,8 +11,17 @@ namespace Application.Service.Vacation;
 
 public class VacationService(ApplicationDbcontext dbcontext, IVacationDocumentStorage? documentStorage = null) : IVacationService
 {
+    private const int KeetaCompanyId = 2;
+    private static readonly VacationRequestStatus[] PendingApprovalStatuses =
+    [
+        VacationRequestStatus.PendingKeetaManager,
+        VacationRequestStatus.PendingOperation,
+        VacationRequestStatus.PendingAccountant,
+        VacationRequestStatus.PendingAdministration
+    ];
     private static readonly VacationRequestStatus[] OverlapStatuses =
     [
+        VacationRequestStatus.PendingKeetaManager,
         VacationRequestStatus.PendingOperation,
         VacationRequestStatus.PendingAccountant,
         VacationRequestStatus.PendingAdministration,
@@ -49,7 +58,9 @@ public class VacationService(ApplicationDbcontext dbcontext, IVacationDocumentSt
             RequestedByUserId = actorUserId,
             RequestedByName = actorName,
             RequestedAt = RiyadhNow(),
-            Status = VacationRequestStatus.PendingOperation,
+            Status = rider.CompanyId == KeetaCompanyId
+                ? VacationRequestStatus.PendingKeetaManager
+                : VacationRequestStatus.PendingOperation,
             Rider = rider
         };
 
@@ -195,7 +206,7 @@ public class VacationService(ApplicationDbcontext dbcontext, IVacationDocumentSt
         var roles = await dbcontext.VacationUserRoleAssignments.AsNoTracking()
             .Where(x => x.UserId == actorUserId).Select(x => x.Role).ToListAsync(cancellationToken);
         var statuses = roles
-            .Where(x => x is VacationRole.Operation or VacationRole.Accountant or VacationRole.Administration)
+            .Where(x => x is VacationRole.KeetaManager or VacationRole.Operation or VacationRole.Accountant or VacationRole.Administration)
             .Select(StatusForRole)
             .ToList();
         if (statuses.Count == 0)
@@ -277,6 +288,10 @@ public class VacationService(ApplicationDbcontext dbcontext, IVacationDocumentSt
             {
                 vacation.Status = VacationRequestStatus.Rejected;
                 vacation.HrStatus = VacationHrStatus.Closed;
+            }
+            else if (role == VacationRole.KeetaManager)
+            {
+                vacation.Status = VacationRequestStatus.PendingOperation;
             }
             else if (role == VacationRole.Operation)
             {
@@ -621,12 +636,12 @@ public class VacationService(ApplicationDbcontext dbcontext, IVacationDocumentSt
         var requests = await dbcontext.VacationRequests
             .Include(x => x.Rider).ThenInclude(x => x.Employee)
             .Where(x => x.Status == VacationRequestStatus.Approved || x.Status == VacationRequestStatus.Active ||
-                        ((x.Status == VacationRequestStatus.PendingOperation || x.Status == VacationRequestStatus.PendingAccountant || x.Status == VacationRequestStatus.PendingAdministration) && x.EndDate < today))
+                        (PendingApprovalStatuses.Contains(x.Status) && x.EndDate < today))
             .ToListAsync(cancellationToken);
 
         foreach (var vacation in requests)
         {
-            if (vacation.Status is VacationRequestStatus.PendingOperation or VacationRequestStatus.PendingAccountant or VacationRequestStatus.PendingAdministration)
+            if (PendingApprovalStatuses.Contains(vacation.Status))
             {
                 vacation.Status = VacationRequestStatus.Expired;
                 vacation.HrStatus = VacationHrStatus.Closed;
@@ -751,10 +766,11 @@ public class VacationService(ApplicationDbcontext dbcontext, IVacationDocumentSt
         return Task.CompletedTask;
     }
 
-    private static bool CanAmend(VacationRequestStatus status) => status is VacationRequestStatus.PendingOperation or VacationRequestStatus.PendingAccountant or VacationRequestStatus.PendingAdministration or VacationRequestStatus.Approved or VacationRequestStatus.Active;
+    private static bool CanAmend(VacationRequestStatus status) => status is VacationRequestStatus.PendingKeetaManager or VacationRequestStatus.PendingOperation or VacationRequestStatus.PendingAccountant or VacationRequestStatus.PendingAdministration or VacationRequestStatus.Approved or VacationRequestStatus.Active;
     private static bool CanCancel(VacationRequestStatus status) => CanAmend(status);
     private static VacationRequestStatus StatusForRole(VacationRole role) => role switch
     {
+        VacationRole.KeetaManager => VacationRequestStatus.PendingKeetaManager,
         VacationRole.Operation => VacationRequestStatus.PendingOperation,
         VacationRole.Accountant => VacationRequestStatus.PendingAccountant,
         VacationRole.Administration => VacationRequestStatus.PendingAdministration,
@@ -762,10 +778,20 @@ public class VacationService(ApplicationDbcontext dbcontext, IVacationDocumentSt
     };
     private static VacationRole? RoleForStatus(VacationRequestStatus status) => status switch
     {
+        VacationRequestStatus.PendingKeetaManager => VacationRole.KeetaManager,
         VacationRequestStatus.PendingOperation => VacationRole.Operation,
         VacationRequestStatus.PendingAccountant => VacationRole.Accountant,
         VacationRequestStatus.PendingAdministration => VacationRole.Administration,
         _ => null
+    };
+
+    private static int ApprovalOrder(VacationRole role) => role switch
+    {
+        VacationRole.KeetaManager => 0,
+        VacationRole.Operation => 1,
+        VacationRole.Accountant => 2,
+        VacationRole.Administration => 3,
+        _ => int.MaxValue
     };
 
     private static bool HasCurrentCompletedDocument(VacationRequest vacation, VacationHrDocumentType type) =>
@@ -827,6 +853,6 @@ public class VacationService(ApplicationDbcontext dbcontext, IVacationDocumentSt
             HasCurrentCompletedDocument(vacation, VacationHrDocumentType.Ticket),
             HasCurrentCompletedDocument(vacation, VacationHrDocumentType.ExitReentryVisa),
             documents);
-        return new VacationRequestResponse(vacation.Id, ToResponse(vacation.Rider), vacation.StartDate, vacation.EndDate, vacation.MemberNotes, vacation.Status, RoleForStatus(vacation.Status), vacation.RequestedByUserId, vacation.RequestedByName, vacation.RequestedAt, vacation.FullyApprovedAt, vacation.ActivatedAt, vacation.CompletedAt, vacation.CancelledAt, vacation.CancelledByUserId, vacation.CancelledByName, vacation.CancellationReason, vacation.Decisions.OrderBy(x => x.Role).Select(ToResponse).ToList(), vacation.DateChangeRequests.OrderByDescending(x => x.RequestedAt).Select(ToResponse).ToList(), vacation.CancellationRequests.OrderByDescending(x => x.RequestedAt).Select(ToResponse).ToList(), hr);
+        return new VacationRequestResponse(vacation.Id, ToResponse(vacation.Rider), vacation.StartDate, vacation.EndDate, vacation.MemberNotes, vacation.Status, RoleForStatus(vacation.Status), vacation.RequestedByUserId, vacation.RequestedByName, vacation.RequestedAt, vacation.FullyApprovedAt, vacation.ActivatedAt, vacation.CompletedAt, vacation.CancelledAt, vacation.CancelledByUserId, vacation.CancelledByName, vacation.CancellationReason, vacation.Decisions.OrderBy(x => ApprovalOrder(x.Role)).Select(ToResponse).ToList(), vacation.DateChangeRequests.OrderByDescending(x => x.RequestedAt).Select(ToResponse).ToList(), vacation.CancellationRequests.OrderByDescending(x => x.RequestedAt).Select(ToResponse).ToList(), hr);
     }
 }
