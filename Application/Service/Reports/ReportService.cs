@@ -3019,7 +3019,8 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                     ExpectedDays: riderExpectedDays,
                     TargetOrders: targetOrders,
                     IsNewRider: isNewRider,
-                    StartDate: riderStartDate
+                    StartDate: riderStartDate,
+                    IsFreelancer: rider.IsFreelancer ?? false
                 ));
             }
 
@@ -3176,6 +3177,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
         int TargetOrders,         // NEW: Adjusted target based on expected days
         bool IsNewRider,          // NEW: Flag indicating if rider is new this month
         DateOnly StartDate,       // NEW: Date when rider started in this month
+        bool IsFreelancer,
         int Rank = 0
     );
 
