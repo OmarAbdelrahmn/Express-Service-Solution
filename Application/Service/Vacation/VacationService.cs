@@ -258,6 +258,9 @@ public class VacationService(ApplicationDbcontext dbcontext, IVacationDocumentSt
     {
         if (!Enum.IsDefined(request.Decision) || string.IsNullOrWhiteSpace(request.Reason))
             return Result.Failure<VacationRequestResponse>(RequiredReasonError());
+        if ((request.Decision == VacationDecision.Returned && !request.TargetRole.HasValue) ||
+            (request.Decision != VacationDecision.Returned && request.TargetRole.HasValue))
+            return Result.Failure<VacationRequestResponse>(VacationErrors.InvalidReturnTarget);
         await using var transaction = await dbcontext.Database.BeginTransactionAsync(cancellationToken);
         try
         {
@@ -273,18 +276,40 @@ public class VacationService(ApplicationDbcontext dbcontext, IVacationDocumentSt
                 return Result.Failure<VacationRequestResponse>(VacationErrors.AccessDenied);
 
             var actorName = await GetUserNameAsync(actorUserId, cancellationToken);
+            var now = RiyadhNow();
+            if (request.Decision == VacationDecision.Returned &&
+                !IsValidReturnTarget(vacation, role.Value, request.TargetRole!.Value))
+                return Result.Failure<VacationRequestResponse>(VacationErrors.InvalidReturnTarget);
+
             dbcontext.VacationApprovalDecisions.Add(new VacationApprovalDecision
             {
                 VacationRequestId = vacation.Id,
                 Role = role.Value,
                 Decision = request.Decision,
+                TargetRole = request.TargetRole,
                 Reason = request.Reason.Trim(),
                 DecidedByUserId = actorUserId,
                 DecidedByName = actorName,
-                DecidedAt = RiyadhNow()
+                DecidedAt = now
             });
 
-            if (request.Decision == VacationDecision.Rejected)
+            if (request.Decision == VacationDecision.Returned)
+            {
+                var targetRole = request.TargetRole!.Value;
+                foreach (var approval in vacation.Decisions.Where(x =>
+                             x.Decision == VacationDecision.Approved &&
+                             !x.IsSuperseded &&
+                             ApprovalOrder(x.Role) >= ApprovalOrder(targetRole)))
+                {
+                    approval.IsSuperseded = true;
+                    approval.SupersededAt = now;
+                }
+
+                vacation.Status = StatusForRole(targetRole);
+                vacation.FullyApprovedAt = null;
+                vacation.HrStatus = VacationHrStatus.PendingApproval;
+            }
+            else if (request.Decision == VacationDecision.Rejected)
             {
                 vacation.Status = VacationRequestStatus.Rejected;
                 vacation.HrStatus = VacationHrStatus.Closed;
@@ -794,6 +819,23 @@ public class VacationService(ApplicationDbcontext dbcontext, IVacationDocumentSt
         _ => int.MaxValue
     };
 
+    private static bool IsValidReturnTarget(VacationRequest vacation, VacationRole currentRole, VacationRole targetRole) =>
+        AvailableReturnRoles(vacation, currentRole).Contains(targetRole);
+
+    private static IReadOnlyCollection<VacationRole> AvailableReturnRoles(VacationRequest vacation, VacationRole? currentRole = null)
+    {
+        var activeRole = currentRole ?? RoleForStatus(vacation.Status);
+        if (!activeRole.HasValue)
+            return [];
+
+        var workflow = vacation.Status == VacationRequestStatus.PendingKeetaManager ||
+                       vacation.Decisions.Any(x => x.Role == VacationRole.KeetaManager)
+            ? new[] { VacationRole.KeetaManager, VacationRole.Operation, VacationRole.Accountant, VacationRole.Administration }
+            : new[] { VacationRole.Operation, VacationRole.Accountant, VacationRole.Administration };
+
+        return workflow.Where(x => ApprovalOrder(x) < ApprovalOrder(activeRole.Value)).ToList();
+    }
+
     private static bool HasCurrentCompletedDocument(VacationRequest vacation, VacationHrDocumentType type) =>
         vacation.HrDocuments.Any(x => x.Type == type && !x.IsSuperseded && x.IsCompleted);
 
@@ -837,7 +879,7 @@ public class VacationService(ApplicationDbcontext dbcontext, IVacationDocumentSt
     private static Error RequiredReasonError() => new("Vacation.ReasonRequired", "A decision reason is required.", 400);
 
     private static VacationRiderResponse ToResponse(RiderDetails rider) => new(rider.Id, rider.EmployeeIqamaNo, rider.Employee.NameAR, rider.Employee.NameEN, rider.WorkingId, rider.Employee.HousingId, rider.Employee.Housing?.Name, rider.Employee.PassportNo, rider.Employee.PassportEnd, rider.Employee.IqamaEndM, rider.Employee.IqamaEndH);
-    private static VacationDecisionResponse ToResponse(VacationApprovalDecision decision) => new(decision.Role, decision.Decision, decision.Reason, decision.DecidedByUserId, decision.DecidedByName, decision.DecidedAt);
+    private static VacationDecisionResponse ToResponse(VacationApprovalDecision decision) => new(decision.Role, decision.Decision, decision.TargetRole, decision.Reason, decision.DecidedByUserId, decision.DecidedByName, decision.DecidedAt, decision.IsSuperseded, decision.SupersededAt);
     private static VacationDateChangeResponse ToResponse(VacationDateChangeRequest amendment) => new(amendment.Id, amendment.PreviousStartDate, amendment.PreviousEndDate, amendment.ProposedStartDate, amendment.ProposedEndDate, amendment.Reason, amendment.RequestedByUserId, amendment.RequestedByName, amendment.RequestedAt, amendment.Status, amendment.ResolvedByUserId, amendment.ResolvedByName, amendment.ResolutionReason, amendment.ResolvedAt);
     private static VacationCancellationResponse ToResponse(VacationCancellationRequest cancellation) => new(cancellation.Id, cancellation.Reason, cancellation.RequestedByUserId, cancellation.RequestedByName, cancellation.RequestedAt, cancellation.Status, cancellation.ResolvedByUserId, cancellation.ResolvedByName, cancellation.ResolutionReason, cancellation.ResolvedAt);
     private static VacationHrDocumentResponse ToResponse(VacationHrDocument document)
@@ -853,6 +895,6 @@ public class VacationService(ApplicationDbcontext dbcontext, IVacationDocumentSt
             HasCurrentCompletedDocument(vacation, VacationHrDocumentType.Ticket),
             HasCurrentCompletedDocument(vacation, VacationHrDocumentType.ExitReentryVisa),
             documents);
-        return new VacationRequestResponse(vacation.Id, ToResponse(vacation.Rider), vacation.StartDate, vacation.EndDate, vacation.MemberNotes, vacation.Status, RoleForStatus(vacation.Status), vacation.RequestedByUserId, vacation.RequestedByName, vacation.RequestedAt, vacation.FullyApprovedAt, vacation.ActivatedAt, vacation.CompletedAt, vacation.CancelledAt, vacation.CancelledByUserId, vacation.CancelledByName, vacation.CancellationReason, vacation.Decisions.OrderBy(x => ApprovalOrder(x.Role)).Select(ToResponse).ToList(), vacation.DateChangeRequests.OrderByDescending(x => x.RequestedAt).Select(ToResponse).ToList(), vacation.CancellationRequests.OrderByDescending(x => x.RequestedAt).Select(ToResponse).ToList(), hr);
+        return new VacationRequestResponse(vacation.Id, ToResponse(vacation.Rider), vacation.StartDate, vacation.EndDate, vacation.MemberNotes, vacation.Status, RoleForStatus(vacation.Status), AvailableReturnRoles(vacation), vacation.RequestedByUserId, vacation.RequestedByName, vacation.RequestedAt, vacation.FullyApprovedAt, vacation.ActivatedAt, vacation.CompletedAt, vacation.CancelledAt, vacation.CancelledByUserId, vacation.CancelledByName, vacation.CancellationReason, vacation.Decisions.OrderBy(x => x.DecidedAt).ThenBy(x => x.Id).Select(ToResponse).ToList(), vacation.DateChangeRequests.OrderByDescending(x => x.RequestedAt).Select(ToResponse).ToList(), vacation.CancellationRequests.OrderByDescending(x => x.RequestedAt).Select(ToResponse).ToList(), hr);
     }
 }

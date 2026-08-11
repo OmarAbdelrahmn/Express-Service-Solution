@@ -66,10 +66,15 @@ public class VacationApprovalDecisionConfigration : IEntityTypeConfiguration<Vac
         e.ToTable("VacationApprovalDecisions");
         e.Property(x => x.Role).HasConversion<int>();
         e.Property(x => x.Decision).HasConversion<int>();
+        e.Property(x => x.TargetRole).HasConversion<int?>();
+        e.Property(x => x.IsSuperseded).HasDefaultValue(false);
         e.Property(x => x.Reason).IsRequired().HasMaxLength(1000);
         e.Property(x => x.DecidedByUserId).IsRequired().HasMaxLength(450);
         e.Property(x => x.DecidedByName).IsRequired().HasMaxLength(200);
-        e.HasIndex(x => new { x.VacationRequestId, x.Role }).IsUnique();
+        e.HasIndex(x => new { x.VacationRequestId, x.Role })
+            .IsUnique()
+            .HasFilter("[Decision] = 1 AND [IsSuperseded] = 0");
+        e.HasIndex(x => new { x.VacationRequestId, x.DecidedAt });
         e.HasOne(x => x.VacationRequest).WithMany(x => x.Decisions).HasForeignKey(x => x.VacationRequestId).OnDelete(DeleteBehavior.Cascade);
     }
 }

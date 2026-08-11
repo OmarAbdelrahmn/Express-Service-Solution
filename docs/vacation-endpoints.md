@@ -19,7 +19,7 @@ This applies to the create response and to the member request list, approval inb
 ## Approval inbox
 
 - `GET /api/vacation-requests/inbox` returns requests currently actionable by the caller's vacation assignments.
-- `POST /api/vacation-requests/{id}/decisions` — `{ "decision": 1, "reason": "Approved after roster review" }`. `1` is approved and `2` is rejected. The server selects the current Keeta Manager, Operation, Accountant, or Administration stage.
+- `POST /api/vacation-requests/{id}/decisions` — `{ "decision": 1, "reason": "Approved after roster review" }`. `1` is approved and `2` is rejected. `3` returns the request for rework and requires an earlier workflow stage: `{ "decision": 3, "targetRole": 1, "reason": "Operations must correct the roster details." }`. The server selects the current Keeta Manager, Operation, Accountant, or Administration stage.
 
 The approval sequence is conditional on the rider's company when the request is created:
 
@@ -27,6 +27,14 @@ The approval sequence is conditional on the rider's company when the request is 
 - every other company: Operation -> Accountant -> Administration.
 
 The selected sequence is represented by the vacation status and does not change if the rider's company is edited after the request starts. `PendingKeetaManager` is status value `10`; its `currentRole` is `5`.
+
+### Return for rework
+
+- Only the user assigned to the current approval stage can return a request.
+- `targetRole` must be an earlier stage in this request's workflow: Keeta Manager (`5`), Operation (`1`), Accountant (`2`), or Administration (`3`). HR cannot be a target.
+- A return changes the request back to the selected pending stage, adds the required reason to `decisions`, and requires approval to replay from that stage through Administration.
+- Existing approvals from the selected stage onward are retained as audit history but returned with `isSuperseded: true`; earlier approvals remain effective. Decision history is chronological.
+- Every vacation request response includes `availableReturnRoles`, the valid backward destinations for its current stage. An invalid target returns `Vacation.InvalidReturnTarget`.
 
 ## Admin and Master oversight
 

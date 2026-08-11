@@ -6912,6 +6912,10 @@ namespace Domain.Migrations
                     b.Property<int>("Decision")
                         .HasColumnType("int");
 
+                    b.Property<bool>("IsSuperseded")
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false);
+
                     b.Property<string>("Reason")
                         .IsRequired()
                         .HasMaxLength(1000)
@@ -6920,13 +6924,22 @@ namespace Domain.Migrations
                     b.Property<int>("Role")
                         .HasColumnType("int");
 
+                    b.Property<DateTime?>("SupersededAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int?>("TargetRole")
+                        .HasColumnType("int");
+
                     b.Property<Guid>("VacationRequestId")
                         .HasColumnType("uniqueidentifier");
 
                     b.HasKey("Id");
 
                     b.HasIndex("VacationRequestId", "Role")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasFilter("[Decision] = 1 AND [IsSuperseded] = 0");
+
+                    b.HasIndex("VacationRequestId", "DecidedAt");
 
                     b.ToTable("VacationApprovalDecisions", (string)null);
                 });

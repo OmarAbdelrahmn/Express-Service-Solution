@@ -61,6 +61,117 @@ public class VacationServiceTests
     }
 
     [Fact]
+    public async Task AccountantCanReturnVacationToOperation_AndApprovalReplaysFromOperation()
+    {
+        await using var db = CreateDbContext();
+        await SeedAsync(db);
+        db.VacationUserRoleAssignments.AddRange(
+            new VacationUserRoleAssignment { UserId = "reviewer", Role = VacationRole.Operation, GrantedBy = "master" },
+            new VacationUserRoleAssignment { UserId = "accountant", Role = VacationRole.Accountant, GrantedBy = "master" },
+            new VacationUserRoleAssignment { UserId = "administrator", Role = VacationRole.Administration, GrantedBy = "master" });
+        await db.SaveChangesAsync();
+        var service = new VacationService(db);
+        var start = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3)).AddDays(3);
+
+        var created = await service.CreateForMemberAsync("member", 100, new CreateVacationRequest(1, start, start.AddDays(4)));
+        await service.DecideAsync("reviewer", created.Value.Id, new VacationDecisionRequest(VacationDecision.Approved, "Operations approved"));
+        var returned = await service.DecideAsync("accountant", created.Value.Id,
+            new VacationDecisionRequest(VacationDecision.Returned, "Operations must correct the roster.", VacationRole.Operation));
+        var operationInbox = await service.GetInboxAsync("reviewer");
+        var accountantInbox = await service.GetInboxAsync("accountant");
+
+        Assert.True(returned.IsSuccess);
+        Assert.Equal(VacationRequestStatus.PendingOperation, returned.Value.Status);
+        Assert.Equal(VacationRole.Operation, returned.Value.CurrentRole);
+        Assert.Empty(returned.Value.AvailableReturnRoles);
+        Assert.Single(operationInbox.Value);
+        Assert.Empty(accountantInbox.Value);
+        Assert.Contains(returned.Value.Decisions, x => x.Role == VacationRole.Accountant && x.Decision == VacationDecision.Returned && x.TargetRole == VacationRole.Operation && !x.IsSuperseded);
+        Assert.True(returned.Value.Decisions.Single(x => x.Role == VacationRole.Operation && x.Decision == VacationDecision.Approved).IsSuperseded);
+
+        var replayedOperation = await service.DecideAsync("reviewer", created.Value.Id, new VacationDecisionRequest(VacationDecision.Approved, "Operations reapproved"));
+        var replayedAccountant = await service.DecideAsync("accountant", created.Value.Id, new VacationDecisionRequest(VacationDecision.Approved, "Accounting reapproved"));
+        var completed = await service.DecideAsync("administrator", created.Value.Id, new VacationDecisionRequest(VacationDecision.Approved, "Administration approved"));
+
+        Assert.Equal(VacationRequestStatus.PendingAccountant, replayedOperation.Value.Status);
+        Assert.Equal(VacationRequestStatus.PendingAdministration, replayedAccountant.Value.Status);
+        Assert.Equal(VacationRequestStatus.Approved, completed.Value.Status);
+        Assert.Equal(5, completed.Value.Decisions.Count);
+    }
+
+    [Fact]
+    public async Task AdministrationCanChooseAnEarlierReturnTarget()
+    {
+        await using var db = CreateDbContext();
+        await SeedAsync(db);
+        await AssignWorkflowRolesAsync(db);
+        var service = new VacationService(db);
+        var start = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3)).AddDays(3);
+
+        var created = await service.CreateForMemberAsync("member", 100, new CreateVacationRequest(1, start, start.AddDays(4)));
+        await service.DecideAsync("reviewer", created.Value.Id, new VacationDecisionRequest(VacationDecision.Approved, "Operations approved"));
+        var pendingAdministration = await service.DecideAsync("reviewer", created.Value.Id, new VacationDecisionRequest(VacationDecision.Approved, "Accounting approved"));
+        var returned = await service.DecideAsync("administrator", created.Value.Id,
+            new VacationDecisionRequest(VacationDecision.Returned, "Accounting must update the request.", VacationRole.Accountant));
+
+        Assert.Equal([VacationRole.Operation, VacationRole.Accountant], pendingAdministration.Value.AvailableReturnRoles);
+        Assert.True(returned.IsSuccess);
+        Assert.Equal(VacationRequestStatus.PendingAccountant, returned.Value.Status);
+        Assert.False(returned.Value.Decisions.Single(x => x.Role == VacationRole.Operation && x.Decision == VacationDecision.Approved).IsSuperseded);
+        Assert.True(returned.Value.Decisions.Single(x => x.Role == VacationRole.Accountant && x.Decision == VacationDecision.Approved).IsSuperseded);
+    }
+
+    [Fact]
+    public async Task ReturnTargetsRespectTheOriginalWorkflow()
+    {
+        await using var db = CreateDbContext();
+        await SeedAsync(db);
+        var rider = await db.RiderDetails.SingleAsync(x => x.Id == 1);
+        rider.CompanyId = 2;
+        db.VacationUserRoleAssignments.AddRange(
+            new VacationUserRoleAssignment { UserId = "keeta-manager", Role = VacationRole.KeetaManager, GrantedBy = "master" },
+            new VacationUserRoleAssignment { UserId = "reviewer", Role = VacationRole.Operation, GrantedBy = "master" });
+        await db.SaveChangesAsync();
+        var service = new VacationService(db);
+        var start = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3)).AddDays(3);
+
+        var created = await service.CreateForMemberAsync("member", 100, new CreateVacationRequest(1, start, start.AddDays(4)));
+        await service.DecideAsync("keeta-manager", created.Value.Id, new VacationDecisionRequest(VacationDecision.Approved, "Keeta approved"));
+        var returned = await service.DecideAsync("reviewer", created.Value.Id,
+            new VacationDecisionRequest(VacationDecision.Returned, "Keeta must review again.", VacationRole.KeetaManager));
+
+        Assert.True(returned.IsSuccess);
+        Assert.Equal(VacationRequestStatus.PendingKeetaManager, returned.Value.Status);
+        Assert.True(returned.Value.Decisions.Single(x => x.Role == VacationRole.KeetaManager && x.Decision == VacationDecision.Approved).IsSuperseded);
+    }
+
+    [Fact]
+    public async Task InvalidReturnTargetsAreRejected()
+    {
+        await using var db = CreateDbContext();
+        await SeedAsync(db);
+        db.VacationUserRoleAssignments.AddRange(
+            new VacationUserRoleAssignment { UserId = "reviewer", Role = VacationRole.Operation, GrantedBy = "master" },
+            new VacationUserRoleAssignment { UserId = "reviewer", Role = VacationRole.Accountant, GrantedBy = "master" });
+        await db.SaveChangesAsync();
+        var service = new VacationService(db);
+        var start = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3)).AddDays(3);
+        var created = await service.CreateForMemberAsync("member", 100, new CreateVacationRequest(1, start, start.AddDays(4)));
+        await service.DecideAsync("reviewer", created.Value.Id, new VacationDecisionRequest(VacationDecision.Approved, "Operations approved"));
+
+        var noTarget = await service.DecideAsync("reviewer", created.Value.Id, new VacationDecisionRequest(VacationDecision.Returned, "Target is required"));
+        var sameStage = await service.DecideAsync("reviewer", created.Value.Id, new VacationDecisionRequest(VacationDecision.Returned, "Cannot return to myself", VacationRole.Accountant));
+        var hrTarget = await service.DecideAsync("reviewer", created.Value.Id, new VacationDecisionRequest(VacationDecision.Returned, "HR is not an approval stage", VacationRole.HR));
+        var unavailableKeetaTarget = await service.DecideAsync("reviewer", created.Value.Id, new VacationDecisionRequest(VacationDecision.Returned, "Not a Keeta workflow", VacationRole.KeetaManager));
+
+        Assert.All([noTarget, sameStage, hrTarget, unavailableKeetaTarget], result =>
+        {
+            Assert.True(result.IsFailure);
+            Assert.Equal("Vacation.InvalidReturnTarget", result.Error.Code);
+        });
+    }
+
+    [Fact]
     public async Task KeetaRider_RequiresKeetaManagerApprovalBeforeOperation()
     {
         await using var db = CreateDbContext();
@@ -236,6 +347,7 @@ public class VacationServiceTests
         db.ApplicationUsers.AddRange(
             new ApplicationUser { Id = "member", UserName = "100", FullName = "Housing Member" },
             new ApplicationUser { Id = "reviewer", UserName = "reviewer", FullName = "Reviewer" },
+            new ApplicationUser { Id = "accountant", UserName = "accountant", FullName = "Accountant" },
             new ApplicationUser { Id = "keeta-manager", UserName = "keeta-manager", FullName = "Keeta Manager" },
             new ApplicationUser { Id = "administrator", UserName = "administrator", FullName = "Administrator" },
             new ApplicationUser { Id = "hr", UserName = "hr", FullName = "HR User" },

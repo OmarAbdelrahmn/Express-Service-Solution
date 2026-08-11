@@ -26,7 +26,8 @@ public enum VacationRequestStatus
 public enum VacationDecision
 {
     Approved = 1,
-    Rejected = 2
+    Rejected = 2,
+    Returned = 3
 }
 
 public enum VacationAmendmentStatus
@@ -96,10 +97,13 @@ public class VacationApprovalDecision
     public Guid VacationRequestId { get; set; }
     public VacationRole Role { get; set; }
     public VacationDecision Decision { get; set; }
+    public VacationRole? TargetRole { get; set; }
     public string Reason { get; set; } = string.Empty;
     public string DecidedByUserId { get; set; } = string.Empty;
     public string DecidedByName { get; set; } = string.Empty;
     public DateTime DecidedAt { get; set; } = DateTime.UtcNow.AddHours(3);
+    public bool IsSuperseded { get; set; }
+    public DateTime? SupersededAt { get; set; }
     public VacationRequest VacationRequest { get; set; } = null!;
 }
 
