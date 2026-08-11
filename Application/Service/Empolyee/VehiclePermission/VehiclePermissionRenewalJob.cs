@@ -1,4 +1,5 @@
 ﻿using Domain;
+using Domain.Auditing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -11,10 +12,13 @@ public interface IVehiclePermissionRenewalJob
 
 public class VehiclePermissionRenewalJob(
     ApplicationDbcontext db,
+    IAuditContextAccessor auditContextAccessor,
     ILogger<VehiclePermissionRenewalJob> logger) : IVehiclePermissionRenewalJob
 {
     public async Task RunAsync(CancellationToken ct = default)
     {
+        auditContextAccessor.Set(new AuditContext(
+            Guid.NewGuid(), AuditActorType.System, null, "Hangfire:VehiclePermissionRenewal", "Hangfire", "VehiclePermissionRenewal"));
         var today = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3));
 
         logger.LogInformation("VehiclePermissionRenewalJob starting for {Date}", today);

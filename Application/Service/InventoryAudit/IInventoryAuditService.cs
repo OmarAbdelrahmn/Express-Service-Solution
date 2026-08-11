@@ -1,6 +1,5 @@
 ﻿using Application.Abstraction;
 using Application.Contracts.InventoryAudit;
-using Domain.Entities.Spare;
 
 namespace Application.Service.InventoryAudit;
 

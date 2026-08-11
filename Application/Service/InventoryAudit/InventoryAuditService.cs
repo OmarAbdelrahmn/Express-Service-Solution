@@ -1,7 +1,6 @@
 ﻿using Application.Abstraction;
 using Application.Contracts.InventoryAudit;
 using Domain;
-using Domain.Entities.Spare;
 using Microsoft.EntityFrameworkCore;
 
 namespace Application.Service.InventoryAudit;
@@ -22,24 +21,30 @@ public class InventoryAuditService(ApplicationDbcontext dbcontext) : IInventoryA
         if (page < 1) page = 1;
         if (pageSize is < 1 or > 500) pageSize = 50;
 
-        var query = _dbcontext.InventoryAuditLogs.AsNoTracking().AsQueryable();
+        var query = _dbcontext.SystemAuditEvents
+            .AsNoTracking()
+            .Where(a => a.EntityType == InventoryAuditProjection.SparePartEntityType ||
+                        a.EntityType == InventoryAuditProjection.RiderAccessoryEntityType)
+            .AsQueryable();
 
         if (fromDate.HasValue)
-            query = query.Where(a => a.PerformedAt >= fromDate.Value);
+            query = query.Where(a => a.OccurredAtUtc >= ToUtc(fromDate.Value));
 
         if (toDate.HasValue)
-            query = query.Where(a => a.PerformedAt <= toDate.Value);
+            query = query.Where(a => a.OccurredAtUtc <= ToUtc(toDate.Value));
 
         if (itemType.HasValue)
-            query = query.Where(a => a.ItemType == itemType.Value);
+            query = itemType.Value == InventoryItemType.SparePart
+                ? query.Where(a => a.EntityType == InventoryAuditProjection.SparePartEntityType)
+                : query.Where(a => a.EntityType == InventoryAuditProjection.RiderAccessoryEntityType);
 
         if (!string.IsNullOrWhiteSpace(location))
-            query = query.Where(a => a.LocationBefore == location || a.LocationAfter == location);
+            query = query.Where(a => a.ScopeBefore == location || a.ScopeAfter == location);
 
         if (!string.IsNullOrWhiteSpace(performedBy))
-            query = query.Where(a => a.PerformedBy == performedBy);
+            query = query.Where(a => a.ActorName == performedBy);
 
-        query = query.OrderByDescending(a => a.PerformedAt);
+        query = query.OrderByDescending(a => a.OccurredAtUtc);
 
         var totalCount = await query.CountAsync();
 
@@ -52,24 +57,10 @@ public class InventoryAuditService(ApplicationDbcontext dbcontext) : IInventoryA
             totalCount,
             page,
             pageSize,
-            items.Select(MapToResponse));
+            items.Select(InventoryAuditProjection.ToResponse));
 
         return Result.Success(response);
     }
 
-    private static InventoryAuditLogResponse MapToResponse(InventoryAuditLog log) => new(
-        log.Id,
-        log.ItemType.ToString(),
-        log.ItemId,
-        log.ItemName,
-        log.Action.ToString(),
-        log.LocationBefore,
-        log.LocationAfter,
-        log.QuantityBefore,
-        log.QuantityAfter,
-        log.PriceBefore,
-        log.PriceAfter,
-        log.PerformedBy,
-        log.PerformedAt,
-        log.Notes);
+    private static DateTimeOffset ToUtc(DateTime value) => new(value.ToUniversalTime());
 }

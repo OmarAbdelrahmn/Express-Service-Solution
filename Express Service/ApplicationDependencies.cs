@@ -43,6 +43,7 @@ using Application.Service.RiderAccessory;
 using Application.Service.Riders;
 using Application.Service.SparePart;
 using Application.Service.SupplierSer;
+using Application.Service.SystemAudit;
 using Application.Service.temp;
 using Application.Service.OutRiderInfos;
 using Application.Service.OutageShiftPerformances;
@@ -55,6 +56,7 @@ using Application.Service.Wallet;
 using DocumentFormat.OpenXml.Office2016.Drawing.ChartDrawing;
 using Asp.Versioning;
 using Domain;
+using Domain.Auditing;
 using Domain.Entities;
 using FluentValidation;
 using Hangfire;
@@ -77,6 +79,7 @@ public static class ApplicationDependencies
     {
         Services.AddControllers();
         Services.AddEndpointsApiExplorer();
+        Services.AddScoped<IAuditContextAccessor, AuditContextAccessor>();
         Services.AddScoped<IJwtProvider, JwtProvider>();
         Services.AddScoped<IAuthService, AuthService>();
         Services.AddScoped<IUserService, UserServices>();
@@ -113,6 +116,7 @@ public static class ApplicationDependencies
         Services.AddScoped<ISparePartService, SparePartService>();
         Services.AddScoped<IRiderAccessoryService, RiderAccessoryService>();
         Services.AddScoped<IInventoryAuditService, InventoryAuditService>();
+        Services.AddScoped<ISystemAuditService, SystemAuditService>();
         Services.AddScoped<ITransferService, TransferService>();
         Services.AddScoped<IBillService, BillService>();
         Services.AddScoped<ISupplierService, SupplierService>();

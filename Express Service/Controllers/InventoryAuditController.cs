@@ -1,5 +1,5 @@
 ﻿using Application.Service.InventoryAudit;
-using Domain.Entities.Spare;
+using Application.Contracts.InventoryAudit;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 

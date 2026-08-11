@@ -1,4 +1,5 @@
 ﻿using Application.Service.Import;
+using Domain.Auditing;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -78,6 +79,7 @@ public class BackgroundImportService : IBackgroundImportService
 
                 using (var scope = _serviceScopeFactory.CreateScope())
                 {
+                    SetAuditContext(scope.ServiceProvider, jobId, uploadedBy, "RiderVerification");
                     var importService = scope.ServiceProvider.GetRequiredService<IImportService>();
 
                     await ProcessVerificationJob(
@@ -385,6 +387,7 @@ public class BackgroundImportService : IBackgroundImportService
 
                 using (var scope = _serviceScopeFactory.CreateScope())
                 {
+                    SetAuditContext(scope.ServiceProvider, jobId, uploadedBy, "WorkingIdSync");
                     var importService = scope.ServiceProvider.GetRequiredService<IImportService>();
 
                     await ProcessWorkingIdSyncJob(
@@ -669,6 +672,7 @@ public class BackgroundImportService : IBackgroundImportService
 
                 using (var scope = _serviceScopeFactory.CreateScope())
                 {
+                    SetAuditContext(scope.ServiceProvider, jobId, uploadedBy, "RiderShiftImport");
                     var importService = scope.ServiceProvider.GetRequiredService<IImportService>();
 
                     await ProcessRiderShiftImportJob(
@@ -893,6 +897,18 @@ public class BackgroundImportService : IBackgroundImportService
         }
     }
 
+    private static void SetAuditContext(IServiceProvider serviceProvider, string jobId, string uploadedBy, string operationName)
+    {
+        var operationId = Guid.TryParse(jobId, out var parsed) ? parsed : Guid.NewGuid();
+        serviceProvider.GetRequiredService<IAuditContextAccessor>().Set(new AuditContext(
+            operationId,
+            AuditActorType.BackgroundJob,
+            uploadedBy,
+            uploadedBy,
+            "BackgroundImport",
+            operationName,
+            jobId));
+    }
 
 
 }

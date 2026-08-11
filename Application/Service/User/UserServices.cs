@@ -68,14 +68,19 @@ public class UserServices(UserManager<ApplicationUser> manager) : IUserService
 
     public async Task<Result> UpdateUserProfile(string id, UpdateUserProfileRequest request)
     {
-        //var user = await manager.FindByIdAsync(id);
-        //user = request.Adapt(user);
-        //await manager.UpdateAsync(user!);
-        await manager.Users
-            .Where(i => i.Id == id)
-            .ExecuteUpdateAsync(set =>
-            set.SetProperty(x => x.FullName, request.FullName)
-               .SetProperty(x => x.Address, request.Address));
+        var user = await manager.FindByIdAsync(id);
+        if (user is null)
+            return Result.Failure(UserErrors.UserNotFound);
+
+        user.FullName = request.FullName;
+        user.Address = request.Address;
+
+        var updateResult = await manager.UpdateAsync(user);
+        if (!updateResult.Succeeded)
+        {
+            var error = updateResult.Errors.First();
+            return Result.Failure(new Error(error.Code, error.Description, StatusCodes.Status400BadRequest));
+        }
 
         return Result.Success();
     }

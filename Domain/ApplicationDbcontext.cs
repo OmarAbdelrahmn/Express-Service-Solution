@@ -7,18 +7,35 @@ using Domain.Entities.AccountingCore;
 using Domain.Entities.FinancialOperations;
 using Domain.Entities.AccountingPlatform;
 using Domain.Entities.Vacation;
+using Domain.Auditing;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
+using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Storage;
 using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
+using System.Text.Json;
 
 namespace Domain;
 
 public class ApplicationDbcontext : IdentityDbContext<ApplicationUser, ApplicationRole, string>
 {
+    private static readonly JsonSerializerOptions AuditJsonOptions = new(JsonSerializerDefaults.Web);
+    private readonly IAuditContextAccessor auditContextAccessor;
+
     [SetsRequiredMembers]
-    public ApplicationDbcontext(DbContextOptions<ApplicationDbcontext> options) : base(options)
+    public ApplicationDbcontext(DbContextOptions<ApplicationDbcontext> options)
+        : this(options, new AuditContextAccessor())
     {
+    }
+
+    [SetsRequiredMembers]
+    public ApplicationDbcontext(
+        DbContextOptions<ApplicationDbcontext> options,
+        IAuditContextAccessor auditContextAccessor) : base(options)
+    {
+        this.auditContextAccessor = auditContextAccessor;
     }
 
     public required DbSet<ApplicationUser> ApplicationUsers { get; set; }
@@ -127,7 +144,6 @@ public class ApplicationDbcontext : IdentityDbContext<ApplicationUser, Applicati
     public required DbSet<RiderAccessory> RiderAccessories { get; set; }
     public required DbSet<RiderAccessoryUsage> RiderAccessoryUsages { get; set; }
     public required DbSet<SparePartUsage> SparePartUsages { get; set; }
-    public required DbSet<InventoryAuditLog> InventoryAuditLogs { get; set; }
     public required DbSet<Supplier> Suppliers { get; set; }
     public required DbSet<Bill> Bills { get; set; }
     public required DbSet<BillItem> BillItems { get; set; }
@@ -146,6 +162,7 @@ public class ApplicationDbcontext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<VehiclePetrolCost>  VehiclePetrolCosts  { get; set; }
     public DbSet<RiderPetrolCost> RiderPetrolCosts { get; set; }
     public DbSet<EmployeeOrder> EmployeeOrders{ get; set; }
+    public DbSet<SystemAuditEvent> SystemAuditEvents { get; set; }
 
     public DbSet<TransporterShift> TransporterShifts { get; set; }
     public DbSet<OutRiderInfo> OutRiderInfos { get; set; }
@@ -442,5 +459,301 @@ public class ApplicationDbcontext : IdentityDbContext<ApplicationUser, Applicati
 
 
     }
+
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        var candidates = CaptureAuditCandidates();
+        if (candidates.Count == 0)
+            return base.SaveChanges(acceptAllChangesOnSuccess);
+
+        if (!acceptAllChangesOnSuccess)
+            throw new InvalidOperationException("Audited saves must accept changes on success.");
+
+        IDbContextTransaction? transaction = null;
+        try
+        {
+            if (Database.IsRelational() && Database.CurrentTransaction is null)
+                transaction = Database.BeginTransaction();
+
+            var result = base.SaveChanges(true);
+            AddAuditEvents(candidates);
+            base.SaveChanges(true);
+            transaction?.Commit();
+            return result;
+        }
+        catch
+        {
+            transaction?.Rollback();
+            throw;
+        }
+        finally
+        {
+            transaction?.Dispose();
+        }
+    }
+
+    public override async Task<int> SaveChangesAsync(
+        bool acceptAllChangesOnSuccess,
+        CancellationToken cancellationToken = default)
+    {
+        var candidates = CaptureAuditCandidates();
+        if (candidates.Count == 0)
+            return await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+
+        if (!acceptAllChangesOnSuccess)
+            throw new InvalidOperationException("Audited saves must accept changes on success.");
+
+        IDbContextTransaction? transaction = null;
+        try
+        {
+            if (Database.IsRelational() && Database.CurrentTransaction is null)
+                transaction = await Database.BeginTransactionAsync(cancellationToken);
+
+            var result = await base.SaveChangesAsync(true, cancellationToken);
+            AddAuditEvents(candidates);
+            await base.SaveChangesAsync(true, cancellationToken);
+            if (transaction is not null)
+                await transaction.CommitAsync(cancellationToken);
+            return result;
+        }
+        catch
+        {
+            if (transaction is not null)
+                await transaction.RollbackAsync(cancellationToken);
+            throw;
+        }
+        finally
+        {
+            if (transaction is not null)
+                await transaction.DisposeAsync();
+        }
+    }
+
+    private List<AuditCandidate> CaptureAuditCandidates()
+    {
+        ChangeTracker.DetectChanges();
+
+        var candidates = new List<AuditCandidate>();
+        foreach (var entry in ChangeTracker.Entries())
+        {
+            if (entry.State is not (EntityState.Added or EntityState.Modified or EntityState.Deleted) || !ShouldAudit(entry))
+                continue;
+
+            var action = entry.State switch
+            {
+                EntityState.Added => SystemAuditAction.Create,
+                EntityState.Modified => SystemAuditAction.Update,
+                EntityState.Deleted => SystemAuditAction.Delete,
+                _ => throw new InvalidOperationException("Unexpected audited entity state.")
+            };
+
+            var allProperties = GetAuditedProperties(entry).ToList();
+            var properties = allProperties;
+            if (action == SystemAuditAction.Update)
+            {
+                properties = properties
+                    .Where(property => property.IsModified && !ValuesEqual(property.OriginalValue, property.CurrentValue))
+                    .ToList();
+
+                if (properties.Count == 0)
+                    continue;
+            }
+
+            var oldValues = action is SystemAuditAction.Update or SystemAuditAction.Delete
+                ? ReadValues(properties, useOriginalValues: true)
+                : new Dictionary<string, object?>();
+            var newValues = action == SystemAuditAction.Create
+                ? new Dictionary<string, object?>()
+                : action == SystemAuditAction.Update
+                    ? ReadValues(properties, useOriginalValues: false)
+                    : new Dictionary<string, object?>();
+            var (scopeTypeBefore, scopeBefore) = action is SystemAuditAction.Update or SystemAuditAction.Delete
+                ? GetScope(ReadValues(allProperties, useOriginalValues: true))
+                : (null, null);
+            var (scopeTypeAfter, scopeAfter) = action is SystemAuditAction.Create or SystemAuditAction.Update
+                ? GetScope(ReadValues(allProperties, useOriginalValues: false))
+                : (null, null);
+
+            candidates.Add(new AuditCandidate(
+                entry.Entity,
+                entry.Metadata,
+                action,
+                properties.Select(x => x.Metadata.Name).ToArray(),
+                oldValues,
+                newValues,
+                action == SystemAuditAction.Delete ? BuildEntityKey(entry, useOriginalValues: true) : null,
+                GetDisplayName(
+                    ReadValues(allProperties, useOriginalValues: false),
+                    ReadValues(allProperties, useOriginalValues: true)),
+                scopeTypeBefore ?? scopeTypeAfter,
+                scopeBefore,
+                scopeAfter));
+        }
+
+        return candidates;
+    }
+
+    private void AddAuditEvents(IEnumerable<AuditCandidate> candidates)
+    {
+        var context = auditContextAccessor.Current;
+        var timestamp = DateTimeOffset.UtcNow;
+        var events = new List<SystemAuditEvent>();
+
+        foreach (var candidate in candidates)
+        {
+            var entry = Entry(candidate.Entity);
+            var newValues = candidate.Action == SystemAuditAction.Create
+                ? ReadValues(GetAuditedProperties(entry)
+                    .Where(property => candidate.PropertyNames.Contains(property.Metadata.Name)), useOriginalValues: false)
+                : candidate.NewValues;
+            var entityKey = candidate.EntityKey ?? BuildEntityKey(entry, useOriginalValues: false);
+
+            events.Add(new SystemAuditEvent
+            {
+                OperationId = context.OperationId,
+                OccurredAtUtc = timestamp,
+                ActorType = context.ActorType,
+                ActorUserId = context.ActorUserId,
+                ActorName = context.ActorName,
+                Source = context.Source,
+                OperationName = context.OperationName,
+                CorrelationId = context.CorrelationId,
+                HttpMethod = context.HttpMethod,
+                RequestPath = context.RequestPath,
+                IpAddress = context.IpAddress,
+                EntityType = candidate.Metadata.ClrType.FullName ?? candidate.Metadata.Name,
+                EntityKey = entityKey,
+                EntityDisplayName = candidate.EntityDisplayName,
+                Action = candidate.Action,
+                ChangedFieldsJson = JsonSerializer.Serialize(candidate.PropertyNames.Order(StringComparer.Ordinal), AuditJsonOptions),
+                OldValuesJson = candidate.OldValues.Count == 0 ? null : JsonSerializer.Serialize(candidate.OldValues, AuditJsonOptions),
+                NewValuesJson = newValues.Count == 0 ? null : JsonSerializer.Serialize(newValues, AuditJsonOptions),
+                ScopeType = candidate.ScopeType,
+                ScopeBefore = candidate.ScopeBefore,
+                ScopeAfter = candidate.ScopeAfter
+            });
+        }
+
+        SystemAuditEvents.AddRange(events);
+    }
+
+    private static bool ShouldAudit(EntityEntry entry)
+    {
+        var type = entry.Metadata.ClrType;
+        var typeName = type.Name;
+        var nameSpace = type.Namespace ?? string.Empty;
+
+        if (type == typeof(SystemAuditEvent) ||
+            type.GetCustomAttribute<AuditIgnoreAttribute>() is not null)
+            return false;
+
+        if (nameSpace.StartsWith("Domain.Entities.AccountingCore", StringComparison.Ordinal) ||
+            nameSpace.StartsWith("Domain.Entities.AccountingPlatform", StringComparison.Ordinal) ||
+            nameSpace.StartsWith("Domain.Entities.FinancialOperations", StringComparison.Ordinal))
+            return false;
+
+        if (typeName.StartsWith("Temp", StringComparison.Ordinal) ||
+            typeName is "DailyReportLog" or "RefreshToken" or "InventoryAuditLog" ||
+            typeName.StartsWith("IdentityUserToken", StringComparison.Ordinal) ||
+            typeName.StartsWith("IdentityUserLogin", StringComparison.Ordinal) ||
+            typeName.StartsWith("IdentityUserClaim", StringComparison.Ordinal))
+            return false;
+
+        return true;
+    }
+
+    private static IEnumerable<PropertyEntry> GetAuditedProperties(EntityEntry entry) => entry.Properties
+        .Where(property => property.Metadata.PropertyInfo?.GetCustomAttribute<AuditIgnoreAttribute>() is null)
+        .Where(property => property.Metadata.ClrType != typeof(byte[]) && property.Metadata.ClrType != typeof(Stream));
+
+    private static Dictionary<string, object?> ReadValues(
+        IEnumerable<PropertyEntry> properties,
+        bool useOriginalValues)
+    {
+        var result = new Dictionary<string, object?>(StringComparer.Ordinal);
+        foreach (var property in properties)
+        {
+            var value = useOriginalValues ? property.OriginalValue : property.CurrentValue;
+            result[property.Metadata.Name] = IsSensitive(property.Metadata.Name) ? "[REDACTED]" : value;
+        }
+
+        return result;
+    }
+
+    private static bool IsSensitive(string propertyName) =>
+        propertyName.Contains("password", StringComparison.OrdinalIgnoreCase) ||
+        propertyName.Contains("hash", StringComparison.OrdinalIgnoreCase) ||
+        propertyName.Contains("token", StringComparison.OrdinalIgnoreCase) ||
+        propertyName.Contains("secret", StringComparison.OrdinalIgnoreCase) ||
+        propertyName.Contains("securitystamp", StringComparison.OrdinalIgnoreCase) ||
+        propertyName.Contains("concurrencystamp", StringComparison.OrdinalIgnoreCase) ||
+        propertyName.Contains("authenticator", StringComparison.OrdinalIgnoreCase);
+
+    private static bool ValuesEqual(object? left, object? right) => Equals(left, right);
+
+    private static string BuildEntityKey(EntityEntry entry, bool useOriginalValues)
+    {
+        var key = entry.Metadata.FindPrimaryKey();
+        if (key is null)
+            return "(keyless)";
+
+        return string.Join("|", key.Properties.Select(property =>
+        {
+            var value = useOriginalValues
+                ? entry.Property(property.Name).OriginalValue
+                : entry.Property(property.Name).CurrentValue;
+            return $"{property.Name}={JsonSerializer.Serialize(value, AuditJsonOptions)}";
+        }));
+    }
+
+    private static string? GetDisplayName(
+        IReadOnlyDictionary<string, object?> newValues,
+        IReadOnlyDictionary<string, object?> oldValues)
+    {
+        foreach (var name in new[] { "Name", "FullName", "WorkingId", "EmployeeIqamaNo", "IqamaNo", "VehicleNumber" })
+        {
+            if (TryGetString(newValues, name, out var value) || TryGetString(oldValues, name, out value))
+                return value;
+        }
+
+        return null;
+    }
+
+    private static (string? Type, string? Value) GetScope(IReadOnlyDictionary<string, object?> values)
+    {
+        if (TryGetString(values, "Location", out var location))
+            return ("Location", location);
+        if (TryGetString(values, "HousingId", out var housingId))
+            return ("Housing", housingId);
+        if (TryGetString(values, "HousingName", out var housingName))
+            return ("Housing", housingName);
+
+        return (null, null);
+    }
+
+    private static bool TryGetString(IReadOnlyDictionary<string, object?> values, string name, out string? value)
+    {
+        if (values.TryGetValue(name, out var raw) && raw is not null)
+        {
+            value = Convert.ToString(raw, System.Globalization.CultureInfo.InvariantCulture);
+            return !string.IsNullOrWhiteSpace(value) && value != "[REDACTED]";
+        }
+
+        value = null;
+        return false;
+    }
+
+    private sealed record AuditCandidate(
+        object Entity,
+        IEntityType Metadata,
+        SystemAuditAction Action,
+        IReadOnlyList<string> PropertyNames,
+        Dictionary<string, object?> OldValues,
+        Dictionary<string, object?> NewValues,
+        string? EntityKey,
+        string? EntityDisplayName,
+        string? ScopeType,
+        string? ScopeBefore,
+        string? ScopeAfter);
 
 }

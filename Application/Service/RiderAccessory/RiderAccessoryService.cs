@@ -193,10 +193,6 @@ public class RiderAccessoryService(ApplicationDbcontext dbcontext) : IRiderAcces
         await _dbcontext.RiderAccessories.AddAsync(accessory);
         await _dbcontext.SaveChangesAsync();
 
-        // Log the manual creation now that the entity has its Id.
-        InventoryAuditLogger.LogAccessoryCreate(_dbcontext, accessory, performedBy);
-        await _dbcontext.SaveChangesAsync();
-
         return Result.Success(MapToResponse(accessory));
     }
 
@@ -208,15 +204,10 @@ public class RiderAccessoryService(ApplicationDbcontext dbcontext) : IRiderAcces
             return Result.Failure<RiderAccessoryResponse>(
                 new Error("NotFound", "Accessory not found", 404));
 
-        // Snapshot values before they're overwritten so we can log a before/after diff.
-        var before = RiderAccessorySnapshot.From(accessory);
-
         accessory.Name = request.Name;
         accessory.Quantity = request.Quantity;
         accessory.Price = request.Price;
         accessory.Location = request.Location;
-
-        InventoryAuditLogger.LogAccessoryUpdate(_dbcontext, before, accessory, performedBy);
 
         await _dbcontext.SaveChangesAsync();
 
@@ -230,8 +221,6 @@ public class RiderAccessoryService(ApplicationDbcontext dbcontext) : IRiderAcces
         if (accessory == null)
             return Result.Failure(
                 new Error("NotFound", "Accessory not found", 404));
-
-        InventoryAuditLogger.LogAccessoryDelete(_dbcontext, accessory, performedBy);
 
         _dbcontext.RiderAccessories.Remove(accessory);
         await _dbcontext.SaveChangesAsync();

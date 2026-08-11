@@ -1211,10 +1211,6 @@ public class SparePartService(ApplicationDbcontext dbcontext) : ISparePartServic
         await _dbcontext.SpareParts.AddAsync(sparePart);
         await _dbcontext.SaveChangesAsync();
 
-        // Log the manual creation now that the entity has its Id.
-        InventoryAuditLogger.LogSparePartCreate(_dbcontext, sparePart, performedBy);
-        await _dbcontext.SaveChangesAsync();
-
         return Result.Success(MapToResponse(sparePart));
     }
 
@@ -1226,15 +1222,10 @@ public class SparePartService(ApplicationDbcontext dbcontext) : ISparePartServic
             return Result.Failure<SparePartResponse>(
                 new Error("NotFound", "Spare part not found", 404));
 
-        // Snapshot values before they're overwritten so we can log a before/after diff.
-        var before = SparePartSnapshot.From(sparePart);
-
         sparePart.Name = request.Name;
         sparePart.Quantity = request.Quantity;
         sparePart.Price = request.Price;
         sparePart.Location = request.Location;
-
-        InventoryAuditLogger.LogSparePartUpdate(_dbcontext, before, sparePart, performedBy);
 
         await _dbcontext.SaveChangesAsync();
 
@@ -1248,8 +1239,6 @@ public class SparePartService(ApplicationDbcontext dbcontext) : ISparePartServic
         if (sparePart == null)
             return Result.Failure(
                 new Error("NotFound", "Spare part not found", 404));
-
-        InventoryAuditLogger.LogSparePartDelete(_dbcontext, sparePart, performedBy);
 
         _dbcontext.SpareParts.Remove(sparePart);
         await _dbcontext.SaveChangesAsync();

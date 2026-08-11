@@ -5,8 +5,14 @@ using System.Text;
 namespace Application.Contracts.InventoryAudit;
 
 
+public enum InventoryItemType
+{
+    SparePart = 1,
+    RiderAccessory = 2
+}
+
 public record InventoryAuditLogResponse(
-    int Id,
+    long Id,
     string ItemType,        // "SparePart" | "RiderAccessory"
     int ItemId,
     string ItemName,

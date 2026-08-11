@@ -3,8 +3,10 @@ using Application.Service.DailyReport;
 using Application.Service.AccountingOutbox;
 using Application.Service.VehiclePermission;
 using Application.Service.Vacation;
+using Domain.Auditing;
 using Express_Service;
 using Hangfire;
+using System.Security.Claims;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -175,6 +177,27 @@ app.UseCors("AllowFrontend");
 app.UseRateLimiter();
 
 app.UseAuthentication();
+
+app.Use(async (context, next) =>
+{
+    var actorUserId = context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value
+        ?? context.User.FindFirst("sub")?.Value;
+    var actorName = context.User.Identity?.Name ?? actorUserId ?? "Anonymous";
+    var auditContext = context.RequestServices.GetRequiredService<IAuditContextAccessor>();
+    auditContext.Set(new AuditContext(
+        Guid.NewGuid(),
+        string.IsNullOrWhiteSpace(actorUserId) ? AuditActorType.System : AuditActorType.User,
+        actorUserId,
+        actorName,
+        "Http",
+        $"{context.Request.Method} {context.Request.Path}",
+        context.TraceIdentifier,
+        context.Request.Method,
+        context.Request.Path,
+        context.Connection.RemoteIpAddress?.ToString()));
+
+    await next();
+});
 
 app.UseAuthorization();
 

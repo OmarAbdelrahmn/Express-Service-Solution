@@ -6,6 +6,7 @@ using Application.Contracts.RiderAccessoryCon;
 using Application.Contracts.SparePartCo;
 using Application.Contracts.SupplierCon;
 using Application.Service.Empolyee;
+using Application.Service.InventoryAudit;
 using Application.Service.Reports;
 using Domain;
 using Domain.Entities;
@@ -4942,36 +4943,23 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
 
         var housing = housingResult.Value;
 
-        var query = context.InventoryAuditLogs
+        var query = context.SystemAuditEvents
             .AsNoTracking()
-            .Where(a => a.LocationBefore == housing.Name || a.LocationAfter == housing.Name)
+            .Where(a => (a.EntityType == InventoryAuditProjection.SparePartEntityType ||
+                         a.EntityType == InventoryAuditProjection.RiderAccessoryEntityType) &&
+                        (a.ScopeBefore == housing.Name || a.ScopeAfter == housing.Name))
             .AsQueryable();
 
         if (fromDate.HasValue)
-            query = query.Where(a => a.PerformedAt >= fromDate.Value);
+            query = query.Where(a => a.OccurredAtUtc >= new DateTimeOffset(fromDate.Value.ToUniversalTime()));
         if (toDate.HasValue)
-            query = query.Where(a => a.PerformedAt <= toDate.Value);
+            query = query.Where(a => a.OccurredAtUtc <= new DateTimeOffset(toDate.Value.ToUniversalTime()));
 
         var logs = await query
-            .OrderByDescending(a => a.PerformedAt)
+            .OrderByDescending(a => a.OccurredAtUtc)
             .ToListAsync();
 
-        var response = logs.Select(a => new InventoryAuditLogResponse(
-            a.Id,
-            a.ItemType.ToString(),
-            a.ItemId,
-            a.ItemName,
-            a.Action.ToString(),
-            a.LocationBefore,
-            a.LocationAfter,
-            a.QuantityBefore,
-            a.QuantityAfter,
-            a.PriceBefore,
-            a.PriceAfter,
-            a.PerformedBy,
-            a.PerformedAt,
-            a.Notes
-        ));
+        var response = logs.Select(InventoryAuditProjection.ToResponse);
 
         return Result.Success(response);
     }
