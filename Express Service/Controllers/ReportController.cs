@@ -13,6 +13,29 @@ public class ReportController(IReportService service) : ControllerBase
 
     private readonly IReportService service = service;
 
+    /// <summary>
+    /// Returns every Hunger and Keeta rider for a selected month range in one year.
+    /// Each rider has one entry per requested month, including zero-value months.
+    /// Hunger target: 8 hours × 26 days = 208 hours; Keeta target: 9 hours × 26 days = 234 hours.
+    /// </summary>
+    [HttpGet("riders/monthly-performance")]
+    public async Task<IActionResult> GetRidersMonthlyPerformance(
+        [FromQuery] int year,
+        [FromQuery] int fromMonth,
+        [FromQuery] int toMonth,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await service.GetRidersMonthlyPerformanceRangeAsync(
+            year,
+            fromMonth,
+            toMonth,
+            cancellationToken);
+
+        return result.IsSuccess
+            ? Ok(result.Value)
+            : result.ToProblem();
+    }
+
 
 
     // ── POST /api/Report/rider-recent-months/from-file

@@ -6,6 +6,39 @@
 
 namespace Application.Contracts.ReportCo;
 
+/// <summary>
+/// Monthly performance for Hunger and Keeta riders across a selected range of
+/// months in one calendar year.
+/// </summary>
+public record RidersMonthlyPerformanceRangeReport(
+    int Year,
+    int FromMonth,
+    int ToMonth,
+    int HungerMonthlyWorkingHoursTarget,
+    int KeetaMonthlyWorkingHoursTarget,
+    List<RiderMonthlyPerformanceRangeItem> Riders
+);
+
+public record RiderMonthlyPerformanceRangeItem(
+    int RiderId,
+    long IqamaNo,
+    string RiderNameAR,
+    string RiderNameEN,
+    string? WorkingId,
+    int CompanyId,
+    string CompanyName,
+    List<RiderMonthlyPlatformPerformance> Months
+);
+
+public record RiderMonthlyPlatformPerformance(
+    int Year,
+    int Month,
+    string MonthName,
+    int TotalAcceptedOrders,
+    int TotalRealRejectedOrders,
+    int WorkingHoursTarget
+);
+
 public record DailyCompanyShiftSummary(
     DateOnly ShiftDate,
     int CompanyId,

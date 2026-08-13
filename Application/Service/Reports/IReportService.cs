@@ -11,6 +11,12 @@ namespace Application.Service.Reports;
 public interface IReportService
 {
 
+    Task<Result<RidersMonthlyPerformanceRangeReport>> GetRidersMonthlyPerformanceRangeAsync(
+        int year,
+        int fromMonth,
+        int toMonth,
+        CancellationToken cancellationToken = default);
+
     Task<Result<RiderRecentMonthsResult>> GetRecentMonthsFromExcelAsync(
        Stream excelInputStream,
        CancellationToken cancellationToken = default);

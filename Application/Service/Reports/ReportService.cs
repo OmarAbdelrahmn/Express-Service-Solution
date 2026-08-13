@@ -38,6 +38,133 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
     private const int FIRST_CRITICAL_DAYS = 3;
     private const int LAST_CRITICAL_DAYS = 4;
 
+    private const int HungerCompanyId = 1;
+    private const int KeetaCompanyId = 2;
+    private const int HungerMonthlyWorkingHoursTarget = 8 * 26;
+    private const int KeetaMonthlyWorkingHoursTarget = 9 * 26;
+
+    public async Task<Result<RidersMonthlyPerformanceRangeReport>> GetRidersMonthlyPerformanceRangeAsync(
+        int year,
+        int fromMonth,
+        int toMonth,
+        CancellationToken cancellationToken = default)
+    {
+        if (year < 1 || fromMonth is < 1 or > 12 || toMonth is < 1 or > 12 || fromMonth > toMonth)
+        {
+            return Result.Failure<RidersMonthlyPerformanceRangeReport>(
+                new Error(
+                    "invalid_input",
+                    "Year must be valid and months must be between 1 and 12, with fromMonth less than or equal to toMonth.",
+                    StatusCodes.Status400BadRequest));
+        }
+
+        var rangeStart = new DateOnly(year, fromMonth, 1);
+        var rangeEnd = new DateOnly(year, toMonth, 1).AddMonths(1).AddDays(-1);
+
+        var shifts = await _dbcontext.RiderShifts
+            .AsNoTracking()
+            .Where(s => (s.CompanyId == HungerCompanyId || s.CompanyId == KeetaCompanyId)
+                        && s.ShiftDate >= rangeStart
+                        && s.ShiftDate <= rangeEnd)
+            .Select(s => new
+            {
+                s.RiderId,
+                s.CompanyId,
+                s.ShiftDate,
+                s.AcceptedDailyOrders,
+                s.RealRejectedDailyOrders
+            })
+            .ToListAsync(cancellationToken);
+
+        var currentCompanyRiders = await _dbcontext.RiderDetails
+            .AsNoTracking()
+            .Include(r => r.Employee)
+            .Where(r => r.CompanyId == HungerCompanyId || r.CompanyId == KeetaCompanyId)
+            .ToListAsync(cancellationToken);
+
+        var riderIds = shifts.Select(s => s.RiderId)
+            .Concat(currentCompanyRiders.Select(r => r.Id))
+            .Distinct()
+            .ToList();
+
+        var ridersById = currentCompanyRiders
+            .ToDictionary(r => r.Id);
+
+        var missingRiderIds = riderIds.Except(ridersById.Keys).ToList();
+        if (missingRiderIds.Count > 0)
+        {
+            var historicalRiders = await _dbcontext.RiderDetails
+                .AsNoTracking()
+                .Include(r => r.Employee)
+                .Where(r => missingRiderIds.Contains(r.Id))
+                .ToListAsync(cancellationToken);
+
+            foreach (var rider in historicalRiders)
+                ridersById[rider.Id] = rider;
+        }
+
+        var performanceByRiderMonth = shifts
+            .GroupBy(s => new { s.RiderId, s.CompanyId, s.ShiftDate.Year, s.ShiftDate.Month })
+            .ToDictionary(
+                g => (g.Key.RiderId, g.Key.CompanyId, g.Key.Year, g.Key.Month),
+                g => new
+                {
+                    AcceptedOrders = g.Sum(s => s.AcceptedDailyOrders),
+                    RealRejectedOrders = g.Sum(s => s.RealRejectedDailyOrders)
+                });
+
+        var riderCompanyPairs = shifts
+            .Select(s => (RiderId: s.RiderId, CompanyId: s.CompanyId))
+            .Concat(currentCompanyRiders.Select(r => (RiderId: r.Id, CompanyId: r.CompanyId)))
+            .Distinct()
+            .Where(pair => ridersById.ContainsKey(pair.RiderId))
+            .OrderBy(pair => pair.CompanyId)
+            .ThenBy(pair => ridersById[pair.RiderId].Employee.NameAR)
+            .ToList();
+
+        var results = riderCompanyPairs.Select(pair =>
+        {
+            var rider = ridersById[pair.RiderId];
+            var workingHoursTarget = pair.CompanyId == HungerCompanyId
+                ? HungerMonthlyWorkingHoursTarget
+                : KeetaMonthlyWorkingHoursTarget;
+
+            var months = Enumerable.Range(fromMonth, toMonth - fromMonth + 1)
+                .Select(month =>
+                {
+                    performanceByRiderMonth.TryGetValue(
+                        (pair.RiderId, pair.CompanyId, year, month), out var performance);
+
+                    return new RiderMonthlyPlatformPerformance(
+                        year,
+                        month,
+                        new DateOnly(year, month, 1).ToString("MMMM"),
+                        performance?.AcceptedOrders ?? 0,
+                        performance?.RealRejectedOrders ?? 0,
+                        workingHoursTarget);
+                })
+                .ToList();
+
+            return new RiderMonthlyPerformanceRangeItem(
+                rider.Id,
+                rider.EmployeeIqamaNo,
+                rider.Employee.NameAR,
+                rider.Employee.NameEN,
+                rider.WorkingId,
+                pair.CompanyId,
+                pair.CompanyId == HungerCompanyId ? "Hunger" : "Keeta",
+                months);
+        }).ToList();
+
+        return Result.Success(new RidersMonthlyPerformanceRangeReport(
+            year,
+            fromMonth,
+            toMonth,
+            HungerMonthlyWorkingHoursTarget,
+            KeetaMonthlyWorkingHoursTarget,
+            results));
+    }
+
 
     public async Task<Result<RiderRecentMonthsResult>> GetRecentMonthsFromExcelAsync(
         Stream excelInputStream,
