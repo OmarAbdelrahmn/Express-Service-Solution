@@ -14,8 +14,6 @@ public record RidersMonthlyPerformanceRangeReport(
     int Year,
     int FromMonth,
     int ToMonth,
-    int HungerMonthlyWorkingHoursTarget,
-    int KeetaMonthlyWorkingHoursTarget,
     List<RiderMonthlyPerformanceRangeItem> Riders
 );
 
@@ -36,7 +34,7 @@ public record RiderMonthlyPlatformPerformance(
     string MonthName,
     int TotalAcceptedOrders,
     int TotalRealRejectedOrders,
-    int WorkingHoursTarget
+    float TotalWorkingHours
 );
 
 public record DailyCompanyShiftSummary(

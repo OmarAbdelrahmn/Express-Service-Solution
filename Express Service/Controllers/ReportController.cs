@@ -16,7 +16,8 @@ public class ReportController(IReportService service) : ControllerBase
     /// <summary>
     /// Returns every Hunger and Keeta rider for a selected month range in one year.
     /// Each rider has one entry per requested month, including zero-value months.
-    /// Hunger target: 8 hours × 26 days = 208 hours; Keeta target: 9 hours × 26 days = 234 hours.
+    /// Monthly hours are calculated from the rider's actual shifts.
+    /// Riders without an accepted order in the selected period are excluded.
     /// </summary>
     [HttpGet("riders/monthly-performance")]
     public async Task<IActionResult> GetRidersMonthlyPerformance(

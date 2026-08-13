@@ -40,8 +40,6 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
 
     private const int HungerCompanyId = 1;
     private const int KeetaCompanyId = 2;
-    private const int HungerMonthlyWorkingHoursTarget = 8 * 26;
-    private const int KeetaMonthlyWorkingHoursTarget = 9 * 26;
 
     public async Task<Result<RidersMonthlyPerformanceRangeReport>> GetRidersMonthlyPerformanceRangeAsync(
         int year,
@@ -72,36 +70,22 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                 s.CompanyId,
                 s.ShiftDate,
                 s.AcceptedDailyOrders,
-                s.RealRejectedDailyOrders
+                s.RealRejectedDailyOrders,
+                s.WorkingHours
             })
             .ToListAsync(cancellationToken);
 
-        var currentCompanyRiders = await _dbcontext.RiderDetails
-            .AsNoTracking()
-            .Include(r => r.Employee)
-            .Where(r => r.CompanyId == HungerCompanyId || r.CompanyId == KeetaCompanyId)
-            .ToListAsync(cancellationToken);
-
-        var riderIds = shifts.Select(s => s.RiderId)
-            .Concat(currentCompanyRiders.Select(r => r.Id))
+        var riderIds = shifts
+            .Where(s => s.AcceptedDailyOrders > 0)
+            .Select(s => s.RiderId)
             .Distinct()
             .ToList();
 
-        var ridersById = currentCompanyRiders
-            .ToDictionary(r => r.Id);
-
-        var missingRiderIds = riderIds.Except(ridersById.Keys).ToList();
-        if (missingRiderIds.Count > 0)
-        {
-            var historicalRiders = await _dbcontext.RiderDetails
-                .AsNoTracking()
-                .Include(r => r.Employee)
-                .Where(r => missingRiderIds.Contains(r.Id))
-                .ToListAsync(cancellationToken);
-
-            foreach (var rider in historicalRiders)
-                ridersById[rider.Id] = rider;
-        }
+        var ridersById = await _dbcontext.RiderDetails
+            .AsNoTracking()
+            .Include(r => r.Employee)
+            .Where(r => riderIds.Contains(r.Id))
+            .ToDictionaryAsync(r => r.Id, cancellationToken);
 
         var performanceByRiderMonth = shifts
             .GroupBy(s => new { s.RiderId, s.CompanyId, s.ShiftDate.Year, s.ShiftDate.Month })
@@ -110,13 +94,14 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                 g => new
                 {
                     AcceptedOrders = g.Sum(s => s.AcceptedDailyOrders),
-                    RealRejectedOrders = g.Sum(s => s.RealRejectedDailyOrders)
+                    RealRejectedOrders = g.Sum(s => s.RealRejectedDailyOrders),
+                    WorkingHours = g.Sum(s => s.WorkingHours)
                 });
 
         var riderCompanyPairs = shifts
-            .Select(s => (RiderId: s.RiderId, CompanyId: s.CompanyId))
-            .Concat(currentCompanyRiders.Select(r => (RiderId: r.Id, CompanyId: r.CompanyId)))
-            .Distinct()
+            .GroupBy(s => new { s.RiderId, s.CompanyId })
+            .Where(g => g.Sum(s => s.AcceptedDailyOrders) > 0)
+            .Select(g => (RiderId: g.Key.RiderId, CompanyId: g.Key.CompanyId))
             .Where(pair => ridersById.ContainsKey(pair.RiderId))
             .OrderBy(pair => pair.CompanyId)
             .ThenBy(pair => ridersById[pair.RiderId].Employee.NameAR)
@@ -125,9 +110,6 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
         var results = riderCompanyPairs.Select(pair =>
         {
             var rider = ridersById[pair.RiderId];
-            var workingHoursTarget = pair.CompanyId == HungerCompanyId
-                ? HungerMonthlyWorkingHoursTarget
-                : KeetaMonthlyWorkingHoursTarget;
 
             var months = Enumerable.Range(fromMonth, toMonth - fromMonth + 1)
                 .Select(month =>
@@ -141,7 +123,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                         new DateOnly(year, month, 1).ToString("MMMM"),
                         performance?.AcceptedOrders ?? 0,
                         performance?.RealRejectedOrders ?? 0,
-                        workingHoursTarget);
+                        performance?.WorkingHours ?? 0);
                 })
                 .ToList();
 
@@ -160,8 +142,6 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
             year,
             fromMonth,
             toMonth,
-            HungerMonthlyWorkingHoursTarget,
-            KeetaMonthlyWorkingHoursTarget,
             results));
     }
 
