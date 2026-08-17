@@ -66,7 +66,10 @@ public class VacationUserRoleAssignment
 public class VacationRequest
 {
     public Guid Id { get; set; } = Guid.NewGuid();
-    public int RiderId { get; set; }
+    /// <summary>The employee taking the vacation. This is populated for riders and non-rider employees.</summary>
+    public long EmployeeIqamaNo { get; set; }
+    /// <summary>Present only when the vacation belongs to a rider.</summary>
+    public int? RiderId { get; set; }
     public DateOnly StartDate { get; set; }
     public DateOnly EndDate { get; set; }
     public string? MemberNotes { get; set; }
@@ -84,7 +87,8 @@ public class VacationRequest
     public string? CancellationReason { get; set; }
     public byte[] RowVersion { get; set; } = [];
 
-    public RiderDetails Rider { get; set; } = null!;
+    public Employees Employee { get; set; } = null!;
+    public RiderDetails? Rider { get; set; }
     public ICollection<VacationApprovalDecision> Decisions { get; set; } = [];
     public ICollection<VacationDateChangeRequest> DateChangeRequests { get; set; } = [];
     public ICollection<VacationCancellationRequest> CancellationRequests { get; set; } = [];

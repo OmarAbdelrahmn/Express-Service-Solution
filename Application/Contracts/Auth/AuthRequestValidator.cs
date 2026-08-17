@@ -2,20 +2,20 @@
 
 namespace Application.Contracts.Auth;
 
-public class RefreshTokenRequestValidator : AbstractValidator<AuthRequest>
+public class AuthRequestValidator : AbstractValidator<AuthRequest>
 {
 
-    public RefreshTokenRequestValidator()
+    public AuthRequestValidator()
     {
         RuleFor(x => x.UserName)
             .NotEmpty()
             .WithMessage("UserName is required")
-            .EmailAddress();
+            .MaximumLength(256);
 
         RuleFor(x => x.Password)
             .NotEmpty()
             .WithMessage("Password is required")
-            .Length(8, 50);
+            .MaximumLength(128);
 
     }
 }

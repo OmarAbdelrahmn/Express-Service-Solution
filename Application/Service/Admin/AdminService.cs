@@ -1,50 +1,142 @@
 ﻿using Application.Abstraction;
 using Application.Abstraction.Errors;
+using Application.Authentication;
 using Application.Contracts.Users;
 using Domain;
 using Domain.Entities;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using System.Data;
+using System.Security.Cryptography;
 
 namespace Application.Service.Admin;
 
 public class AdminService(
      UserManager<ApplicationUser> manager
-    , ApplicationDbcontext dbcontext) : IAdminService
+    , ApplicationDbcontext dbcontext
+    , IOptions<SupportPasswordResetOptions> supportResetOptions
+    , ILogger<AdminService> logger) : IAdminService
 {
     private readonly UserManager<ApplicationUser> manager = manager;
     private readonly ApplicationDbcontext dbcontext = dbcontext;
+    private readonly SupportPasswordResetOptions supportResetOptions = supportResetOptions.Value;
+    private readonly ILogger<AdminService> logger = logger;
 
 
-    public async Task<Result> ResetPasswordAsync(string userName)
+    public async Task<Result<SupportPasswordResetResponse>> SupportResetPasswordAsync(
+        string userName,
+        string? supportKey,
+        CancellationToken cancellationToken = default)
     {
-        string tempPassword = "P@ssword1234";
-
-        var user = await manager.FindByNameAsync(userName);
-
-        if (user == null)
+        if (!supportResetOptions.IsConfigured)
         {
-            return Result.Failure(UserErrors.UserNotFound);
-        }
-        var result = await manager.RemovePasswordAsync(user);
-
-        if (!result.Succeeded)
-        {
-            var error = result.Errors.First();
-            return Result.Failure(new Error(error.Code, error.Description, StatusCodes.Status400BadRequest));
+            logger.LogError("Support password reset is unavailable because its support key is not configured securely.");
+            return Result.Failure<SupportPasswordResetResponse>(UserErrors.SupportResetUnavailable);
         }
 
-        result = await manager.AddPasswordAsync(user, tempPassword);
-        if (!result.Succeeded)
+        if (!supportResetOptions.Matches(supportKey))
         {
-            var error = result.Errors.First();
-            return Result.Failure(new Error(error.Code, error.Description, StatusCodes.Status400BadRequest));
+            logger.LogWarning("Rejected a support password reset request with an invalid support key.");
+            return Result.Failure<SupportPasswordResetResponse>(UserErrors.SupportResetUnauthorized);
         }
 
-        return Result.Success();
+        if (string.IsNullOrWhiteSpace(userName) || userName.Length > 256)
+            return Result.Failure<SupportPasswordResetResponse>(UserErrors.SupportResetUserNotFound);
+
+        var user = await manager.FindByNameAsync(userName.Trim());
+        if (user is null)
+        {
+            logger.LogWarning("Support password reset requested for an unknown account.");
+            return Result.Failure<SupportPasswordResetResponse>(UserErrors.SupportResetUserNotFound);
+        }
+
+        IDbContextTransaction? transaction = null;
+        try
+        {
+            if (dbcontext.Database.IsRelational() && dbcontext.Database.CurrentTransaction is null)
+                transaction = await dbcontext.Database.BeginTransactionAsync(cancellationToken);
+
+            var temporaryPassword = GenerateTemporaryPassword();
+            var resetToken = await manager.GeneratePasswordResetTokenAsync(user);
+            var resetResult = await manager.ResetPasswordAsync(user, resetToken, temporaryPassword);
+            if (!resetResult.Succeeded)
+                return await RollBackFailureAsync(resetResult, transaction, cancellationToken);
+
+            user.AccessFailedCount = 0;
+            user.LockoutEnd = null;
+            var unlockResult = await manager.UpdateAsync(user);
+            if (!unlockResult.Succeeded)
+                return await RollBackFailureAsync(unlockResult, transaction, cancellationToken);
+
+            if (transaction is not null)
+                await transaction.CommitAsync(cancellationToken);
+
+            logger.LogWarning(
+                "Support password reset completed for account {UserId}; lockout was cleared and previous tokens were revoked.",
+                user.Id);
+
+            return Result.Success(new SupportPasswordResetResponse(
+                user.UserName!,
+                temporaryPassword,
+                DateTimeOffset.UtcNow));
+        }
+        catch
+        {
+            if (transaction is not null)
+                await transaction.RollbackAsync(cancellationToken);
+            throw;
+        }
+        finally
+        {
+            if (transaction is not null)
+                await transaction.DisposeAsync();
+        }
     }
+
+    private static async Task<Result<SupportPasswordResetResponse>> RollBackFailureAsync(
+        IdentityResult result,
+        IDbContextTransaction? transaction,
+        CancellationToken cancellationToken)
+    {
+        if (transaction is not null)
+            await transaction.RollbackAsync(cancellationToken);
+
+        var error = result.Errors.First();
+        return Result.Failure<SupportPasswordResetResponse>(
+            new Error(error.Code, error.Description, StatusCodes.Status400BadRequest));
+    }
+
+    private static string GenerateTemporaryPassword()
+    {
+        const string lower = "abcdefghijkmnopqrstuvwxyz";
+        const string upper = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+        const string digits = "23456789";
+        const string symbols = "!@#$%&*+-_?";
+        const int length = 20;
+        var all = lower + upper + digits + symbols;
+        var characters = new char[length];
+
+        characters[0] = Pick(lower);
+        characters[1] = Pick(upper);
+        characters[2] = Pick(digits);
+        characters[3] = Pick(symbols);
+        for (var index = 4; index < characters.Length; index++)
+            characters[index] = Pick(all);
+
+        for (var index = characters.Length - 1; index > 0; index--)
+        {
+            var swapIndex = RandomNumberGenerator.GetInt32(index + 1);
+            (characters[index], characters[swapIndex]) = (characters[swapIndex], characters[index]);
+        }
+
+        return new string(characters);
+    }
+
+    private static char Pick(string source) => source[RandomNumberGenerator.GetInt32(source.Length)];
     public async Task<Result<int>> BackfillHousingIdsAsync(CancellationToken cancellationToken = default)
     {
         try
@@ -168,7 +260,8 @@ public class AdminService(
 
         user.IsDisable = !user.IsDisable;
 
-        var result = await manager.UpdateAsync(user);
+        // Rotate the stamp so a token issued before disable/re-enable can never revive.
+        var result = await manager.UpdateSecurityStampAsync(user);
         if (result.Succeeded)
             return Result.Success();
 

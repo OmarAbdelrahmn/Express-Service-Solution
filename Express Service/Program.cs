@@ -1,3 +1,4 @@
+using Application.Authentication;
 using Application.EmailWarmup;
 using Application.Service.DailyReport;
 using Application.Service.AccountingOutbox;
@@ -6,6 +7,8 @@ using Application.Service.Vacation;
 using Domain.Auditing;
 using Express_Service;
 using Hangfire;
+using Microsoft.AspNetCore.HttpOverrides;
+using System.Net;
 using System.Security.Claims;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -40,8 +43,19 @@ builder.Services.AddSingleton<IWebHostEnvironment>(builder.Environment);
 builder.Services.AddHealthChecks();
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    foreach (var configuredProxy in builder.Configuration.GetSection("ForwardedHeaders:KnownProxies").Get<string[]>() ?? [])
+    {
+        if (IPAddress.TryParse(configuredProxy, out var proxyAddress))
+            options.KnownProxies.Add(proxyAddress);
+    }
+});
 
 var app = builder.Build();
+
+app.UseForwardedHeaders();
 
 app.Use(async (context, next) =>
 {
@@ -80,6 +94,9 @@ app.UseSwaggerUI(c =>
 
 using (var scope = app.Services.CreateScope())
 {
+    var identityBootstrapper = scope.ServiceProvider.GetRequiredService<IIdentityBootstrapper>();
+    await identityBootstrapper.InitializeAsync();
+
     var scheduler = scope.ServiceProvider.GetRequiredService<ReportScheduler>();
     scheduler.RegisterAll();
 }

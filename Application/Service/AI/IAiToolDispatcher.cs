@@ -77,8 +77,6 @@ public class AiToolDispatcher(
                                           $"Toggle status for user '{S(args, "userName")}'", args),
             "delete_user" => BuildConfirmation("DeleteUser",
                                           $"Permanently delete user '{S(args, "userName")}'", args),
-            "reset_password" => BuildConfirmation("ResetPassword",
-                                          $"Reset password for '{S(args, "userName")}'", args),
 
             // ── Employees ────────────────────────────────────────────────
             "get_all_employees" => await HandleGetAllEmployees(),
@@ -218,7 +216,6 @@ public class AiToolDispatcher(
         {
             "ToggleUserStatus" => await ExecToggle(args),
             "DeleteUser" => await ExecDeleteUser(args),
-            "ResetPassword" => await ExecResetPassword(args),
             "StartSubstitution" => await ExecStartSubstitution(args),
             "StopSubstitution" => await ExecStopSubstitution(args),
             "TakeVehicle" => await ExecTakeVehicle(args),
@@ -1481,14 +1478,6 @@ public class AiToolDispatcher(
         var r = await adminService.DeletaUserAsync(S(args, "userName"));
         return r.IsSuccess
             ? new AiChatResponse($"✅ User '{S(args, "userName")}' deleted.")
-            : new AiChatResponse($"❌ {r.Error.Description}");
-    }
-
-    private async Task<AiChatResponse> ExecResetPassword(JsonElement args)
-    {
-        var r = await adminService.ResetPasswordAsync(S(args, "userName"));
-        return r.IsSuccess
-            ? new AiChatResponse($"✅ Password reset for '{S(args, "userName")}'.")
             : new AiChatResponse($"❌ {r.Error.Description}");
     }
 

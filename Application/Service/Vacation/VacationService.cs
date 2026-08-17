@@ -39,28 +39,48 @@ public class VacationService(ApplicationDbcontext dbcontext, IVacationDocumentSt
         if (housingId is null)
             return Result.Failure<VacationRequestResponse>(VacationErrors.AccessDenied);
 
-        var rider = await dbcontext.RiderDetails
-            .Include(x => x.Employee).ThenInclude(x => x.Housing)
-            .SingleOrDefaultAsync(x => x.Id == request.RiderId && x.Employee.HousingId == housingId && !x.Employee.IsDeleted, cancellationToken);
-        if (rider is null)
-            return Result.Failure<VacationRequestResponse>(VacationErrors.RiderNotFound);
+        if (request.RiderId.HasValue == request.EmployeeIqamaNo.HasValue)
+            return Result.Failure<VacationRequestResponse>(new Error("Vacation.InvalidPerson", "Provide exactly one of riderId or employeeIqamaNo.", 400));
 
-        if (await HasOverlapAsync(rider.Id, request.StartDate, request.EndDate, null, cancellationToken))
+        RiderDetails? rider = null;
+        Employees? employee;
+        if (request.RiderId.HasValue)
+        {
+            rider = await dbcontext.RiderDetails
+                .Include(x => x.Employee).ThenInclude(x => x.Housing)
+                .SingleOrDefaultAsync(x => x.Id == request.RiderId.Value && x.Employee.HousingId == housingId && !x.Employee.IsDeleted, cancellationToken);
+            if (rider is null)
+                return Result.Failure<VacationRequestResponse>(VacationErrors.RiderNotFound);
+            employee = rider.Employee;
+        }
+        else
+        {
+            employee = await dbcontext.Employees
+                .Include(x => x.Housing)
+                .SingleOrDefaultAsync(x => x.IqamaNo == request.EmployeeIqamaNo!.Value && x.HousingId == housingId && !x.IsDeleted, cancellationToken);
+            if (employee is null)
+                return Result.Failure<VacationRequestResponse>(new Error("Vacation.EmployeeNotFound", "Employee was not found in the member's housing.", 404));
+            rider = await dbcontext.RiderDetails.SingleOrDefaultAsync(x => x.EmployeeIqamaNo == employee.IqamaNo, cancellationToken);
+        }
+
+        if (await HasOverlapAsync(employee.IqamaNo, request.StartDate, request.EndDate, null, cancellationToken))
             return Result.Failure<VacationRequestResponse>(VacationErrors.Overlap);
 
         var actorName = await GetUserNameAsync(actorUserId, cancellationToken);
         var vacation = new VacationRequest
         {
-            RiderId = rider.Id,
+            EmployeeIqamaNo = employee.IqamaNo,
+            RiderId = rider?.Id,
             StartDate = request.StartDate,
             EndDate = request.EndDate,
             MemberNotes = string.IsNullOrWhiteSpace(request.MemberNotes) ? null : request.MemberNotes.Trim(),
             RequestedByUserId = actorUserId,
             RequestedByName = actorName,
             RequestedAt = RiyadhNow(),
-            Status = rider.CompanyId == KeetaCompanyId
+            Status = rider?.CompanyId == KeetaCompanyId
                 ? VacationRequestStatus.PendingKeetaManager
                 : VacationRequestStatus.PendingOperation,
+            Employee = employee,
             Rider = rider
         };
 
@@ -76,7 +96,7 @@ public class VacationService(ApplicationDbcontext dbcontext, IVacationDocumentSt
             return Result.Failure<IReadOnlyCollection<VacationRequestResponse>>(VacationErrors.AccessDenied);
 
         var items = await RequestsQuery()
-            .Where(x => x.Rider.Employee.HousingId == housingId)
+            .Where(x => x.Employee.HousingId == housingId)
             .OrderByDescending(x => x.RequestedAt)
             .AsNoTracking()
             .ToListAsync(cancellationToken);
@@ -95,7 +115,7 @@ public class VacationService(ApplicationDbcontext dbcontext, IVacationDocumentSt
             return Result.Failure<IReadOnlyCollection<VacationRequestResponse>>(new Error("Vacation.InvalidDates", "End date must be on or after start date.", 400));
 
         var items = await RequestsQuery()
-            .Where(x => x.Rider.Employee.HousingId == housingId &&
+            .Where(x => x.Employee.HousingId == housingId &&
                         (x.Status == VacationRequestStatus.Approved || x.Status == VacationRequestStatus.Active) &&
                         x.StartDate <= to && x.EndDate >= from)
             .OrderBy(x => x.StartDate)
@@ -121,7 +141,7 @@ public class VacationService(ApplicationDbcontext dbcontext, IVacationDocumentSt
             return Result.Failure<VacationDateChangeResponse>(new Error("Vacation.InvalidDates", "The revised start date must be today or later for a non-active vacation.", 400));
         if (await HasPendingAmendmentAsync(vacation.Id, cancellationToken))
             return Result.Failure<VacationDateChangeResponse>(VacationErrors.WorkflowPaused);
-        if (await HasOverlapAsync(vacation.RiderId, request.StartDate, request.EndDate, vacation.Id, cancellationToken))
+        if (await HasOverlapAsync(vacation.EmployeeIqamaNo, request.StartDate, request.EndDate, vacation.Id, cancellationToken))
             return Result.Failure<VacationDateChangeResponse>(VacationErrors.Overlap);
 
         var amendment = new VacationDateChangeRequest
@@ -191,6 +211,8 @@ public class VacationService(ApplicationDbcontext dbcontext, IVacationDocumentSt
         }
         if (query.RiderId.HasValue)
             source = source.Where(x => x.RiderId == query.RiderId.Value);
+        if (query.EmployeeIqamaNo.HasValue)
+            source = source.Where(x => x.EmployeeIqamaNo == query.EmployeeIqamaNo.Value);
         if (query.FromDate.HasValue)
             source = source.Where(x => x.EndDate >= query.FromDate.Value);
         if (query.ToDate.HasValue)
@@ -367,7 +389,7 @@ public class VacationService(ApplicationDbcontext dbcontext, IVacationDocumentSt
         try
         {
             var amendment = await dbcontext.VacationDateChangeRequests
-                .Include(x => x.VacationRequest).ThenInclude(x => x.Rider).ThenInclude(x => x.Employee)
+                .Include(x => x.VacationRequest).ThenInclude(x => x.Employee)
                 .Include(x => x.VacationRequest.HrDocuments)
                 .SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
             if (amendment is null)
@@ -390,7 +412,7 @@ public class VacationService(ApplicationDbcontext dbcontext, IVacationDocumentSt
                     return Result.Failure<VacationDateChangeResponse>(VacationErrors.InvalidState);
                 if (vacation.Status != VacationRequestStatus.Active && amendment.ProposedStartDate < RiyadhToday())
                     return Result.Failure<VacationDateChangeResponse>(new Error("Vacation.InvalidDates", "The revised start date must be today or later for a non-active vacation.", 400));
-                if (await HasOverlapAsync(vacation.RiderId, amendment.ProposedStartDate, amendment.ProposedEndDate, vacation.Id, cancellationToken))
+                if (await HasOverlapAsync(vacation.EmployeeIqamaNo, amendment.ProposedStartDate, amendment.ProposedEndDate, vacation.Id, cancellationToken))
                     return Result.Failure<VacationDateChangeResponse>(VacationErrors.Overlap);
 
                 vacation.StartDate = amendment.ProposedStartDate;
@@ -426,7 +448,7 @@ public class VacationService(ApplicationDbcontext dbcontext, IVacationDocumentSt
         try
         {
             var cancellation = await dbcontext.VacationCancellationRequests
-                .Include(x => x.VacationRequest).ThenInclude(x => x.Rider).ThenInclude(x => x.Employee)
+                .Include(x => x.VacationRequest).ThenInclude(x => x.Employee)
                 .Include(x => x.VacationRequest.DateChangeRequests)
                 .SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
             if (cancellation is null)
@@ -466,7 +488,7 @@ public class VacationService(ApplicationDbcontext dbcontext, IVacationDocumentSt
         try
         {
             var vacation = await dbcontext.VacationRequests
-                .Include(x => x.Rider).ThenInclude(x => x.Employee)
+                .Include(x => x.Employee)
                 .Include(x => x.DateChangeRequests)
                 .Include(x => x.CancellationRequests)
                 .Include(x => x.Decisions)
@@ -607,7 +629,7 @@ public class VacationService(ApplicationDbcontext dbcontext, IVacationDocumentSt
         CancellationToken cancellationToken = default)
     {
         var document = await dbcontext.VacationHrDocuments.AsNoTracking()
-            .Include(x => x.VacationRequest).ThenInclude(x => x.Rider).ThenInclude(x => x.Employee)
+            .Include(x => x.VacationRequest).ThenInclude(x => x.Employee)
             .SingleOrDefaultAsync(x => x.Id == documentId && x.VacationRequestId == vacationRequestId, cancellationToken);
         if (document is null)
             return Result.Failure<VacationDocumentFileResponse>(VacationErrors.DocumentNotFound);
@@ -616,7 +638,7 @@ public class VacationService(ApplicationDbcontext dbcontext, IVacationDocumentSt
         if (!allowed && memberIqamaNo != 0)
         {
             var housingId = await GetManagedHousingIdAsync(memberIqamaNo, cancellationToken);
-            allowed = housingId.HasValue && document.VacationRequest.Rider.Employee.HousingId == housingId.Value;
+            allowed = housingId.HasValue && document.VacationRequest.Employee.HousingId == housingId.Value;
         }
         if (!allowed)
             return Result.Failure<VacationDocumentFileResponse>(VacationErrors.AccessDenied);
@@ -659,7 +681,7 @@ public class VacationService(ApplicationDbcontext dbcontext, IVacationDocumentSt
     {
         var today = RiyadhToday();
         var requests = await dbcontext.VacationRequests
-            .Include(x => x.Rider).ThenInclude(x => x.Employee)
+            .Include(x => x.Employee)
             .Where(x => x.Status == VacationRequestStatus.Approved || x.Status == VacationRequestStatus.Active ||
                         (PendingApprovalStatuses.Contains(x.Status) && x.EndDate < today))
             .ToListAsync(cancellationToken);
@@ -679,7 +701,8 @@ public class VacationService(ApplicationDbcontext dbcontext, IVacationDocumentSt
     }
 
     private IQueryable<VacationRequest> RequestsQuery() => dbcontext.VacationRequests
-        .Include(x => x.Rider).ThenInclude(x => x.Employee).ThenInclude(x => x.Housing)
+        .Include(x => x.Employee).ThenInclude(x => x.Housing)
+        .Include(x => x.Rider)
         .Include(x => x.Decisions)
         .Include(x => x.DateChangeRequests)
         .Include(x => x.CancellationRequests)
@@ -687,7 +710,8 @@ public class VacationService(ApplicationDbcontext dbcontext, IVacationDocumentSt
         .AsSplitQuery();
 
     private async Task<VacationRequest?> LoadVacationForUpdateAsync(Guid id, CancellationToken cancellationToken) => await dbcontext.VacationRequests
-        .Include(x => x.Rider).ThenInclude(x => x.Employee)
+        .Include(x => x.Employee)
+        .Include(x => x.Rider)
         .Include(x => x.Decisions)
         .Include(x => x.DateChangeRequests)
         .Include(x => x.CancellationRequests)
@@ -700,16 +724,16 @@ public class VacationService(ApplicationDbcontext dbcontext, IVacationDocumentSt
         if (housingId is null)
             return Result.Failure<VacationRequest>(VacationErrors.AccessDenied);
         var vacation = await dbcontext.VacationRequests
-            .Include(x => x.Rider).ThenInclude(x => x.Employee)
-            .SingleOrDefaultAsync(x => x.Id == id && x.Rider.Employee.HousingId == housingId, cancellationToken);
+            .Include(x => x.Employee)
+            .SingleOrDefaultAsync(x => x.Id == id && x.Employee.HousingId == housingId, cancellationToken);
         return vacation is null ? Result.Failure<VacationRequest>(VacationErrors.NotFound) : Result.Success(vacation);
     }
 
     private async Task<int?> GetManagedHousingIdAsync(long managerIqamaNo, CancellationToken cancellationToken) => await dbcontext.Housings
         .Where(x => x.ManagerIqamaNo == managerIqamaNo).Select(x => (int?)x.Id).SingleOrDefaultAsync(cancellationToken);
 
-    private async Task<bool> HasOverlapAsync(int riderId, DateOnly startDate, DateOnly endDate, Guid? excludedRequestId, CancellationToken cancellationToken) => await dbcontext.VacationRequests
-        .AnyAsync(x => x.RiderId == riderId && OverlapStatuses.Contains(x.Status) && (!excludedRequestId.HasValue || x.Id != excludedRequestId.Value) && x.StartDate <= endDate && x.EndDate >= startDate, cancellationToken);
+    private async Task<bool> HasOverlapAsync(long employeeIqamaNo, DateOnly startDate, DateOnly endDate, Guid? excludedRequestId, CancellationToken cancellationToken) => await dbcontext.VacationRequests
+        .AnyAsync(x => x.EmployeeIqamaNo == employeeIqamaNo && OverlapStatuses.Contains(x.Status) && (!excludedRequestId.HasValue || x.Id != excludedRequestId.Value) && x.StartDate <= endDate && x.EndDate >= startDate, cancellationToken);
 
     private async Task<bool> HasPendingAmendmentAsync(Guid vacationRequestId, CancellationToken cancellationToken) =>
         await dbcontext.VacationDateChangeRequests.AnyAsync(x => x.VacationRequestId == vacationRequestId && x.Status == VacationAmendmentStatus.Pending, cancellationToken) ||
@@ -772,7 +796,7 @@ public class VacationService(ApplicationDbcontext dbcontext, IVacationDocumentSt
 
     private Task SetEmployeeStatusAsync(VacationRequest vacation, string status, string changedBy, string reason, CancellationToken cancellationToken)
     {
-        var employee = vacation.Rider.Employee;
+        var employee = vacation.Employee;
         if (string.Equals(employee.Status, status, StringComparison.OrdinalIgnoreCase))
             return Task.CompletedTask;
         var oldStatus = employee.Status;
@@ -878,7 +902,7 @@ public class VacationService(ApplicationDbcontext dbcontext, IVacationDocumentSt
     private static DateOnly RiyadhToday() => DateOnly.FromDateTime(RiyadhNow());
     private static Error RequiredReasonError() => new("Vacation.ReasonRequired", "A decision reason is required.", 400);
 
-    private static VacationRiderResponse ToResponse(RiderDetails rider) => new(rider.Id, rider.EmployeeIqamaNo, rider.Employee.NameAR, rider.Employee.NameEN, rider.WorkingId, rider.Employee.HousingId, rider.Employee.Housing?.Name, rider.Employee.PassportNo, rider.Employee.PassportEnd, rider.Employee.IqamaEndM, rider.Employee.IqamaEndH);
+    private static VacationRiderResponse ToResponse(RiderDetails rider, Employees employee) => new(rider.Id, employee.IqamaNo, employee.NameAR, employee.NameEN, rider.WorkingId, employee.HousingId, employee.Housing?.Name, employee.PassportNo, employee.PassportEnd, employee.IqamaEndM, employee.IqamaEndH);
     private static VacationDecisionResponse ToResponse(VacationApprovalDecision decision) => new(decision.Role, decision.Decision, decision.TargetRole, decision.Reason, decision.DecidedByUserId, decision.DecidedByName, decision.DecidedAt, decision.IsSuperseded, decision.SupersededAt);
     private static VacationDateChangeResponse ToResponse(VacationDateChangeRequest amendment) => new(amendment.Id, amendment.PreviousStartDate, amendment.PreviousEndDate, amendment.ProposedStartDate, amendment.ProposedEndDate, amendment.Reason, amendment.RequestedByUserId, amendment.RequestedByName, amendment.RequestedAt, amendment.Status, amendment.ResolvedByUserId, amendment.ResolvedByName, amendment.ResolutionReason, amendment.ResolvedAt);
     private static VacationCancellationResponse ToResponse(VacationCancellationRequest cancellation) => new(cancellation.Id, cancellation.Reason, cancellation.RequestedByUserId, cancellation.RequestedByName, cancellation.RequestedAt, cancellation.Status, cancellation.ResolvedByUserId, cancellation.ResolvedByName, cancellation.ResolutionReason, cancellation.ResolvedAt);
@@ -887,6 +911,7 @@ public class VacationService(ApplicationDbcontext dbcontext, IVacationDocumentSt
         var baseUrl = $"/api/vacation-requests/{document.VacationRequestId}/documents/{document.Id}";
         return new VacationHrDocumentResponse(document.Id, document.Type, document.Version, document.OriginalFileName, document.ContentType, document.FileSize, document.UploadedByUserId, document.UploadedByName, document.UploadedAt, document.IsCompleted, document.CompletedAt, document.IsSuperseded, document.SupersededAt, document.SupersededReason, baseUrl + "/stream", baseUrl + "/download");
     }
+    private static VacationEmployeeResponse ToEmployeeResponse(Employees employee, bool isRider) => new(employee.IqamaNo, employee.NameAR, employee.NameEN, employee.HousingId, employee.Housing?.Name, employee.PassportNo, employee.PassportEnd, employee.IqamaEndM, employee.IqamaEndH, isRider);
     private static VacationRequestResponse ToResponse(VacationRequest vacation)
     {
         var documents = vacation.HrDocuments.OrderByDescending(x => x.UploadedAt).Select(ToResponse).ToList();
@@ -895,6 +920,6 @@ public class VacationService(ApplicationDbcontext dbcontext, IVacationDocumentSt
             HasCurrentCompletedDocument(vacation, VacationHrDocumentType.Ticket),
             HasCurrentCompletedDocument(vacation, VacationHrDocumentType.ExitReentryVisa),
             documents);
-        return new VacationRequestResponse(vacation.Id, ToResponse(vacation.Rider), vacation.StartDate, vacation.EndDate, vacation.MemberNotes, vacation.Status, RoleForStatus(vacation.Status), AvailableReturnRoles(vacation), vacation.RequestedByUserId, vacation.RequestedByName, vacation.RequestedAt, vacation.FullyApprovedAt, vacation.ActivatedAt, vacation.CompletedAt, vacation.CancelledAt, vacation.CancelledByUserId, vacation.CancelledByName, vacation.CancellationReason, vacation.Decisions.OrderBy(x => x.DecidedAt).ThenBy(x => x.Id).Select(ToResponse).ToList(), vacation.DateChangeRequests.OrderByDescending(x => x.RequestedAt).Select(ToResponse).ToList(), vacation.CancellationRequests.OrderByDescending(x => x.RequestedAt).Select(ToResponse).ToList(), hr);
+        return new VacationRequestResponse(vacation.Id, ToEmployeeResponse(vacation.Employee, vacation.Rider is not null), vacation.Rider is null ? null : ToResponse(vacation.Rider, vacation.Employee), vacation.StartDate, vacation.EndDate, vacation.MemberNotes, vacation.Status, RoleForStatus(vacation.Status), AvailableReturnRoles(vacation), vacation.RequestedByUserId, vacation.RequestedByName, vacation.RequestedAt, vacation.FullyApprovedAt, vacation.ActivatedAt, vacation.CompletedAt, vacation.CancelledAt, vacation.CancelledByUserId, vacation.CancelledByName, vacation.CancellationReason, vacation.Decisions.OrderBy(x => x.DecidedAt).ThenBy(x => x.Id).Select(ToResponse).ToList(), vacation.DateChangeRequests.OrderByDescending(x => x.RequestedAt).Select(ToResponse).ToList(), vacation.CancellationRequests.OrderByDescending(x => x.RequestedAt).Select(ToResponse).ToList(), hr);
     }
 }

@@ -13,17 +13,19 @@ using Domain.Entities;
 using Domain.Entities.Spare;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using static Application.Service.Member.IMemberService;
 
 namespace Application.Service.Member;
 
-public class MemberService(UserManager<ApplicationUser> userManager, SignInManager<ApplicationUser> signInManager, IJwtProvider jwtProvider, ApplicationDbcontext context, IReportService reportService) : IMemberService
+public class MemberService(UserManager<ApplicationUser> userManager, SignInManager<ApplicationUser> signInManager, IJwtProvider jwtProvider, ApplicationDbcontext context, IReportService reportService, ILogger<MemberService> logger) : IMemberService
 {
     private readonly UserManager<ApplicationUser> userManager = userManager;
     private readonly SignInManager<ApplicationUser> signInManager = signInManager;
     private readonly IJwtProvider jwtProvider = jwtProvider;
     private readonly ApplicationDbcontext context = context;
     private readonly IReportService reportService = reportService;
+    private readonly ILogger<MemberService> logger = logger;
 
     public async Task<Result<HousingSpendingReportResponse>> GetHousingSpendingReportAsync(
     long managerIqamaNo,
@@ -1794,20 +1796,40 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
     }
     public async Task<Result<MemberAuthResponse>> MemberSignInAsync(MemberAuthRequest request)
     {
+        if (request.IqamaNo <= 0 || string.IsNullOrEmpty(request.Password) || request.Password.Length > 128)
+        {
+            logger.LogWarning("Rejected a member login request with invalid input shape.");
+            return Result.Failure<MemberAuthResponse>(UserErrors.InvalidCredentials);
+        }
+
         // Find user by Iqama number (username)
         var user = await userManager.FindByNameAsync(request.IqamaNo.ToString());
 
         if (user is null)
+        {
+            logger.LogWarning("Member login failed because account {IqamaNo} was not found.", request.IqamaNo);
             return Result.Failure<MemberAuthResponse>(UserErrors.InvalidCredentials);
+        }
 
         if (user.IsDisable)
+        {
+            logger.LogWarning("Member login rejected for disabled account {UserId}.", user.Id);
             return Result.Failure<MemberAuthResponse>(UserErrors.Disableuser);
+        }
 
         // Verify password
         var result = await signInManager.PasswordSignInAsync(user, request.Password, false, true);
 
         if (!result.Succeeded)
         {
+            logger.LogWarning(
+                "Member login failed for account {UserId}. LockedOut: {LockedOut}; NotAllowed: {NotAllowed}; FailedCount: {FailedCount}; LockoutEnd: {LockoutEnd}.",
+                user.Id,
+                result.IsLockedOut,
+                result.IsNotAllowed,
+                user.AccessFailedCount,
+                user.LockoutEnd);
+
             var error = result.IsNotAllowed
                 ? UserErrors.EmailNotConfirmed
                 : result.IsLockedOut
@@ -1853,9 +1875,10 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
         // Generate JWT token
         var (token, expiresIn) = jwtProvider.GenerateToken(user, userRoles);
 
-        user.LastLogin = DateTime.UtcNow.AddHours(3);
+        user.LastLogin = DateTime.UtcNow;
 
         await userManager.UpdateAsync(user);
+        logger.LogInformation("Member login succeeded for account {UserId}.", user.Id);
 
         var housingInfo = new HousingBasicInfo(
             housing.Id,

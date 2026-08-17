@@ -28,18 +28,36 @@ public class AuthService(
 
     public async Task<Result<AuthResponse>> SingInAsync(AuthRequest request)
     {
-
-        if (await manager.FindByNameAsync(request.UserName) is not { } user)
+        var userName = request.UserName?.Trim();
+        if (string.IsNullOrWhiteSpace(userName) ||
+            userName.Length > 256 ||
+            string.IsNullOrEmpty(request.Password) ||
+            request.Password.Length > 128)
+        {
+            logger.LogWarning("Rejected an admin login request with invalid input shape.");
             return Result.Failure<AuthResponse>(UserErrors.InvalidCredentials);
+        }
+
+        if (await manager.FindByNameAsync(userName) is not { } user)
+        {
+            logger.LogWarning("Admin login failed because account {UserName} was not found.", userName);
+            return Result.Failure<AuthResponse>(UserErrors.InvalidCredentials);
+        }
 
         if (user.IsDisable)
+        {
+            logger.LogWarning("Admin login rejected for disabled account {UserId}.", user.Id);
             return Result.Failure<AuthResponse>(UserErrors.Disableuser);
+        }
 
         var userRole = await manager.GetRolesAsync(user);
 
 
         if (userRole.Contains("Member"))
+        {
+            logger.LogWarning("Admin login rejected because account {UserId} has the Member role.", user.Id);
             return Result.Failure<AuthResponse>(UserErrors.InvalidCredentials);
+        }
 
 
         var result = await signInMaganager.PasswordSignInAsync(user, request.Password, false, true);
@@ -50,10 +68,11 @@ public class AuthService(
 
             var (Token, ExpiresIn) = jwtProvider.GenerateToken(user, userRoles);
 
-            user.LastLogin = DateTime.UtcNow.AddHours(3);
+            user.LastLogin = DateTime.UtcNow;
 
 
             await manager.UpdateAsync(user);
+            logger.LogInformation("Admin login succeeded for account {UserId}.", user.Id);
 
             var response = new AuthResponse(
                 user.Id,
@@ -64,6 +83,14 @@ public class AuthService(
 
             return Result.Success(response);
         }
+
+        logger.LogWarning(
+            "Admin login failed for account {UserId}. LockedOut: {LockedOut}; NotAllowed: {NotAllowed}; FailedCount: {FailedCount}; LockoutEnd: {LockoutEnd}.",
+            user.Id,
+            result.IsLockedOut,
+            result.IsNotAllowed,
+            user.AccessFailedCount,
+            user.LockoutEnd);
 
         var error = result.IsNotAllowed ?
              UserErrors.EmailNotConfirmed :

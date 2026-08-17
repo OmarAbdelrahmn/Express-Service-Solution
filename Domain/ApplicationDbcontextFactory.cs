@@ -13,7 +13,7 @@ public class ApplicationDbcontextFactory : IDesignTimeDbContextFactory<Applicati
     public ApplicationDbcontext CreateDbContext(string[] args)
     {
         var connectionString = Environment.GetEnvironmentVariable("ConnectionStrings__DefaultConnection")
-            ?? "Server=db33462.public.databaseasp.net;Database=db33462;User Id=db33462;Password=9d#J_Fe73-Xr;Encrypt=False;MultipleActiveResultSets=True;";
+            ?? "Server=db33462.public.databaseasp.net; Database=db33462; User Id=db33462; Password=9d#J_Fe73-Xr; Encrypt=True; TrustServerCertificate=True; MultipleActiveResultSets=True;";
 
         return new ApplicationDbcontext(
             new DbContextOptionsBuilder<ApplicationDbcontext>()

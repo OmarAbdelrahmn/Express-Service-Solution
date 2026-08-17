@@ -5,6 +5,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>Express_Service</RootNamespace>
+    <UserSecretsId>Express-Service-Solution-Development</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>

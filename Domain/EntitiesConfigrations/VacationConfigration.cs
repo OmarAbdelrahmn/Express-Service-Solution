@@ -31,8 +31,9 @@ public class VacationRequestConfigration : IEntityTypeConfiguration<VacationRequ
         e.Property(x => x.CancelledByName).HasMaxLength(200);
         e.Property(x => x.CancellationReason).HasMaxLength(1000);
         e.Property(x => x.RowVersion).IsRowVersion();
-        e.HasIndex(x => new { x.RiderId, x.Status, x.StartDate, x.EndDate });
+        e.HasIndex(x => new { x.EmployeeIqamaNo, x.Status, x.StartDate, x.EndDate });
         e.HasIndex(x => new { x.Status, x.RequestedAt });
+        e.HasOne(x => x.Employee).WithMany().HasForeignKey(x => x.EmployeeIqamaNo).OnDelete(DeleteBehavior.Restrict);
         e.HasOne(x => x.Rider).WithMany().HasForeignKey(x => x.RiderId).OnDelete(DeleteBehavior.Restrict);
     }
 }

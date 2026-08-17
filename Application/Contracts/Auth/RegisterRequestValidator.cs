@@ -13,13 +13,13 @@ public class RegisterRequestValidator : AbstractValidator<RegisterRequest>
         RuleFor(x => x.UserName)
             .NotEmpty()
             .WithMessage("UserName is required")
-            .EmailAddress();
+            .MaximumLength(256);
 
         RuleFor(x => x.Password)
             .NotEmpty()
             .WithMessage("Password is required")
-            .Length(8, 16)
-            .WithMessage("Password must be between 8 and 16 characters")
+            .Length(12, 128)
+            .WithMessage("Password must be between 12 and 128 characters")
             .Matches(RegexPatterns.Password)
             .WithMessage("Password should contains Lowercase,Uppercase,Number and Special character ");
 

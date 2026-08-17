@@ -14,5 +14,15 @@ public interface IAdminService
     Task<Result<int>> BackfillHousingIdsAsync(CancellationToken cancellationToken = default);
 
 
-    Task<Result> ResetPasswordAsync(string userName);
+    Task<Result<SupportPasswordResetResponse>> SupportResetPasswordAsync(
+        string userName,
+        string? supportKey,
+        CancellationToken cancellationToken = default);
 }
+
+public sealed record SupportPasswordResetResponse(
+    string UserName,
+    string TemporaryPassword,
+    DateTimeOffset ResetAtUtc);
+
+public sealed record SupportPasswordResetRequest(string UserName);

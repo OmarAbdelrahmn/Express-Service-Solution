@@ -10,7 +10,8 @@ namespace Express_Service.Controllers;
 public class RiderSalaryImportController(IRiderSalaryImportService service) : ControllerBase
 {
     [HttpPost]
-    public async Task<IActionResult> Import([FromForm] IFormFile file, CancellationToken cancellationToken)
+    [Consumes("multipart/form-data")]
+    public async Task<IActionResult> Import(IFormFile file, CancellationToken cancellationToken)
     {
         if (file is null || file.Length == 0)
             return BadRequest(new { error = "No file uploaded or file is empty." });

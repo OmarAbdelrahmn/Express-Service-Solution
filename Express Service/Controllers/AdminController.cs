@@ -1,7 +1,9 @@
 ﻿using Application.Service.Admin;
+using Application.Authentication;
 using Application.Service.User;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 
 
 
@@ -25,14 +27,24 @@ public class AdminController(IAdminService service, IUserService service1) : Con
     //        deletedEmployees.ToProblem();
     //}
 
-    [HttpGet("adminreset")]
+    [HttpPost("adminreset")]
     [AllowAnonymous]
-    public async Task<IActionResult> AdminReset(string UserName)
+    [EnableRateLimiting("support-reset")]
+    [ResponseCache(Duration = 0, Location = ResponseCacheLocation.None, NoStore = true)]
+    public async Task<IActionResult> AdminReset(
+        [FromBody] SupportPasswordResetRequest request,
+        [FromHeader(Name = SupportPasswordResetOptions.HeaderName)] string? supportKey,
+        CancellationToken cancellationToken)
     {
-        var result = await service.ResetPasswordAsync(UserName);
-        return result.IsSuccess ?
-            Ok() :
-            result.ToProblem();
+        Response.Headers.CacheControl = "no-store";
+        Response.Headers.Pragma = "no-cache";
+
+        var result = await service.SupportResetPasswordAsync(
+            request.UserName,
+            supportKey,
+            cancellationToken);
+
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
 
 

@@ -4,6 +4,7 @@ using Domain;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Domain.Migrations
 {
     [DbContext(typeof(ApplicationDbcontext))]
-    partial class ApplicationDbcontextModelSnapshot : ModelSnapshot
+    [Migration("20260817073252_RemoveModelSeededIdentityAccounts")]
+    partial class RemoveModelSeededIdentityAccounts
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -7180,9 +7183,6 @@ namespace Domain.Migrations
                     b.Property<DateTime?>("CompletedAt")
                         .HasColumnType("datetime2");
 
-                    b.Property<long>("EmployeeIqamaNo")
-                        .HasColumnType("bigint");
-
                     b.Property<DateOnly>("EndDate")
                         .HasColumnType("date");
 
@@ -7209,7 +7209,7 @@ namespace Domain.Migrations
                         .HasMaxLength(450)
                         .HasColumnType("nvarchar(450)");
 
-                    b.Property<int?>("RiderId")
+                    b.Property<int>("RiderId")
                         .HasColumnType("int");
 
                     b.Property<byte[]>("RowVersion")
@@ -7226,11 +7226,9 @@ namespace Domain.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("RiderId");
-
                     b.HasIndex("Status", "RequestedAt");
 
-                    b.HasIndex("EmployeeIqamaNo", "Status", "StartDate", "EndDate");
+                    b.HasIndex("RiderId", "Status", "StartDate", "EndDate");
 
                     b.ToTable("VacationRequests", null, t =>
                         {
@@ -9291,18 +9289,11 @@ namespace Domain.Migrations
 
             modelBuilder.Entity("Domain.Entities.Vacation.VacationRequest", b =>
                 {
-                    b.HasOne("Domain.Entities.Employees", "Employee")
-                        .WithMany()
-                        .HasForeignKey("EmployeeIqamaNo")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
                     b.HasOne("Domain.Entities.RiderDetails", "Rider")
                         .WithMany()
                         .HasForeignKey("RiderId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.Navigation("Employee");
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
 
                     b.Navigation("Rider");
                 });

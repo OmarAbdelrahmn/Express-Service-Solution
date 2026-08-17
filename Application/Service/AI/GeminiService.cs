@@ -87,7 +87,6 @@ public class GeminiService(
         Tool("get_user_by_name", "Get a user by username", P("userName","string","Username")),
         Tool("toggle_user_status", "Enable/disable a user account (requires confirmation)", P("userName","string","Username")),
         Tool("delete_user", "Permanently delete a user (requires confirmation)", P("userName","string","Username")),
-        Tool("reset_password", "Reset user password to default (requires confirmation)", P("userName","string","Username")),
 
         // Employees
         Tool("get_all_employees", "Get all employees in the system"),
@@ -235,7 +234,7 @@ public class GeminiService(
         - For "this month" use {today:yyyy-MM}. For "last month" use {today.AddMonths(-1):yyyy-MM}.
         - For comprehensive questions, prefer the aggregated tools (get_rider_full_profile,
           get_company_full_dashboard, get_housing_full_dashboard, get_operational_overview).
-        - Write operations (toggle/delete/reset/assign/return/start-sub/stop-sub) always require
+        - Write operations (toggle/delete/assign/return/start-sub/stop-sub) always require
           confirmation — call the function so the system shows a confirmation dialog.
         - ALWAYS respond entirely in Arabic, regardless of the language the user writes in.
         - Be concise — the UI renders data in tables; just summarize the key insight in Arabic.

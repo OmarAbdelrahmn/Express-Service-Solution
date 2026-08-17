@@ -13,4 +13,7 @@ public static class UserErrors
     public static readonly Error userLockedout = new("User.LockedUser", "User is locked , contact the administrator", StatusCodes.Status401Unauthorized);
     public static readonly Error PhoneNumberNotConfirmed = new("User.PhoneNumberNotConfirmed", "Phone number confirmation is required before signing in", StatusCodes.Status401Unauthorized);
     public static readonly Error SignInNotAllowed = new("User.SignInNotAllowed", "Sign-in is not allowed for this account", StatusCodes.Status401Unauthorized);
+    public static readonly Error SupportResetUnauthorized = new("SupportReset.Unauthorized", "The support reset credentials are invalid", StatusCodes.Status401Unauthorized);
+    public static readonly Error SupportResetUnavailable = new("SupportReset.Unavailable", "The support reset endpoint is not configured", StatusCodes.Status503ServiceUnavailable);
+    public static readonly Error SupportResetUserNotFound = new("SupportReset.UserNotFound", "User not found", StatusCodes.Status404NotFound);
 }

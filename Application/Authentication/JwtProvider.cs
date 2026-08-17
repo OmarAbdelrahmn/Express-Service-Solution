@@ -10,14 +10,20 @@ namespace Application.Authentication;
 
 public class JwtProvider(IOptions<JwtOptions> options) : IJwtProvider
 {
+    public const string SecurityStampClaimType = "security_stamp";
+
     private readonly JwtOptions options = options.Value;
 
     public (string Token, int Expiry) GenerateToken(ApplicationUser user, IEnumerable<string> roles)
     {
+        if (string.IsNullOrWhiteSpace(user.SecurityStamp))
+            throw new InvalidOperationException("A security stamp is required before issuing a token.");
+
         Claim[] claims = [
             new (System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub, user.Id),
             new (System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.UniqueName, user.UserName!),
             new (System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
+            new (SecurityStampClaimType, user.SecurityStamp),
             new (nameof(roles),JsonSerializer.Serialize(roles),System.IdentityModel.Tokens.Jwt.JsonClaimValueTypes.JsonArray)
             ];
 
@@ -30,7 +36,7 @@ public class JwtProvider(IOptions<JwtOptions> options) : IJwtProvider
             issuer: options.Issuer,
             audience: options.Audience,
             claims: claims,
-            expires: DateTime.UtcNow.AddHours(3).AddMinutes(options.ExpiryIn),
+            expires: DateTime.UtcNow.AddMinutes(options.ExpiryIn),
             signingCredentials: signingCredentials
         );
 
@@ -47,9 +53,12 @@ public class JwtProvider(IOptions<JwtOptions> options) : IJwtProvider
         {
             tokenhandler.ValidateToken(token, new TokenValidationParameters
             {
-                ValidateIssuer = false,
-                ValidateAudience = false,
+                ValidateIssuer = true,
+                ValidateAudience = true,
                 ValidateLifetime = true,
+                ValidateIssuerSigningKey = true,
+                ValidIssuer = options.Issuer,
+                ValidAudience = options.Audience,
                 ClockSkew = TimeSpan.Zero,
                 IssuerSigningKey = key
             }, out SecurityToken validatedToken);

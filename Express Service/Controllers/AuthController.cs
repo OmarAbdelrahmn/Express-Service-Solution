@@ -2,6 +2,7 @@
 using Application.Service.Auth;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace Express_Service.Controllers;
 
@@ -49,6 +50,7 @@ public class AuthController(IAuthService service) : ControllerBase
 
     [HttpPost("login")]
     [AllowAnonymous]
+    [EnableRateLimiting("login")]
 
     public async Task<IActionResult> login([FromBody] AuthRequest request)
     {

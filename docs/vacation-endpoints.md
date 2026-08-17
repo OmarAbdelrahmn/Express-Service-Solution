@@ -4,17 +4,22 @@ All endpoints require a bearer token. Vacation permissions are independent of Id
 
 ## Member (`Member` Identity role)
 
-- `POST /api/member/vacation-requests` — `{ "riderId": 1, "startDate": "2026-08-01", "endDate": "2026-08-10", "memberNotes": "Flight details shared by the rider" }`. `memberNotes` is optional, limited to 1,000 characters, and is displayed to the vacation approvers/supervisor on every vacation-request response.
-- `GET /api/member/vacation-requests` — all vacation history for riders in the member's housing.
-- `GET /api/member/vacation-riders?fromDate=2026-08-01&toDate=2026-08-31` — approved or active vacation riders; both dates are optional and default to today.
+- `POST /api/member/vacation-requests` — creates a vacation for either a rider or an employee in the member's housing. Send exactly one identifier:
+  - Rider: `{ "riderId": 1, "startDate": "2026-08-01", "endDate": "2026-08-10", "memberNotes": "Flight details shared by the rider" }`
+  - Employee: `{ "employeeIqamaNo": 1234567890, "startDate": "2026-08-01", "endDate": "2026-08-10", "memberNotes": "Annual leave" }`
+  `memberNotes` is optional and limited to 1,000 characters. Sending both identifiers, neither identifier, or an employee outside the member's housing returns `400`/`404`.
+- `GET /api/member/vacation-requests` — all vacation history for riders and employees in the member's housing.
+- `GET /api/member/vacation-riders?fromDate=2026-08-01&toDate=2026-08-31` — approved or active vacations in the member's housing; the route name is retained for compatibility, but its results can now include employees.
 - `POST /api/member/vacation-requests/{id}/date-change` — `{ "startDate": "2026-08-02", "endDate": "2026-08-11", "reason": "Flight changed" }`.
 - `POST /api/member/vacation-requests/{id}/cancellation` — `{ "reason": "Rider remains available" }`.
 
-## Frontend response change: member notes
+## Frontend response change: person and member notes
 
 Every response that contains a `VacationRequestResponse` now includes `memberNotes` next to the vacation dates. It is the optional note entered by the housing member for the rider's supervisor/approvers; it is `null` when no note was supplied.
 
 This applies to the create response and to the member request list, approval inbox, HR inbox, vacation detail, and Master/Admin vacation list responses. Display it as read-only in all supervisor/approval views.
+
+Every `VacationRequestResponse` now has an `employee` object for the person taking leave, with `iqamaNo`, names, housing, passport/iqama dates, and `isRider`. It retains `rider` for rider-specific details (`riderId`, `workingId`); this field is `null` for a non-rider employee. Use `employee` as the main display identity.
 
 ## Approval inbox
 
@@ -25,6 +30,8 @@ The approval sequence is conditional on the rider's company when the request is 
 
 - `RiderDetails.CompanyId == 2`: Keeta Manager -> Operation -> Accountant -> Administration.
 - every other company: Operation -> Accountant -> Administration.
+
+Non-rider employee vacations always use Operation -> Accountant -> Administration.
 
 The selected sequence is represented by the vacation status and does not change if the rider's company is edited after the request starts. `PendingKeetaManager` is status value `10`; its `currentRole` is `5`.
 
@@ -38,7 +45,7 @@ The selected sequence is represented by the vacation status and does not change 
 
 ## Admin and Master oversight
 
-- `GET /api/vacation-requests?status=&stage=&riderId=&fromDate=&toDate=&page=1&pageSize=50`.
+- `GET /api/vacation-requests?status=&stage=&riderId=&employeeIqamaNo=&fromDate=&toDate=&page=1&pageSize=50`. `riderId` filters rider requests; `employeeIqamaNo` filters all requests for one employee.
 - `GET /api/vacation-requests/{id}`.
 - `GET /api/vacation-date-changes` and `GET /api/vacation-cancellations`.
 

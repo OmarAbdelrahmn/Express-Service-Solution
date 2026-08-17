@@ -21,6 +21,7 @@
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <ProjectReference Include="..\Application\Application.csproj" />
     <ProjectReference Include="..\Domain\Domain.csproj" />
+    <ProjectReference Include="..\Express Service\Express Service.csproj" />
   </ItemGroup>
 
   <ItemGroup>

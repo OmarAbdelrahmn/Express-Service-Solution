@@ -12,6 +12,27 @@ namespace Accounting.Tests;
 public class VacationServiceTests
 {
     [Fact]
+    public async Task CreateVacation_ForEmployee_PersistsTheEmployeeAndKeepsRiderNull()
+    {
+        await using var db = CreateDbContext();
+        await SeedAsync(db);
+        var service = new VacationService(db);
+        var start = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3)).AddDays(3);
+
+        var created = await service.CreateForMemberAsync(
+            "member", 100, new CreateVacationRequest(null, start, start.AddDays(3), EmployeeIqamaNo: 300));
+
+        Assert.True(created.IsSuccess);
+        Assert.Equal(300, created.Value.Employee.IqamaNo);
+        Assert.False(created.Value.Employee.IsRider);
+        Assert.Null(created.Value.Rider);
+        Assert.Equal(VacationRequestStatus.PendingOperation, created.Value.Status);
+        var persisted = await db.VacationRequests.SingleAsync();
+        Assert.Equal(300, persisted.EmployeeIqamaNo);
+        Assert.Null(persisted.RiderId);
+    }
+
+    [Fact]
     public async Task CreateVacation_PersistsMemberNotes_AndReturnsThemInVacationResponses()
     {
         await using var db = CreateDbContext();
@@ -371,6 +392,24 @@ public class VacationServiceTests
             Phone = "0500000000",
             DateOfBirth = new DateOnly(2000, 1, 1),
             HousingId = 1,
+            Status = "enable"
+        });
+        db.Employees.Add(new Employees
+        {
+            IqamaNo = 300,
+            IqamaEndM = new DateOnly(2030, 1, 1),
+            IqamaEndH = new DateOnly(2030, 1, 1),
+            PassportNo = "E123456",
+            PassportEnd = new DateOnly(2031, 1, 1),
+            Sponsor = "Sponsor",
+            JobTitle = "Coordinator",
+            NameAR = "Employee AR",
+            NameEN = "Employee EN",
+            Country = "SA",
+            Phone = "0500000001",
+            DateOfBirth = new DateOnly(2000, 1, 1),
+            HousingId = 1,
+            IsEmployee = true,
             Status = "enable"
         });
         db.RiderDetails.Add(new RiderDetails { Id = 1, EmployeeIqamaNo = 200, CompanyId = 1, WorkingId = "R-1" });

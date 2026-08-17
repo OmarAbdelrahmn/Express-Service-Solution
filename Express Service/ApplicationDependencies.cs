@@ -70,6 +70,7 @@ using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using System.Reflection;
+using System.Security.Claims;
 using System.Text;
 
 namespace Express_Service;
@@ -82,6 +83,12 @@ public static class ApplicationDependencies
         Services.AddEndpointsApiExplorer();
         Services.AddScoped<IAuditContextAccessor, AuditContextAccessor>();
         Services.AddScoped<IJwtProvider, JwtProvider>();
+        Services.AddScoped<IJwtAccountValidator, JwtAccountValidator>();
+        Services.AddScoped<IIdentityBootstrapper, IdentityBootstrapper>();
+        Services.Configure<SupportPasswordResetOptions>(
+            configuration.GetSection(SupportPasswordResetOptions.SectionName));
+        Services.Configure<IdentityBootstrapOptions>(
+            configuration.GetSection(IdentityBootstrapOptions.SectionName));
         Services.AddScoped<IAuthService, AuthService>();
         Services.AddScoped<IUserService, UserServices>();
         Services.AddScoped<IAdminService, AdminService>();
@@ -242,13 +249,15 @@ public static class ApplicationDependencies
 
     public static IServiceCollection AddDatabase(this IServiceCollection Services, IConfiguration c)
     {
-        var ConnectionString = c.GetConnectionString("DefaultConnection") ??
-            throw new InvalidOperationException("Connection string is not found in the configuration file");
+        var connectionString = c.GetConnectionString("DefaultConnection");
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            throw new InvalidOperationException(
+                "ConnectionStrings:DefaultConnection must be supplied through secure configuration.");
+        }
 
         Services.AddDbContext<ApplicationDbcontext>(options =>
-    options.UseSqlServer(
-        c.GetConnectionString("DefaultConnection")
-    ));
+            options.UseSqlServer(connectionString));
 
 
         return Services;
@@ -266,6 +275,7 @@ public static class ApplicationDependencies
             ?? throw new InvalidOperationException("JWT configuration is missing.");
 
         if (string.IsNullOrWhiteSpace(jwtSettings.Key) ||
+            Encoding.UTF8.GetByteCount(jwtSettings.Key) < 32 ||
             string.IsNullOrWhiteSpace(jwtSettings.Issuer) ||
             string.IsNullOrWhiteSpace(jwtSettings.Audience) ||
             jwtSettings.ExpiryIn <= 0)
@@ -293,8 +303,33 @@ public static class ApplicationDependencies
                 ValidateIssuerSigningKey = true,
                 ValidAudience = jwtSettings.Audience,
                 ValidIssuer = jwtSettings.Issuer,
-
+                ClockSkew = TimeSpan.FromMinutes(1),
                 IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSettings.Key))
+            };
+            o.Events = new JwtBearerEvents
+            {
+                OnTokenValidated = async context =>
+                {
+                    var userId = context.Principal?.FindFirstValue(ClaimTypes.NameIdentifier)
+                        ?? context.Principal?.FindFirstValue(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub);
+                    var securityStamp = context.Principal?.FindFirstValue(JwtProvider.SecurityStampClaimType);
+
+                    if (string.IsNullOrWhiteSpace(userId) || string.IsNullOrWhiteSpace(securityStamp))
+                    {
+                        context.Fail("The token does not contain current account state.");
+                        return;
+                    }
+
+                    var accountValidator = context.HttpContext.RequestServices
+                        .GetRequiredService<IJwtAccountValidator>();
+                    if (!await accountValidator.IsCurrentAsync(
+                            userId,
+                            securityStamp,
+                            context.HttpContext.RequestAborted))
+                    {
+                        context.Fail("The account or token is no longer valid.");
+                    }
+                }
             };
         });
         Services.AddAuthorization(options =>
@@ -347,15 +382,29 @@ public static class ApplicationDependencies
         Services.AddRateLimiter(options =>
         {
             options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
-            options.AddFixedWindowLimiter("api", limiter =>
-            {
-                limiter.PermitLimit = 100;
-                limiter.Window = TimeSpan.FromMinutes(1);
-                limiter.QueueLimit = 0;
-            });
+            options.AddPolicy("login", context =>
+                System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+                    context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                    _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+                    {
+                        PermitLimit = 10,
+                        Window = TimeSpan.FromMinutes(1),
+                        QueueLimit = 0,
+                        AutoReplenishment = true
+                    }));
+            options.AddPolicy("support-reset", context =>
+                System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+                    context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                    _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+                    {
+                        PermitLimit = 5,
+                        Window = TimeSpan.FromMinutes(10),
+                        QueueLimit = 0,
+                        AutoReplenishment = true
+                    }));
             options.GlobalLimiter = System.Threading.RateLimiting.PartitionedRateLimiter.Create<HttpContext, string>(context =>
                 System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
-                    context.User.Identity?.Name ?? context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                    context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
                     _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
                     {
                         PermitLimit = 100,

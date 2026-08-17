@@ -2,6 +2,7 @@
 using Application.Service.Member;
 using Application.Service.Reminder;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using static Application.Service.Member.IMemberService;
 
 namespace Express_Service.Controllers;
@@ -691,6 +692,7 @@ public class MemberController(IMemberService housingService, IReminderService re
     }
     [HttpPost("member/login")]
     [Microsoft.AspNetCore.Authorization.AllowAnonymous]
+    [EnableRateLimiting("login")]
     public async Task<IActionResult> MemberLogin([FromBody] MemberAuthRequest request)
     {
         var response = await housingService.MemberSignInAsync(request);

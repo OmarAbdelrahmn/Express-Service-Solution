@@ -9,13 +9,15 @@ public class ChangePasswordRequestValidator : AbstractValidator<ChangePasswordRe
     public ChangePasswordRequestValidator()
     {
         RuleFor(i => i.CurrentPassword)
-            .NotEmpty();
+            .NotEmpty()
+            .MaximumLength(128);
 
 
         RuleFor(i => i.NewPassord)
             .NotEmpty()
+            .Length(12, 128)
             .Matches(RegexPatterns.Password)
-            .WithMessage("Password should be 8 digits and should contains Lowercase,Uppercase,Number and Special character ")
+            .WithMessage("Password must contain lowercase, uppercase, number and special characters")
             .NotEqual(c => c.CurrentPassword)
             .WithMessage("New password can't be same as current one");
 
