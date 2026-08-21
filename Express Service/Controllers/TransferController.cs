@@ -41,7 +41,12 @@ public class TransferController(ITransferService service) : ControllerBase
     public async Task<IActionResult> GetdById(int id)
     {
         var response = await service.DeleteTransferAsync(id);
-        return response.IsSuccess ? Ok(response.Value) : response.ToProblem();
+        return response.IsSuccess
+            ? Ok(response.Value)
+            : Problem(
+                detail: response.Error.Description,
+                title: response.Error.Code,
+                statusCode: response.Error.StatuesCode ?? StatusCodes.Status500InternalServerError);
     }
 
     [HttpGet("housing/{housingId}")]

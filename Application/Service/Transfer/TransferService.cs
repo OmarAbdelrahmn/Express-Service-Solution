@@ -55,7 +55,7 @@ public class TransferService(ApplicationDbcontext dbcontext) : ITransferService
         {
             await transaction.RollbackAsync();
             return Result.Failure<bool>(
-                new Error("DeleteTransferError", $"Failed to delete transfer: {ex.Message}", 500));
+                new Error("DeleteTransferError", $"Failed to delete transfer: {ex.GetBaseException().Message}", 500));
         }
     }
 
@@ -110,11 +110,7 @@ public class TransferService(ApplicationDbcontext dbcontext) : ITransferService
         // Reduce from housing location
         housingSparePart.Quantity -= item.Quantity;
 
-        // Remove housing item if quantity becomes zero
-        if (housingSparePart.Quantity == 0)
-        {
-            _dbcontext.SpareParts.Remove(housingSparePart);
-        }
+        // Keep zero-quantity stock rows: they may be referenced by usage history.
 
         return true;
     }
@@ -155,11 +151,7 @@ public class TransferService(ApplicationDbcontext dbcontext) : ITransferService
         // Reduce from housing location
         housingAccessory.Quantity -= item.Quantity;
 
-        // Remove housing item if quantity becomes zero
-        if (housingAccessory.Quantity == 0)
-        {
-            _dbcontext.RiderAccessories.Remove(housingAccessory);
-        }
+        // Keep zero-quantity stock rows: they may be referenced by usage history.
 
         return true;
     }
