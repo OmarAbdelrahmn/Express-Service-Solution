@@ -128,6 +128,7 @@ public class RiderController(IRiderService service) : ControllerBase
             ? Ok(new Re("Rider Deleted Successfully")) : result.ToProblem();
     }
     [HttpDelete("not/{IqamaNo:long}")]
+    [AllowAnonymous]
     //[Authorize(Roles = "Master,Admin")]
     public async Task<IActionResult> NotDeleteRider(long IqamaNo)
     {
