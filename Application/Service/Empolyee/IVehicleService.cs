@@ -11,6 +11,15 @@ public interface IVehicleService
     Task<Result<IEnumerable<VehicleResponse>>> Get(string VehicleNumber);
     Task<Result<IEnumerable<VehicleResponse>>> Getplate(string PlateNumberA);
     Task<Result<IEnumerable<VehicleResponse>>> GetSerial(int Serial);
+    Task<Result<PublicVehicleLookupResponse>> GetPublicRiderAndHousingBySerialAsync(
+        int serialNumber,
+        CancellationToken cancellationToken = default);
+    Task<Result<byte[]>> ExportPublicRiderAndHousingBySerialAsync(
+        int serialNumber,
+        CancellationToken cancellationToken = default);
+    Task<Result<byte[]>> ExportPublicRiderAndHousingFromSerialFileAsync(
+        Stream inputStream,
+        CancellationToken cancellationToken = default);
     Task<Result<VehicleResponse>> CreateAsync(VehicleRequest Request);
     Task<Result<VehicleResponse>> UpdateAsync(string VehicleNumber, UVehicleRequest Request);
     Task<Result> ChangeLocation(string PlatNo, string NewLocation);

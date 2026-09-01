@@ -1,15 +1,12 @@
 ﻿using Application.Authentication;
-using Application.EmailWarmup;
 using Application.Roles;
 using Application.Service.Admin;
 using Application.Service.AI;
 using Application.Service.Auth;
 using Application.Service.Backgroundimports;
 using Application.Service.Dahsboard;
-using Application.Service.DailyReport;
 using Application.Service.Dashboard;
 using Application.Service.DE;
-using Application.Service.EmailWarmup;
 using Application.Service.EmployeesFiles;
 using Application.Service.Empolyee;
 using Application.Service.EscapedEmployee;
@@ -28,6 +25,7 @@ using Application.Service.Ledger;
 using Application.Service.FinancialAccess;
 using Application.Service.FinancialOperations;
 using Application.Service.Compensation;
+using Application.Service.DailyReport;
 using Application.Service.PlatformImports;
 using Application.Service.KeetaBreaks;
 using Application.Service.RiderPayroll;
@@ -143,7 +141,6 @@ public static class ApplicationDependencies
         Services.AddScoped<IVacationLifecycleJob, VacationLifecycleJob>();
         Services.AddSingleton<IVacationDocumentStorage, VacationDocumentStorage>();
         Services.AddScoped<IGeminiService, GeminiService>();
-        Services.AddScoped<IEmailWarmupJob, EmailWarmupJob>();
         Services.AddScoped<IOrderService, OrderService>();
         Services.AddScoped<ITransporterShiftService, TransporterShiftService>();
         Services.AddScoped<IOutRiderInfoService, OutRiderInfoService>();
@@ -154,21 +151,15 @@ public static class ApplicationDependencies
         Services.AddScoped<IAiToolDispatcher, AiToolDispatcher>();
         Services.AddScoped<IHousingInventorySyncService, HousingInventorySyncService>();
         Services.AddScoped<IReminderService, ReminderService>();
-        Services.AddScoped<IAbsentReportJob, AbsentReportJob>();
         Services.AddScoped<IItemMovementReportService, ItemMovementReportService>();
-        Services.AddScoped<IDailyReportJob, DailyReportJob>();
         Services.AddScoped<IAbsentReportEmailSender, AbsentReportEmailSender>();
-
-        Services.AddScoped<IMonthlyProgressReportJob, MonthlyProgressReportJob>();
         Services.AddScoped<IMonthlyProgressReportEmailSender, MonthlyProgressReportEmailSender>();
-
-        Services.AddSingleton<ReportScheduler>();
 
         Services.Configure<DailyReportSettings>(
             configuration.GetSection("DailyReport"));
         Services.Configure<AccountingStorageOptions>(configuration.GetSection(AccountingStorageOptions.SectionName));
 
-        #region Hnagfire + Daily Report Job
+        #region Hangfire
         // ── Hangfire ────────────────────────────────────────────────────────────────
         Services.AddHangfire(config =>
             config
@@ -182,11 +173,6 @@ public static class ApplicationDependencies
             options.WorkerCount = 2;          // keep low — this isn't a heavy workload
             options.Queues = ["daily-reports", "default"];
         });
-
-        // ── Daily Report Services ────────────────────────────────────────────────────
-        Services.Configure<DailyReportSettings>(configuration.GetSection("DailyReport"));
-        Services.AddScoped<IDailyReportJob, DailyReportJob>();
-        Services.AddScoped<IDailyReportEmailSender, DailyReportEmailSender>();
 
 #endregion
 

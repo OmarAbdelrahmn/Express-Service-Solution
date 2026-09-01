@@ -1,6 +1,4 @@
 using Application.Authentication;
-using Application.EmailWarmup;
-using Application.Service.DailyReport;
 using Application.Service.AccountingOutbox;
 using Application.Service.VehiclePermission;
 using Application.Service.Vacation;
@@ -97,29 +95,30 @@ using (var scope = app.Services.CreateScope())
     var identityBootstrapper = scope.ServiceProvider.GetRequiredService<IIdentityBootstrapper>();
     await identityBootstrapper.InitializeAsync();
 
-    var scheduler = scope.ServiceProvider.GetRequiredService<ReportScheduler>();
-    scheduler.RegisterAll();
 }
 
-app.UseHangfireDashboard("/job", new DashboardOptions
+app.UseHangfireDashboard("/job");
+
+// Remove legacy recurring jobs that send email. Hangfire persists recurring
+// jobs, so removing their registration alone would leave old schedules active.
+foreach (var emailJobId in new[]
 {
-    Authorization = [new HangfireDashboardAuthorizationFilter()]
-});
+    "email-warmup",
+    "daily-rider-report",
+    "absent-report-company-1",
+    "absent-report-company-2",
+    "monthly-progress-report-company-1",
+    "monthly-progress-report-company-2"
+})
+{
+    RecurringJob.RemoveIfExists(emailJobId);
+}
 
 RecurringJob.AddOrUpdate<IAccountingOutboxJob>(
     "accounting-outbox",
     job => job.ProcessAsync(CancellationToken.None),
     "* * * * *",
     new RecurringJobOptions { TimeZone = TimeZoneInfo.Utc });
-
-RecurringJob.AddOrUpdate<IDailyReportJob>(
-    "daily-rider-report",
-    x => x.RunAsync(null),
-    "0 12 * * *",
-    new RecurringJobOptions
-    {
-        TimeZone = TimeZoneInfo.FindSystemTimeZoneById("Arab Standard Time")
-    });
 
 RecurringJob.AddOrUpdate<IVehiclePermissionRenewalJob>(
     "vehicle-permission-renewal",
@@ -138,26 +137,6 @@ RecurringJob.AddOrUpdate<IVacationLifecycleJob>(
     {
         TimeZone = TimeZoneInfo.FindSystemTimeZoneById("Arab Standard Time")
     });
-
-RecurringJob.AddOrUpdate<IEmailWarmupJob>(
-    "email-warmup",
-    x => x.RunAsync(CancellationToken.None),
-    "*/20 9-17 * * *",   // Every 20 min, between 9:00 and 17:59
-    new RecurringJobOptions
-    {
-        TimeZone = TimeZoneInfo.FindSystemTimeZoneById("Arab Standard Time")
-    });
-
-// 3 PM KSA = 12:00 UTC
-RecurringJob.AddOrUpdate<IAbsentReportJob>(
-    "absent-report-company-1",
-    job => job.RunAsync(1, null),
-    "0 7 * * *");
-
-RecurringJob.AddOrUpdate<IAbsentReportJob>(
-    "absent-report-company-2",
-    job => job.RunAsync(2, null),
-    "0 7 * * *");
 
 
 app.Use(async (context, next) =>

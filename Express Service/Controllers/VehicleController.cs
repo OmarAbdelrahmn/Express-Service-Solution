@@ -111,6 +111,45 @@ public class VehicleController(IVehicleService service) : ControllerBase
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
 
+    [HttpGet("public/serial/{serial:int}")]
+    [AllowAnonymous]
+    public async Task<IActionResult> GetPublicRiderAndHousingBySerial(
+        [FromRoute] int serial,
+        CancellationToken cancellationToken)
+    {
+        var result = await _service.ExportPublicRiderAndHousingBySerialAsync(serial, cancellationToken);
+
+        return result.IsSuccess
+            ? File(
+                result.Value,
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                $"Vehicle_{serial}_Rider_Housing.xlsx")
+            : result.ToProblem();
+    }
+
+    [HttpPost("public/serial-file")]
+    [AllowAnonymous]
+    public async Task<IActionResult> ExportPublicRiderAndHousingFromSerialFile(
+        IFormFile file,
+        CancellationToken cancellationToken)
+    {
+        if (file is null || file.Length == 0)
+            return BadRequest(new { message = "An Excel file is required." });
+
+        if (!string.Equals(Path.GetExtension(file.FileName), ".xlsx", StringComparison.OrdinalIgnoreCase))
+            return BadRequest(new { message = "Only .xlsx files are supported." });
+
+        await using var inputStream = file.OpenReadStream();
+        var result = await _service.ExportPublicRiderAndHousingFromSerialFileAsync(inputStream, cancellationToken);
+
+        return result.IsSuccess
+            ? File(
+                result.Value,
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                $"Vehicle_Rider_Housing_{DateTime.UtcNow:yyyyMMdd_HHmmss}.xlsx")
+            : result.ToProblem();
+    }
+
     [HttpGet("plate/{plate}")]
     [Authorize(Roles = "Master,Admin,Member")]
     public async Task<IActionResult> GetByPlate([FromRoute] string plate)

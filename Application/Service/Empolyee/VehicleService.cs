@@ -1,5 +1,6 @@
 ﻿using Application.Abstraction;
 using Application.Contracts.Employees;
+using ClosedXML.Excel;
 using Domain;
 using Domain.Entities;
 using Mapster;
@@ -133,6 +134,233 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
         var companyResponses = companies.Adapt<IEnumerable<VehicleResponse>>();
 
         return Result.Success(companyResponses);
+    }
+
+    public async Task<Result<PublicVehicleLookupResponse>> GetPublicRiderAndHousingBySerialAsync(
+        int serialNumber,
+        CancellationToken cancellationToken = default)
+    {
+        var vehicle = await dbcontext.Vehicles
+            .AsNoTracking()
+            .Where(vehicle => vehicle.SerialNumber == serialNumber)
+            .Select(vehicle => new { vehicle.SerialNumber, vehicle.VehicleNumber })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (vehicle is null)
+        {
+            return Result.Failure<PublicVehicleLookupResponse>(
+                new Error("vehicle.NotFound", "Vehicle not found.", 404));
+        }
+
+        var currentRider = await dbcontext.RiderVehicleStatus
+            .AsNoTracking()
+            .Where(status =>
+                status.VehicleNumber == vehicle.VehicleNumber &&
+                status.IsActive &&
+                status.StatusType == VehicleStatusType.Taken &&
+                status.EmployeeIqamaNo.HasValue)
+            .OrderByDescending(status => status.Timestamp)
+            .Join(
+                dbcontext.RiderDetails.AsNoTracking(),
+                status => status.EmployeeIqamaNo!.Value,
+                rider => rider.EmployeeIqamaNo,
+                (_, rider) => new PublicVehicleRiderResponse(
+                    rider.Employee.NameAR,
+                    rider.Employee.NameEN,
+                    rider.Employee.Housing == null
+                        ? null
+                        : new PublicVehicleHousingResponse(
+                            rider.Employee.Housing.Name,
+                            rider.Employee.Housing.Address)))
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return Result.Success(new PublicVehicleLookupResponse(vehicle.SerialNumber, currentRider));
+    }
+
+    public async Task<Result<byte[]>> ExportPublicRiderAndHousingBySerialAsync(
+        int serialNumber,
+        CancellationToken cancellationToken = default)
+    {
+        var lookup = await GetPublicRiderAndHousingBySerialAsync(serialNumber, cancellationToken);
+
+        if (lookup.IsFailure)
+            return Result.Failure<byte[]>(lookup.Error);
+
+        using var workbook = new XLWorkbook();
+        var worksheet = workbook.Worksheets.Add("Vehicle Lookup");
+
+        worksheet.Cell(1, 1).Value = "Serial Number";
+        worksheet.Cell(1, 2).Value = "Current Rider (Arabic)";
+        worksheet.Cell(1, 3).Value = "Current Rider (English)";
+        worksheet.Cell(1, 4).Value = "Housing";
+        worksheet.Cell(1, 5).Value = "Housing Address";
+
+        worksheet.Cell(2, 1).Value = lookup.Value.SerialNumber;
+        worksheet.Cell(2, 2).Value = lookup.Value.CurrentRider?.NameArabic ?? "Not assigned";
+        worksheet.Cell(2, 3).Value = lookup.Value.CurrentRider?.NameEnglish ?? "Not assigned";
+        worksheet.Cell(2, 4).Value = lookup.Value.CurrentRider?.Housing?.Name ?? "Not assigned";
+        worksheet.Cell(2, 5).Value = lookup.Value.CurrentRider?.Housing?.Address ?? "Not assigned";
+
+        worksheet.Row(1).Style.Font.Bold = true;
+        worksheet.Range(1, 1, 1, 5).Style.Fill.BackgroundColor = XLColor.LightBlue;
+        worksheet.Columns().AdjustToContents();
+
+        using var stream = new MemoryStream();
+        workbook.SaveAs(stream);
+
+        return Result.Success(stream.ToArray());
+    }
+
+    public async Task<Result<byte[]>> ExportPublicRiderAndHousingFromSerialFileAsync(
+        Stream inputStream,
+        CancellationToken cancellationToken = default)
+    {
+        using var inputWorkbook = new XLWorkbook(inputStream);
+        var inputWorksheet = inputWorkbook.Worksheets.FirstOrDefault();
+
+        if (inputWorksheet is null)
+            return Result.Failure<byte[]>(new Error("vehicle.InvalidFile", "The workbook does not contain a worksheet.", 400));
+
+        var serialRows = inputWorksheet.Column(1)
+            .CellsUsed()
+            .Skip(1)
+            .Select(cell => cell.TryGetValue<int>(out var serial) ? (int?)serial : null)
+            .ToList();
+
+        if (serialRows.Count == 0)
+            return Result.Failure<byte[]>(new Error("vehicle.InvalidFile", "The first column must contain serial numbers below the header.", 400));
+
+        var serialNumbers = serialRows
+            .Where(serial => serial.HasValue)
+            .Select(serial => serial!.Value)
+            .Distinct()
+            .ToList();
+
+        var vehicles = await dbcontext.Vehicles
+            .AsNoTracking()
+            .Where(vehicle => serialNumbers.Contains(vehicle.SerialNumber))
+            .Select(vehicle => new
+            {
+                vehicle.SerialNumber,
+                vehicle.VehicleNumber,
+                vehicle.Location,
+                AssignedRiderIqamaNo = vehicle.RiderDetails == null
+                    ? (long?)null
+                    : vehicle.RiderDetails.EmployeeIqamaNo
+            })
+            .ToListAsync(cancellationToken);
+
+        var vehicleBySerial = vehicles
+            .GroupBy(vehicle => vehicle.SerialNumber)
+            .ToDictionary(group => group.Key, group => group.First());
+
+        var vehicleNumbers = vehicles
+            .Select(vehicle => vehicle.VehicleNumber)
+            .Distinct()
+            .ToList();
+
+        var currentStatuses = await dbcontext.RiderVehicleStatus
+            .AsNoTracking()
+            .Where(status =>
+                vehicleNumbers.Contains(status.VehicleNumber) &&
+                status.IsActive &&
+                status.StatusType == VehicleStatusType.Taken &&
+                status.EmployeeIqamaNo.HasValue)
+            .OrderByDescending(status => status.Timestamp)
+            .ToListAsync(cancellationToken);
+
+        var currentRiderIqamaByVehicleNumber = currentStatuses
+            .GroupBy(status => status.VehicleNumber)
+            .ToDictionary(group => group.Key, group => group.First().EmployeeIqamaNo!.Value);
+
+        var riderIqamaNumbers = currentRiderIqamaByVehicleNumber.Values
+            .Concat(vehicles
+                .Where(vehicle => vehicle.AssignedRiderIqamaNo.HasValue)
+                .Select(vehicle => vehicle.AssignedRiderIqamaNo!.Value))
+            .Distinct()
+            .ToList();
+        var riders = await dbcontext.RiderDetails
+            .AsNoTracking()
+            .Where(rider => riderIqamaNumbers.Contains(rider.EmployeeIqamaNo))
+            .Select(rider => new
+            {
+                rider.EmployeeIqamaNo,
+                rider.Employee.NameAR,
+                rider.Employee.NameEN,
+                HousingName = rider.Employee.Housing == null ? null : rider.Employee.Housing.Name,
+                HousingAddress = rider.Employee.Housing == null ? null : rider.Employee.Housing.Address
+            })
+            .ToListAsync(cancellationToken);
+
+        var riderByIqama = riders.ToDictionary(rider => rider.EmployeeIqamaNo);
+
+        using var outputWorkbook = new XLWorkbook();
+        var outputWorksheet = outputWorkbook.Worksheets.Add("Vehicle Lookup");
+        var headers = new[]
+        {
+            "Serial Number", "Current Rider (Arabic)", "Current Rider (English)",
+            "Housing", "Housing Address", "Vehicle Location", "Status"
+        };
+
+        for (var column = 0; column < headers.Length; column++)
+            outputWorksheet.Cell(1, column + 1).Value = headers[column];
+
+        for (var index = 0; index < serialRows.Count; index++)
+        {
+            var row = index + 2;
+            var serialNumber = serialRows[index];
+
+            if (!serialNumber.HasValue)
+            {
+                outputWorksheet.Cell(row, 7).Value = "Invalid serial number";
+                continue;
+            }
+
+            outputWorksheet.Cell(row, 1).Value = serialNumber.Value;
+
+            if (!vehicleBySerial.TryGetValue(serialNumber.Value, out var vehicle))
+            {
+                outputWorksheet.Cell(row, 7).Value = "Vehicle not found";
+                continue;
+            }
+
+            outputWorksheet.Cell(row, 6).Value = vehicle.Location;
+
+            currentRiderIqamaByVehicleNumber.TryGetValue(vehicle.VehicleNumber, out var riderIqamaNo);
+            var hasCurrentRiderIqamaNo = riderIqamaNo != 0;
+            var housingRiderIqamaNo = hasCurrentRiderIqamaNo
+                ? riderIqamaNo
+                : vehicle.AssignedRiderIqamaNo;
+
+            if (housingRiderIqamaNo.HasValue && riderByIqama.TryGetValue(housingRiderIqamaNo.Value, out var housingRider))
+            {
+                outputWorksheet.Cell(row, 4).Value = housingRider.HousingName ?? "Not assigned";
+                outputWorksheet.Cell(row, 5).Value = housingRider.HousingAddress ?? vehicle.Location;
+            }
+            else
+            {
+                outputWorksheet.Cell(row, 5).Value = vehicle.Location;
+            }
+
+            if (!hasCurrentRiderIqamaNo || !riderByIqama.TryGetValue(riderIqamaNo, out var rider))
+            {
+                outputWorksheet.Cell(row, 7).Value = "No current rider";
+                continue;
+            }
+
+            outputWorksheet.Cell(row, 2).Value = rider.NameAR;
+            outputWorksheet.Cell(row, 3).Value = rider.NameEN;
+            outputWorksheet.Cell(row, 7).Value = "Found";
+        }
+
+        outputWorksheet.Row(1).Style.Font.Bold = true;
+        outputWorksheet.Range(1, 1, 1, headers.Length).Style.Fill.BackgroundColor = XLColor.LightBlue;
+        outputWorksheet.Columns().AdjustToContents();
+
+        using var outputStream = new MemoryStream();
+        outputWorkbook.SaveAs(outputStream);
+
+        return Result.Success(outputStream.ToArray());
     }
 
     #endregion
