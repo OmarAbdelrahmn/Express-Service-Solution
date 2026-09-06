@@ -144,7 +144,6 @@ public class RiderShiftService(ApplicationDbcontext dbcontext, IRiderWorkingIdHi
             totalRecords = rows.Count();
 
             var shiftsToAdd = new List<RiderShift>();
-            var outRiderWorkingIds = await GetOutRiderWorkingIdsAsync(cancellationToken);
             var rowNumber = 1;
 
             foreach (var row in rows)
@@ -157,11 +156,6 @@ public class RiderShiftService(ApplicationDbcontext dbcontext, IRiderWorkingIdHi
                     if (!shiftData.IsValid)
                     {
                         errors.Add(new ImportError(rowNumber, shiftData.WorkingId ?? "N/A", shiftData.ErrorMessage!));
-                        continue;
-                    }
-
-                    if (outRiderWorkingIds.Contains(shiftData.WorkingId!))
-                    {
                         continue;
                     }
 
@@ -404,7 +398,6 @@ public class RiderShiftService(ApplicationDbcontext dbcontext, IRiderWorkingIdHi
             var rows = worksheet.RowsUsed().Skip(1);
             var rowNumber = 1;
             var tempComparisons = new List<TempRiderShiftComparison>();
-            var outRiderWorkingIds = await GetOutRiderWorkingIdsAsync(cancellationToken);
 
             foreach (var row in rows)
             {
@@ -419,11 +412,6 @@ public class RiderShiftService(ApplicationDbcontext dbcontext, IRiderWorkingIdHi
                             rowNumber,
                             shiftData.WorkingId?.ToString() ?? "N/A",
                             shiftData.ErrorMessage!));
-                        continue;
-                    }
-
-                    if (outRiderWorkingIds.Contains(shiftData.WorkingId!))
-                    {
                         continue;
                     }
 
@@ -1075,20 +1063,6 @@ public class RiderShiftService(ApplicationDbcontext dbcontext, IRiderWorkingIdHi
         }
         return 0;
     }
-
-    private async Task<HashSet<string>> GetOutRiderWorkingIdsAsync(CancellationToken cancellationToken)
-    {
-        var outRiderIds = await dbcontext.OutRiderInfos
-            .AsNoTracking()
-            .Select(r => r.RiderId)
-            .ToListAsync(cancellationToken);
-
-        return outRiderIds
-            .Where(riderId => !string.IsNullOrWhiteSpace(riderId))
-            .Select(riderId => riderId.Trim())
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-    }
-
 
     public async Task<Result<RiderShiftResponse>> CreateShiftAsync(
        CreateRiderShiftRequest request,
@@ -1850,52 +1824,105 @@ public class RiderShiftService(ApplicationDbcontext dbcontext, IRiderWorkingIdHi
                         continue;
                     }
 
-                    // ── CASE 3: WorkingId not current — check history ──────────────────
+                    // ── CASE 3: WorkingId not current — check ownership on the shift date ──
+                    var selectedDate = updateData.ShiftDate!.Value;
+                    var selectedDateStart = selectedDate.ToDateTime(TimeOnly.MinValue);
+                    var selectedDateEnd = selectedDate.ToDateTime(TimeOnly.MaxValue);
+
                     var historyRecord = await dbcontext.Set<RiderWorkingIdHistory>()
                         .Include(h => h.Employee)
                         .Include(h => h.Company)
-                        .Where(h => h.WorkingId == updateData.WorkingId)
+                        .Where(h =>
+                            h.WorkingId == updateData.WorkingId &&
+                            h.StartDate <= selectedDateEnd &&
+                            (!h.EndDate.HasValue || h.EndDate.Value >= selectedDateStart))
                         .OrderByDescending(h => h.StartDate)
                         .FirstOrDefaultAsync(cancellationToken);
 
-                    if (historyRecord == null)
-                    {
-                        notFoundShifts.Add(new NotFoundDetail(
-                            rowNumber,
-                            updateData.WorkingId!,
-                            updateData.ShiftDate!.Value,
-                            "WorkingId not found in current riders or history"));
-                        continue;
-                    }
+                    // Get the rider's current WorkingId via the date-valid history record.
+                    var currentRider = historyRecord == null
+                        ? null
+                        : await dbcontext.RiderDetails
+                            .Include(r => r.Employee)
+                            .Include(r => r.Company)
+                            .FirstOrDefaultAsync(r =>
+                                r.EmployeeIqamaNo == historyRecord.RiderIqamaNo,
+                                cancellationToken);
 
-                    // Get the rider's current WorkingId via history
-                    var currentRider = await dbcontext.RiderDetails
-                        .Include(r => r.Employee)
-                        .Include(r => r.Company)
-                        .FirstOrDefaultAsync(r =>
-                            r.EmployeeIqamaNo == historyRecord.RiderIqamaNo,
+                    var resolvedFromShiftRecords = false;
+                    string? shiftLookupError = null;
+
+                    if (currentRider == null)
+                    {
+                        // Last-resort ownership source for incomplete legacy data. Restrict the
+                        // evidence to the selected month and choose the closest ownership record
+                        // at or before the requested date so an ID reused later is not misapplied.
+                        (currentRider, shiftLookupError) = await ResolveRiderFromMonthlyShiftsAsync(
+                            updateData.WorkingId!,
+                            selectedDate,
                             cancellationToken);
+                        resolvedFromShiftRecords = currentRider != null;
+                    }
 
                     if (currentRider == null)
                     {
                         notFoundShifts.Add(new NotFoundDetail(
                             rowNumber,
                             updateData.WorkingId!,
-                            updateData.ShiftDate!.Value,
-                            $"Rider with IqamaNo {historyRecord.RiderIqamaNo} not found"));
+                            selectedDate,
+                            shiftLookupError ?? "WorkingId not found in current riders, date-valid history, or rider shifts for the selected month"));
                         continue;
                     }
 
-                    // ── CASE 3a: Found via history — try to find shift with current WorkingId ──
-                    var shiftWithCurrentId = await dbcontext.RiderShifts
-                        .Include(s => s.Rider)
-                            .ThenInclude(r => r.Employee)
-                        .Include(s => s.Rider)
-                            .ThenInclude(r => r.Company)
-                        .FirstOrDefaultAsync(s =>
-                            s.WorkingId == currentRider.WorkingId &&
-                            s.ShiftDate == updateData.ShiftDate,
-                            cancellationToken);
+                    // ── CASE 3a: Find the exact dated shift for the resolved rider ─────
+                    RiderShift? shiftWithCurrentId;
+
+                    if (resolvedFromShiftRecords)
+                    {
+                        var shiftsForResolvedRider = await dbcontext.RiderShifts
+                            .Include(s => s.Rider)
+                                .ThenInclude(r => r.Employee)
+                            .Include(s => s.Rider)
+                                .ThenInclude(r => r.Company)
+                            .Where(s => s.RiderId == currentRider.Id && s.ShiftDate == selectedDate)
+                            .ToListAsync(cancellationToken);
+
+                        var companyPerformanceShifts = shiftsForResolvedRider
+                            .Where(s => s.CompanyId == 2)
+                            .ToList();
+                        var uploadedIdShifts = shiftsForResolvedRider
+                            .Where(s => s.WorkingId == updateData.WorkingId)
+                            .ToList();
+
+                        if (companyPerformanceShifts.Count > 1 ||
+                            (companyPerformanceShifts.Count == 0 &&
+                             uploadedIdShifts.Count != 1 &&
+                             shiftsForResolvedRider.Count > 1))
+                        {
+                            notFoundShifts.Add(new NotFoundDetail(
+                                rowNumber,
+                                updateData.WorkingId!,
+                                selectedDate,
+                                $"Multiple shifts found for resolved RiderId {currentRider.Id} on {selectedDate}; no update was applied"));
+                            continue;
+                        }
+
+                        shiftWithCurrentId = companyPerformanceShifts.SingleOrDefault()
+                            ?? uploadedIdShifts.SingleOrDefault()
+                            ?? shiftsForResolvedRider.SingleOrDefault();
+                    }
+                    else
+                    {
+                        shiftWithCurrentId = await dbcontext.RiderShifts
+                            .Include(s => s.Rider)
+                                .ThenInclude(r => r.Employee)
+                            .Include(s => s.Rider)
+                                .ThenInclude(r => r.Company)
+                            .FirstOrDefaultAsync(s =>
+                                s.WorkingId == currentRider.WorkingId &&
+                                s.ShiftDate == selectedDate,
+                                cancellationToken);
+                    }
 
                     if (shiftWithCurrentId != null)
                     {
@@ -1923,17 +1950,27 @@ public class RiderShiftService(ApplicationDbcontext dbcontext, IRiderWorkingIdHi
                         successfulUpdates.Add(new UpdateDetail(
                             rowNumber,
                             updateData.WorkingId!,
-                            currentRider.WorkingId!,
+                            shiftWithCurrentId.WorkingId,
                             currentRider.Employee.NameEN,
-                            updateData.ShiftDate!.Value,
+                            selectedDate,
                             oldAcceptedOrders,
                             updateData.AcceptedOrders ?? oldAcceptedOrders,
-                            currentRider.Company.Name,
+                            shiftWithCurrentId.Company.Name,
                             true));
                     }
                     else
                     {
-                        // ── CASE 3b: Found via history but no shift for this date — create one ──
+                        // ── CASE 3b: Rider resolved but no shift for this date — create one ──
+                        if (string.IsNullOrWhiteSpace(currentRider.WorkingId))
+                        {
+                            notFoundShifts.Add(new NotFoundDetail(
+                                rowNumber,
+                                updateData.WorkingId!,
+                                selectedDate,
+                                $"Resolved RiderId {currentRider.Id}, but the rider has no current WorkingId; no shift was created"));
+                            continue;
+                        }
+
                         var newStatus = CalculateShiftStatus(
                             updateData.AcceptedOrders ?? 0,
                             currentRider.Company.Name);
@@ -1941,8 +1978,8 @@ public class RiderShiftService(ApplicationDbcontext dbcontext, IRiderWorkingIdHi
                         var newShift = new RiderShift
                         {
                             RiderId = currentRider.Id,
-                            WorkingId = currentRider.WorkingId!,
-                            ShiftDate = updateData.ShiftDate!.Value,
+                            WorkingId = currentRider.WorkingId,
+                            ShiftDate = selectedDate,
                             AcceptedDailyOrders = updateData.AcceptedOrders ?? 0,
                             RejectedDailyOrders = 0,
                             RealRejectedDailyOrders = 0,
@@ -1961,9 +1998,9 @@ public class RiderShiftService(ApplicationDbcontext dbcontext, IRiderWorkingIdHi
                         successfulUpdates.Add(new UpdateDetail(
                             rowNumber,
                             updateData.WorkingId!,
-                            currentRider.WorkingId!,
+                            currentRider.WorkingId,
                             currentRider.Employee.NameEN,
-                            updateData.ShiftDate!.Value,
+                            selectedDate,
                             0,
                             updateData.AcceptedOrders ?? 0,
                             currentRider.Company.Name,
@@ -1996,6 +2033,61 @@ public class RiderShiftService(ApplicationDbcontext dbcontext, IRiderWorkingIdHi
                 new Error("ServerError", $"Error reading Excel file: {ex.Message}", 500));
         }
     }
+
+    private async Task<(RiderDetails? Rider, string? Error)> ResolveRiderFromMonthlyShiftsAsync(
+        string workingId,
+        DateOnly selectedDate,
+        CancellationToken cancellationToken)
+    {
+        var monthStart = new DateOnly(selectedDate.Year, selectedDate.Month, 1);
+        var monthEnd = monthStart.AddMonths(1).AddDays(-1);
+
+        var ownershipEvidence = await dbcontext.RiderShifts
+            .AsNoTracking()
+            .Where(s =>
+                s.WorkingId == workingId &&
+                s.ShiftDate >= monthStart &&
+                s.ShiftDate <= monthEnd)
+            .Select(s => new { s.RiderId, s.ShiftDate })
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
+        if (ownershipEvidence.Count == 0)
+        {
+            return (null,
+                $"WorkingId {workingId} was not found in rider shifts between {monthStart} and {monthEnd}");
+        }
+
+        var evidenceOnOrBeforeDate = ownershipEvidence
+            .Where(s => s.ShiftDate <= selectedDate)
+            .ToList();
+        var closestEvidenceDate = evidenceOnOrBeforeDate.Count > 0
+            ? evidenceOnOrBeforeDate.Max(s => s.ShiftDate)
+            : ownershipEvidence.Min(s => s.ShiftDate);
+
+        var riderIdsAtClosestDate = ownershipEvidence
+            .Where(s => s.ShiftDate == closestEvidenceDate)
+            .Select(s => s.RiderId)
+            .Distinct()
+            .ToList();
+
+        if (riderIdsAtClosestDate.Count != 1)
+        {
+            return (null,
+                $"WorkingId {workingId} maps to multiple riders on {closestEvidenceDate}; no update was applied");
+        }
+
+        var riderId = riderIdsAtClosestDate[0];
+        var rider = await dbcontext.RiderDetails
+            .Include(r => r.Employee)
+            .Include(r => r.Company)
+            .FirstOrDefaultAsync(r => r.Id == riderId, cancellationToken);
+
+        return rider == null
+            ? (null, $"RiderId {riderId} from rider shifts no longer has a RiderDetails record")
+            : (rider, null);
+    }
+
     private static UpdateColumnMapping FindUpdateColumnIndices(IXLWorksheet worksheet)
     {
         var headerRow = worksheet.FirstRowUsed();

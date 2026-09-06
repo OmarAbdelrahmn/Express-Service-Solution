@@ -2471,11 +2471,29 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                 ? (int)Math.Ceiling((decimal)currentDayOfMonth / lastDayOfMonth * cfg.FullMonthTargetOrders)
                 : cfg.FullMonthTargetOrders;
 
-            // ── fetch freelancer riders for Company 2 ─────────────────────
+            // ── identify Company 2 riders from their shift records ────────
+            // A rider's CompanyId on RiderDetails is not authoritative because
+            // a rider can be assigned to a different company over time.
+            // Include the preceding month so existing riders with no shift yet
+            // this month are still validated as absences.
+            var previousMonthStart = startDate.AddMonths(-1);
+            var company2RiderIds = await _dbcontext.RiderShifts
+                .Where(s => s.CompanyId == KeetaCompanyId &&
+                            s.ShiftDate >= previousMonthStart &&
+                            s.ShiftDate <= endDate)
+                .Select(s => s.RiderId)
+                .Distinct()
+                .ToListAsync(cancellationToken);
+
+            // ── fetch eligible freelancer rider details ───────────────────
             var riders = await _dbcontext.RiderDetails
                 .Include(r => r.Employee)
                     .ThenInclude(e => e.Housing)
-                .Where(r => r.CompanyId == 2 && r.IsFreelancer != true && r.Employee.IsDeleted != true && !r.Employee.IsEmployee && r.Employee.Status.ToLower() == "enable")
+                .Where(r => company2RiderIds.Contains(r.Id) &&
+                            r.IsFreelancer != true &&
+                            r.Employee.IsDeleted != true &&
+                            !r.Employee.IsEmployee &&
+                            r.Employee.Status.ToLower() == "enable")
                 .AsNoTracking()
                 .ToListAsync(cancellationToken);
 
@@ -2488,7 +2506,7 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
             // ── fetch their shifts within the period ──────────────────────
             var shifts = await _dbcontext.RiderShifts
                 .Where(s => riderIds.Contains(s.RiderId) &&
-                            s.CompanyId == 2 &&
+                            s.CompanyId == KeetaCompanyId &&
                             s.ShiftDate >= startDate &&
                             s.ShiftDate <= endDate)
                 .AsNoTracking()

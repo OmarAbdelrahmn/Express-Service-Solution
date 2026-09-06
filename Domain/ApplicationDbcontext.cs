@@ -165,8 +165,6 @@ public class ApplicationDbcontext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<SystemAuditEvent> SystemAuditEvents { get; set; }
 
     public DbSet<TransporterShift> TransporterShifts { get; set; }
-    public DbSet<OutRiderInfo> OutRiderInfos { get; set; }
-    public DbSet<OutageShiftPerformance> OutageShiftPerformances { get; set; }
     public DbSet<MaintenanceInterval> MaintenanceIntervals { get; set; }
     public DbSet<KeetaDriverShift> KeetaDriverShifts { get; set; }
     public DbSet<KeetaShiftSlot> KeetaShiftSlots{ get; set; }
