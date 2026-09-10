@@ -130,6 +130,7 @@ public class ApplicationDbcontext : IdentityDbContext<ApplicationUser, Applicati
     public required DbSet<Housing> Housings { get; set; }
     public required DbSet<RiderDetails> RiderDetails { get; set; }
     public required DbSet<RiderShift> RiderShifts { get; set; }
+    public DbSet<RiderScorePerformance> RiderScorePerformances { get; set; }
     public required DbSet<RiderShiftSubstitution> RiderShiftSubstitutions { get; set; }
     public required DbSet<Vehicle> Vehicles { get; set; }
     public required DbSet<DeletedEmployees> DeletedEmployees { get; set; }

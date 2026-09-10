@@ -30,6 +30,7 @@ using Application.Service.PlatformImports;
 using Application.Service.KeetaBreaks;
 using Application.Service.RiderPayroll;
 using Application.Service.RiderSalaryImport;
+using Application.Service.RiderScorePerformance;
 using Application.Service.AccountingStorage;
 using Application.Service.AccountingPosting;
 using Application.Service.AccountingOutbox;
@@ -110,6 +111,7 @@ public static class ApplicationDependencies
         Services.AddScoped<IRiderService, RiderService>();
         Services.AddScoped<IRiderSub, RiderSub>();
         Services.AddScoped<IRiderShiftService, RiderShiftService>();
+        Services.AddScoped<IRiderScorePerformanceService, RiderScorePerformanceService>();
         Services.AddScoped<IReportService, ReportService>();
         Services.AddScoped<ITemp, Temp>();
         Services.AddScoped<IHungerDisabilityService, HungerDisabilityService>();
