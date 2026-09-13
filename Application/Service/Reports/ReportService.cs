@@ -1281,7 +1281,9 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                 : 0;
 
             // Group by rider and calculate individual statistics
-            var riderGroups = shifts.GroupBy(s => s.RiderId);
+            // WorkingId is stored on each shift so historical reports remain accurate
+            // after the rider's current WorkingId changes.
+            var riderGroups = shifts.GroupBy(s => new { s.RiderId, s.WorkingId });
             var riderDetails = new List<Company2RiderStackedDetail>();
 
             foreach (var group in riderGroups)
@@ -1307,11 +1309,11 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                     : 0;
 
                 riderDetails.Add(new Company2RiderStackedDetail(
-                    RiderId: rider.Id,
+                    RiderId: group.Key.RiderId,
                     IqamaNo: rider.EmployeeIqamaNo,
                     RiderNameAR: rider.Employee.NameAR,
                     RiderNameEN: rider.Employee.NameEN,
-                    WorkingId: rider.WorkingId ?? "0",
+                    WorkingId: group.Key.WorkingId,
                     HousingName: rider.Employee.Housing?.Name ?? "غير محدد",
                     TotalShifts: riderShiftCount,
                     TotalStackedDeliveries: riderStackedTotal,
@@ -5110,7 +5112,9 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                 ));
             }
 
-            var riderGroups = shifts.GroupBy(s => s.RiderId);
+            // The shift is the historical source of the WorkingId. Grouping by it
+            // prevents a rider's current ID from changing past report results.
+            var riderGroups = shifts.GroupBy(s => new { s.RiderId, s.WorkingId });
             var riderDetails = new List<RiderRejectionDetail>();
 
             foreach (var group in riderGroups)
@@ -5134,11 +5138,11 @@ public class ReportService(ApplicationDbcontext dbcontext) : IReportService
                     : 0;
 
                 riderDetails.Add(new RiderRejectionDetail(
-                    RiderId: rider.Id,
+                    RiderId: group.Key.RiderId,
                     IqamaNo: rider.EmployeeIqamaNo,
                     RiderNameAR: rider.Employee.NameAR,
                     RiderNameEN: rider.Employee.NameEN,
-                    WorkingId: riderShifts.First().WorkingId,
+                    WorkingId: group.Key.WorkingId,
                     TotalShifts: totalShifts,
                     TotalOrders: totalOrders,
                     TargetOrders: targetOrders,
