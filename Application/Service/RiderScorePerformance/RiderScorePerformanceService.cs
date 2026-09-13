@@ -108,15 +108,34 @@ public class RiderScorePerformanceService(
             : Result.Success(response);
     }
 
-    public async Task<Result<RiderScorePerformanceListResponse>> ListAsync(
+    public Task<Result<RiderScorePerformanceListResponse>> ListAsync(
         RiderScorePerformanceFilter filter,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        ListAsync(filter, null, cancellationToken);
+
+    public Task<Result<RiderScorePerformanceListResponse>> ListForHousingAsync(
+        int housingId,
+        RiderScorePerformanceFilter filter,
+        CancellationToken cancellationToken = default) =>
+        ListAsync(filter, housingId, cancellationToken);
+
+    private async Task<Result<RiderScorePerformanceListResponse>> ListAsync(
+        RiderScorePerformanceFilter filter,
+        int? housingId,
+        CancellationToken cancellationToken)
     {
         if (filter.StartDate.HasValue && filter.EndDate.HasValue && filter.StartDate > filter.EndDate)
             return Result.Failure<RiderScorePerformanceListResponse>(
                 RiderScorePerformanceErrors.InvalidRequest("StartDate must be on or before EndDate."));
 
         var query = dbcontext.RiderScorePerformances.AsNoTracking().AsQueryable();
+
+        if (housingId.HasValue)
+        {
+            query = query.Where(x =>
+                x.Rider.Employee.HousingId == housingId.Value &&
+                !x.Rider.Employee.IsDeleted);
+        }
 
         if (filter.RiderId.HasValue)
             query = query.Where(x => x.RiderId == filter.RiderId.Value);

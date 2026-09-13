@@ -1,6 +1,7 @@
 ﻿using Application.Abstraction;
 using Application.Contracts.InventoryAudit;
 using Application.Contracts.RiderAccessoryCon;
+using Application.Contracts.RiderScorePerformance;
 using Application.Contracts.SparePartCo;
 using Application.Contracts.SupplierCon;
 using Application.Service.Reports;
@@ -182,6 +183,10 @@ public interface IMemberService
     // Employees & Riders
     Task<Result<List<HousingEmployeeResponse>>> GetHousingEmployees(long managerIqamaNo);
     Task<Result<List<HousingRiderResponses>>> GetHousingRiders(long managerIqamaNo);
+    Task<Result<RiderScorePerformanceListResponse>> GetHousingRiderScoresAsync(
+        long managerIqamaNo,
+        RiderScorePerformanceFilter filter,
+        CancellationToken cancellationToken = default);
     Task<Result<EmployeeDetailResponse>> GetEmployeeDetails(long managerIqamaNo, long employeeIqamaNo);
 
     // Shifts & Performance

@@ -17,6 +17,11 @@ public interface IRiderScorePerformanceService
         RiderScorePerformanceFilter filter,
         CancellationToken cancellationToken = default);
 
+    Task<Result<RiderScorePerformanceListResponse>> ListForHousingAsync(
+        int housingId,
+        RiderScorePerformanceFilter filter,
+        CancellationToken cancellationToken = default);
+
     Task<Result<RiderScorePerformanceResponse>> UpdateAsync(
         int id,
         UpdateRiderScorePerformanceRequest request,

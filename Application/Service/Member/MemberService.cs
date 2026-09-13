@@ -3,11 +3,13 @@ using Application.Abstraction.Errors;
 using Application.Authentication;
 using Application.Contracts.InventoryAudit;
 using Application.Contracts.RiderAccessoryCon;
+using Application.Contracts.RiderScorePerformance;
 using Application.Contracts.SparePartCo;
 using Application.Contracts.SupplierCon;
 using Application.Service.Empolyee;
 using Application.Service.InventoryAudit;
 using Application.Service.Reports;
+using Application.Service.RiderScorePerformance;
 using Domain;
 using Domain.Entities;
 using Domain.Entities.Spare;
@@ -18,13 +20,14 @@ using static Application.Service.Member.IMemberService;
 
 namespace Application.Service.Member;
 
-public class MemberService(UserManager<ApplicationUser> userManager, SignInManager<ApplicationUser> signInManager, IJwtProvider jwtProvider, ApplicationDbcontext context, IReportService reportService, ILogger<MemberService> logger) : IMemberService
+public class MemberService(UserManager<ApplicationUser> userManager, SignInManager<ApplicationUser> signInManager, IJwtProvider jwtProvider, ApplicationDbcontext context, IReportService reportService, IRiderScorePerformanceService riderScorePerformanceService, ILogger<MemberService> logger) : IMemberService
 {
     private readonly UserManager<ApplicationUser> userManager = userManager;
     private readonly SignInManager<ApplicationUser> signInManager = signInManager;
     private readonly IJwtProvider jwtProvider = jwtProvider;
     private readonly ApplicationDbcontext context = context;
     private readonly IReportService reportService = reportService;
+    private readonly IRiderScorePerformanceService riderScorePerformanceService = riderScorePerformanceService;
     private readonly ILogger<MemberService> logger = logger;
 
     public async Task<Result<HousingSpendingReportResponse>> GetHousingSpendingReportAsync(
@@ -2224,6 +2227,21 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
         )).ToList();
 
         return Result.Success(response);
+    }
+
+    public async Task<Result<RiderScorePerformanceListResponse>> GetHousingRiderScoresAsync(
+        long managerIqamaNo,
+        RiderScorePerformanceFilter filter,
+        CancellationToken cancellationToken = default)
+    {
+        var housingResult = await GetManagedHousing(managerIqamaNo);
+        if (housingResult.IsFailure)
+            return Result.Failure<RiderScorePerformanceListResponse>(housingResult.Error);
+
+        return await riderScorePerformanceService.ListForHousingAsync(
+            housingResult.Value.Id,
+            filter,
+            cancellationToken);
     }
     // Continuation of HousingMemberService class
 

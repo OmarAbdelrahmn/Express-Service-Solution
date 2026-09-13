@@ -281,6 +281,40 @@ public class RiderScorePerformanceServiceTests
     }
 
     [Fact]
+    public async Task ListForHousing_ReturnsOnlyScoresForRidersCurrentlyInThatHousing()
+    {
+        await using var db = CreateDbContext();
+        var housingRider = await SeedRiderAsync(
+            db,
+            110,
+            "TEST-RIDER-110",
+            7100000010,
+            housingId: 21);
+        var otherHousingRider = await SeedRiderAsync(
+            db,
+            111,
+            "TEST-RIDER-111",
+            7100000011,
+            housingId: 22);
+        db.ChangeTracker.Clear();
+        var service = CreateService(db);
+        var date = new DateOnly(2026, 8, 23);
+
+        await service.CreateAsync(CreateRequest(housingRider.WorkingId!, date, "A"));
+        await service.CreateAsync(CreateRequest(otherHousingRider.WorkingId!, date, "B"));
+
+        var result = await service.ListForHousingAsync(
+            21,
+            new RiderScorePerformanceFilter(null, null, null, null, null, null));
+
+        Assert.True(result.IsSuccess);
+        var record = Assert.Single(Assert.Single(result.Value.Days).Records);
+        Assert.Equal(housingRider.Id, record.RiderId);
+        Assert.Equal(1, result.Value.Totals.RecordCount);
+        Assert.Equal(1, result.Value.Totals.RiderCount);
+    }
+
+    [Fact]
     public async Task Import_RejectsWorkbookWithMissingRequiredHeader()
     {
         await using var db = CreateDbContext();
@@ -309,7 +343,8 @@ public class RiderScorePerformanceServiceTests
         ApplicationDbcontext db,
         int riderId,
         string workingId,
-        long iqamaNo)
+        long iqamaNo,
+        int? housingId = null)
     {
         var company = await db.Companies.FirstOrDefaultAsync(x => x.Id == 901);
         if (company is null)
@@ -325,7 +360,8 @@ public class RiderScorePerformanceServiceTests
             IqamaEndH = new DateOnly(2032, 1, 1),
             NameEN = $"Synthetic Rider {riderId}",
             NameAR = $"Synthetic Rider {riderId}",
-            DateOfBirth = new DateOnly(1992, 1, 1)
+            DateOfBirth = new DateOnly(1992, 1, 1),
+            HousingId = housingId
         };
         var rider = new RiderDetails
         {

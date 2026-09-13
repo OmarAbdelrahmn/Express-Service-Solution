@@ -1,4 +1,5 @@
 ﻿using Application.Extensions;
+using Application.Contracts.RiderScorePerformance;
 using Application.Service.Member;
 using Application.Service.Reminder;
 using Microsoft.AspNetCore.Mvc;
@@ -542,6 +543,19 @@ public class MemberController(IMemberService housingService, IReminderService re
     {
         var iqamaNo = User.GetUserIqamaNo()!;
         var result = await housingService.GetHousingRiders(iqamaNo);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
+    [HttpGet("riders/scores")]
+    public async Task<IActionResult> GetRiderScores(
+        [FromQuery] RiderScorePerformanceFilter filter,
+        CancellationToken cancellationToken)
+    {
+        var iqamaNo = User.GetUserIqamaNo()!;
+        var result = await housingService.GetHousingRiderScoresAsync(
+            iqamaNo,
+            filter,
+            cancellationToken);
         return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
     }
 
