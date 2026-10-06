@@ -43,6 +43,7 @@ public record RiderScorePerformanceResponse(
     string SourceRiderId,
     string RiderName,
     string? SubstituteRiderName,
+    string? HousingName,
     DateOnly PerformanceDate,
     int TotalVerificationRequests,
     int SuccessfulVerificationRequests,

@@ -181,15 +181,47 @@ public class ReminderService(ApplicationDbcontext context) : IReminderService
             .Distinct()
             .ToList();
 
+        // A transfer creates a separate stock row (and ID) for each housing.
+        // Resolve all rows for an interval's part so global reminders can use
+        // company and housing usages for the same vehicle and part.
+        var intervalParts = await _ctx.SpareParts
+            .Where(sp => spIntervalSparePartIds.Contains(sp.Id))
+            .Select(sp => new { sp.Id, sp.Name })
+            .AsNoTracking()
+            .ToListAsync();
+
+        var partNames = intervalParts.Select(sp => sp.Name).Distinct().ToList();
+        var matchingParts = await _ctx.SpareParts
+            .Where(sp => partNames.Contains(sp.Name))
+            .Select(sp => new { sp.Id, sp.Name })
+            .AsNoTracking()
+            .ToListAsync();
+
+        var partIdsByName = matchingParts
+            .GroupBy(sp => sp.Name)
+            .ToDictionary(g => g.Key, g => g.Select(sp => sp.Id).ToHashSet());
+        var partIdsByInterval = intervals
+            .Where(i => i.ItemType == MaintenanceItemType.SparePart && i.SparePartId.HasValue)
+            .ToDictionary(
+                i => i.Id,
+                i => intervalParts.FirstOrDefault(sp => sp.Id == i.SparePartId!.Value) is { } part
+                    && partIdsByName.TryGetValue(part.Name, out var ids)
+                    ? ids
+                    : new HashSet<int> { i.SparePartId!.Value });
+        var matchingSparePartIds = partIdsByInterval.Values
+            .SelectMany(ids => ids)
+            .Distinct()
+            .ToList();
+
         var accIntervalAccessoryIds = intervals
             .Where(i => i.ItemType == MaintenanceItemType.Accessory && i.AccessoryId.HasValue)
             .Select(i => i.AccessoryId!.Value)
             .Distinct()
             .ToList();
 
-        var allSparePartUsages = spIntervalSparePartIds.Any()
+        var allSparePartUsages = matchingSparePartIds.Any()
             ? await _ctx.SparePartUsages
-                .Where(u => spIntervalSparePartIds.Contains(u.SparePartId))
+                .Where(u => matchingSparePartIds.Contains(u.SparePartId))
                 .AsNoTracking()
                 .ToListAsync()
             : new List<SparePartUsage>();
@@ -232,7 +264,8 @@ public class ReminderService(ApplicationDbcontext context) : IReminderService
                 date, intervals,
                 allVehicles, allSparePartUsages,
                 allRiders, allAccessoryUsages,
-                housingName: null));
+                housingName: null,
+                partIdsByInterval));
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -589,7 +622,8 @@ public class ReminderService(ApplicationDbcontext context) : IReminderService
         List<SparePartUsage> sparePartUsages,
         List<RiderDetails> riders,
         List<RiderAccessoryUsage> accessoryUsages,
-        string? housingName)
+        string? housingName,
+        Dictionary<int, HashSet<int>> partIdsByInterval)
     {
         var vehicleReminders = new List<VehicleMaintenanceReminder>();
         var riderReminders = new List<RiderMaintenanceReminder>();
@@ -604,9 +638,12 @@ public class ReminderService(ApplicationDbcontext context) : IReminderService
 
             foreach (var interval in spIntervals)
             {
+                if (interval.Location != null && interval.Location != vehicle.Location)
+                    continue;
+
                 var lastUsedAt = sparePartUsages
                     .Where(u => u.VehicleNumber == vehicle.VehicleNumber
-                             && u.SparePartId == interval.SparePartId!.Value)
+                             && partIdsByInterval[interval.Id].Contains(u.SparePartId))
                     .OrderByDescending(u => u.UsedAt)
                     .Select(u => (DateTime?)u.UsedAt)
                     .FirstOrDefault();
@@ -623,9 +660,6 @@ public class ReminderService(ApplicationDbcontext context) : IReminderService
             if (!dueItems.Any()) continue;
 
             var assignedRider = vehicle.RiderDetails;
-
-            if (assignedRider == null)
-                continue;
 
             vehicleReminders.Add(new VehicleMaintenanceReminder(
                 vehicle.VehicleNumber,
@@ -647,6 +681,9 @@ public class ReminderService(ApplicationDbcontext context) : IReminderService
 
             foreach (var interval in accIntervals)
             {
+                if (interval.Location != null && interval.Location != rider.Employee?.Housing?.Name)
+                    continue;
+
                 var lastIssuedAt = accessoryUsages
                     .Where(u => u.RiderId == rider.Id
                              && u.RiderAccessoryId == interval.AccessoryId!.Value)

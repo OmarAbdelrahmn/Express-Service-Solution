@@ -83,7 +83,9 @@ public class RiderScorePerformanceService(
             dbcontext.RiderScorePerformances.Add(entity);
             await dbcontext.SaveChangesAsync(cancellationToken);
 
-            return Result.Success(MapToResponse(entity));
+            var response = await ResponseQuery(entity.Id)
+                .FirstAsync(cancellationToken);
+            return Result.Success(response);
         }
         catch (DbUpdateException)
         {
@@ -100,8 +102,8 @@ public class RiderScorePerformanceService(
         int id,
         CancellationToken cancellationToken = default)
     {
-        var response = await ResponseQuery()
-            .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+        var response = await ResponseQuery(id)
+            .FirstOrDefaultAsync(cancellationToken);
 
         return response is null
             ? Result.Failure<RiderScorePerformanceResponse>(RiderScorePerformanceErrors.NotFound)
@@ -133,8 +135,15 @@ public class RiderScorePerformanceService(
         if (housingId.HasValue)
         {
             query = query.Where(x =>
-                x.Rider.Employee.HousingId == housingId.Value &&
-                !x.Rider.Employee.IsDeleted);
+                x.SubstituteRiderName == null
+                    ? x.Rider.Employee.HousingId == housingId.Value &&
+                      !x.Rider.Employee.IsDeleted
+                    : dbcontext.RiderShiftSubstitutions.Any(substitution =>
+                        substitution.ActualRiderWorkingId == x.SourceRiderId &&
+                        (substitution.SubstituteRider.Employee.NameAR == x.SubstituteRiderName ||
+                         substitution.SubstituteRider.Employee.NameEN == x.SubstituteRiderName) &&
+                        substitution.SubstituteRider.Employee.HousingId == housingId.Value &&
+                        !substitution.SubstituteRider.Employee.IsDeleted));
         }
 
         if (filter.RiderId.HasValue)
@@ -156,29 +165,9 @@ public class RiderScorePerformanceService(
             query = query.Where(x => x.Segment == segment);
         }
 
-        var records = await query
+        var records = await ProjectResponses(query
             .OrderBy(x => x.PerformanceDate)
-            .ThenBy(x => x.WorkingId)
-            .Select(x => new RiderScorePerformanceResponse(
-                x.Id,
-                x.RiderId,
-                x.WorkingId,
-                x.SourceRiderId,
-                x.Rider.Employee.NameAR,
-                x.SubstituteRiderName,
-                x.PerformanceDate,
-                x.TotalVerificationRequests,
-                x.SuccessfulVerificationRequests,
-                x.VerificationSuccessRate,
-                x.GrossOrders,
-                x.CompletedOrders,
-                x.CompletedOrdersInTime,
-                x.FailedOrdersByRider,
-                x.OnTimeDeliveryScore,
-                x.FinalDeliveryQualityScore,
-                x.Segment,
-                x.CreatedAt,
-                x.UpdatedAt))
+            .ThenBy(x => x.WorkingId))
             .ToListAsync(cancellationToken);
 
         var groupedDays = records
@@ -281,7 +270,9 @@ public class RiderScorePerformanceService(
             entity.UpdatedAt = DateTime.UtcNow.AddHours(3);
 
             await dbcontext.SaveChangesAsync(cancellationToken);
-            return Result.Success(MapToResponse(entity));
+            var response = await ResponseQuery(entity.Id)
+                .FirstAsync(cancellationToken);
+            return Result.Success(response);
         }
         catch (DbUpdateException)
         {
@@ -454,9 +445,13 @@ public class RiderScorePerformanceService(
         }
     }
 
-    private IQueryable<RiderScorePerformanceResponse> ResponseQuery() =>
-        dbcontext.RiderScorePerformances
-            .AsNoTracking()
+    private IQueryable<RiderScorePerformanceResponse> ResponseQuery(int id) =>
+        ProjectResponses(dbcontext.RiderScorePerformances.AsNoTracking()
+            .Where(x => x.Id == id));
+
+    private IQueryable<RiderScorePerformanceResponse> ProjectResponses(
+        IQueryable<Domain.Entities.RiderScorePerformance> query) =>
+        query
             .Select(x => new RiderScorePerformanceResponse(
                 x.Id,
                 x.RiderId,
@@ -464,6 +459,20 @@ public class RiderScorePerformanceService(
                 x.SourceRiderId,
                 x.Rider.Employee.NameAR,
                 x.SubstituteRiderName,
+                x.SubstituteRiderName == null
+                    ? x.Rider.Employee.Housing == null
+                        ? null
+                        : x.Rider.Employee.Housing.Name
+                    : dbcontext.RiderShiftSubstitutions
+                        .Where(substitution =>
+                            substitution.ActualRiderWorkingId == x.SourceRiderId &&
+                            (substitution.SubstituteRider.Employee.NameAR == x.SubstituteRiderName ||
+                             substitution.SubstituteRider.Employee.NameEN == x.SubstituteRiderName))
+                        .OrderByDescending(substitution => substitution.StartDate)
+                        .Select(substitution => substitution.SubstituteRider.Employee.Housing == null
+                            ? null
+                            : substitution.SubstituteRider.Employee.Housing.Name)
+                        .FirstOrDefault(),
                 x.PerformanceDate,  
                 x.TotalVerificationRequests,
                 x.SuccessfulVerificationRequests,
@@ -477,27 +486,6 @@ public class RiderScorePerformanceService(
                 x.Segment,
                 x.CreatedAt,
                 x.UpdatedAt));
-
-    private static RiderScorePerformanceResponse MapToResponse(Domain.Entities.RiderScorePerformance entity) => new(
-        entity.Id,
-        entity.RiderId,
-        entity.WorkingId,
-        entity.SourceRiderId,
-        entity.Rider.Employee.NameAR,
-        entity.SubstituteRiderName,
-        entity.PerformanceDate,
-        entity.TotalVerificationRequests,
-        entity.SuccessfulVerificationRequests,
-        entity.VerificationSuccessRate,
-        entity.GrossOrders,
-        entity.CompletedOrders,
-        entity.CompletedOrdersInTime,
-        entity.FailedOrdersByRider,
-        entity.OnTimeDeliveryScore,
-        entity.FinalDeliveryQualityScore,
-        entity.Segment,
-        entity.CreatedAt,
-        entity.UpdatedAt);
 
     private static RiderScorePerformanceTotals CalculateTotals(
         IEnumerable<RiderScorePerformanceResponse> records)

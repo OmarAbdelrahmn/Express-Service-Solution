@@ -6427,46 +6427,43 @@ public class ImportService(ApplicationDbcontext dbcontext, IRiderSub riderSub) :
         List<string> changes,
         string uploadedBy)
     {
-        // Check current status
-        var currentActiveStatus = await _dbcontext.RiderVehicleStatus
-            .Where(s => s.VehicleNumber == vehicle.VehicleNumber && s.IsActive)
-            .FirstOrDefaultAsync();
+        var activeStatuses = await _dbcontext.RiderVehicleStatus
+            .Where(s => s.VehicleNumber == vehicle.VehicleNumber && s.IsActive).ToListAsync();
+        var current = activeStatuses.OrderByDescending(s => s.Timestamp).ThenByDescending(s => s.Id).FirstOrDefault();
+        var currentStatus = current?.StatusType.ToString() ?? "Available";
+        if (data.Status == null || data.Status.Equals(currentStatus, StringComparison.OrdinalIgnoreCase)) return;
 
-        string currentStatus = currentActiveStatus?.StatusType.ToString() ?? "Available";
-
-        // If status in Excel differs from current status
-        if (data.Status != null && !data.Status.Equals(currentStatus, StringComparison.OrdinalIgnoreCase))
+        var assignedRiders = await _dbcontext.RiderDetails
+            .Where(r => r.VehicleNumber == vehicle.VehicleNumber).ToListAsync();
+        var at = DateTime.UtcNow.AddHours(3);
+        changes.Add($"Status changed: {currentStatus} → {data.Status}");
+        foreach (var status in activeStatuses)
         {
-            changes.Add($"Status changed: {currentStatus} → {data.Status}");
-
-            // Deactivate old status
-            if (currentActiveStatus != null)
-            {
-                currentActiveStatus.IsActive = false;
-            }
-
-            // Add new status if not "Available"
-            if (!data.Status.Equals("Available", StringComparison.OrdinalIgnoreCase))
-            {
-                VehicleStatusType newStatusType = data.Status.ToLower() switch
-                {
-                    "problem" => VehicleStatusType.Problem,
-                    "stolen" => VehicleStatusType.Stolen,
-                    "breakup" or "break up" => VehicleStatusType.BreakUp,
-                    _ => VehicleStatusType.Returned
-                };
-
-                _dbcontext.RiderVehicleStatus.Add(new RiderVehicleStatus
-                {
-                    VehicleNumber = vehicle.VehicleNumber,
-                    EmployeeIqamaNo = null,
-                    StatusType = newStatusType,
-                    Reason = $"Status updated via import by {uploadedBy}",
-                    IsActive = true,
-                    Timestamp = DateTime.UtcNow.AddHours(3)
-                });
-            }
+            status.IsActive = false;
+            status.PermissionEndDate = at;
         }
+        foreach (var rider in assignedRiders) rider.VehicleNumber = null;
+
+        var newStatusType = data.Status.ToLowerInvariant() switch
+        {
+            "problem" => VehicleStatusType.Problem,
+            "stolen" => VehicleStatusType.Stolen,
+            "breakup" or "break up" => VehicleStatusType.BreakUp,
+            "outofservice" or "out of service" => VehicleStatusType.OutOfService,
+            _ => VehicleStatusType.Returned
+        };
+        // Available also needs a closing event, otherwise petrol sees an open take.
+        _dbcontext.RiderVehicleStatus.Add(new RiderVehicleStatus
+        {
+            VehicleNumber = vehicle.VehicleNumber,
+            EmployeeIqamaNo = current?.EmployeeIqamaNo,
+            StatusType = newStatusType,
+            Reason = $"Status updated via import by {uploadedBy}",
+            IsActive = newStatusType != VehicleStatusType.Returned,
+            PermissionStartDate = current?.PermissionStartDate,
+            PermissionEndDate = at,
+            Timestamp = at
+        });
     }
 
     private async Task<(bool assigned, string? error)> ProcessRiderAssignment(
@@ -6476,80 +6473,73 @@ public class ImportService(ApplicationDbcontext dbcontext, IRiderSub riderSub) :
     {
         try
         {
-            var rider = await _dbcontext.RiderDetails
-                .Include(r => r.Employee)
+            var rider = await _dbcontext.RiderDetails.Include(r => r.Employee)
                 .FirstOrDefaultAsync(r => r.EmployeeIqamaNo == data.RiderIqamaNo!.Value);
+            if (rider == null) return (false, $"Rider with Iqama {data.RiderIqamaNo} not found");
+            if (rider.Employee.Status != "enable") return (false, "Rider is disabled");
 
-            if (rider == null)
-                return (false, $"Rider with Iqama {data.RiderIqamaNo} not found");
+            var statuses = await _dbcontext.RiderVehicleStatus
+                .Where(s => s.IsActive && (s.VehicleNumber == data.VehicleNumber
+                    || (s.EmployeeIqamaNo == rider.EmployeeIqamaNo
+                        && (s.StatusType == VehicleStatusType.Taken || s.StatusType == VehicleStatusType.switched))))
+                .ToListAsync();
+            var otherRiders = await _dbcontext.RiderDetails
+                .Where(r => r.VehicleNumber == data.VehicleNumber && r.EmployeeIqamaNo != rider.EmployeeIqamaNo)
+                .ToListAsync();
+            if (rider.VehicleNumber == data.VehicleNumber && otherRiders.Count == 0
+                && statuses.Count == 1 && statuses[0].StatusType == VehicleStatusType.Taken
+                && statuses[0].EmployeeIqamaNo == rider.EmployeeIqamaNo)
+                return (true, null);
 
-            if (rider.Employee.Status != "enable")
-                return (false, "Rider is disabled");
-
-            // Check if rider already has a vehicle
-            if (!string.IsNullOrEmpty(rider.VehicleNumber))
-            {
+            var at = DateTime.UtcNow.AddHours(3);
+            if (!string.IsNullOrEmpty(rider.VehicleNumber) && rider.VehicleNumber != data.VehicleNumber)
                 warnings.Add($"Rider already has vehicle {rider.VehicleNumber}, replacing it");
+            if (otherRiders.Count > 0) warnings.Add("Vehicle was unavailable, forcing assignment");
 
-                // Return old vehicle
-                var oldVehicleStatus = await _dbcontext.RiderVehicleStatus
-                    .FirstOrDefaultAsync(s => s.VehicleNumber == rider.VehicleNumber &&
-                                             s.EmployeeIqamaNo == rider.EmployeeIqamaNo &&
-                                             s.IsActive &&
-                                             s.StatusType == VehicleStatusType.Taken);
-
-                if (oldVehicleStatus != null)
-                {
-                    oldVehicleStatus.IsActive = false;
-                    _dbcontext.RiderVehicleStatus.Add(new RiderVehicleStatus
-                    {
-                        VehicleNumber = rider.VehicleNumber,
-                        EmployeeIqamaNo = rider.EmployeeIqamaNo,
-                        StatusType = VehicleStatusType.Returned,
-                        Reason = "Replaced by import",
-                        IsActive = false,
-                        Timestamp = DateTime.UtcNow.AddHours(3)
-                    });
-                }
-            }
-
-            // Check if vehicle is available
-            var vehicleUnavailable = await _dbcontext.RiderVehicleStatus
-                .AnyAsync(s => s.VehicleNumber == data.VehicleNumber &&
-                              s.IsActive &&
-                              (s.StatusType == VehicleStatusType.Taken ||
-                               s.StatusType == VehicleStatusType.Problem ||
-                               s.StatusType == VehicleStatusType.Stolen));
-
-            if (vehicleUnavailable)
+            var returns = statuses
+                .Where(s => (s.StatusType == VehicleStatusType.Taken || s.StatusType == VehicleStatusType.switched)
+                    && s.EmployeeIqamaNo.HasValue)
+                .Select(s => (Vehicle: s.VehicleNumber, Iqama: s.EmployeeIqamaNo!.Value))
+                .ToHashSet();
+            if (!string.IsNullOrEmpty(rider.VehicleNumber) && rider.VehicleNumber != data.VehicleNumber)
+                returns.Add((rider.VehicleNumber, rider.EmployeeIqamaNo));
+            foreach (var previousRider in otherRiders)
             {
-                // Deactivate old statuses
-                var oldStatuses = await _dbcontext.RiderVehicleStatus
-                    .Where(s => s.VehicleNumber == data.VehicleNumber && s.IsActive)
-                    .ToListAsync();
-
-                foreach (var status in oldStatuses)
-                {
-                    status.IsActive = false;
-                }
-
-                warnings.Add("Vehicle was unavailable, forcing assignment");
+                returns.Add((data.VehicleNumber!, previousRider.EmployeeIqamaNo));
+                previousRider.VehicleNumber = null;
             }
-
-            // Assign vehicle to rider
+            foreach (var status in statuses)
+            {
+                status.IsActive = false;
+                status.PermissionEndDate = at;
+            }
+            foreach (var previous in returns)
+            {
+                var status = statuses.FirstOrDefault(s => s.VehicleNumber == previous.Vehicle
+                    && s.EmployeeIqamaNo == previous.Iqama);
+                _dbcontext.RiderVehicleStatus.Add(new RiderVehicleStatus
+                {
+                    VehicleNumber = previous.Vehicle,
+                    EmployeeIqamaNo = previous.Iqama,
+                    StatusType = VehicleStatusType.Returned,
+                    Reason = "Replaced by import",
+                    IsActive = false,
+                    Permission = status?.Permission,
+                    PermissionStartDate = status?.PermissionStartDate,
+                    PermissionEndDate = at,
+                    Timestamp = at
+                });
+            }
             rider.VehicleNumber = data.VehicleNumber;
-
-            // Add history
             _dbcontext.RiderVehicleStatus.Add(new RiderVehicleStatus
             {
                 VehicleNumber = data.VehicleNumber!,
-                EmployeeIqamaNo = data.RiderIqamaNo!.Value,
+                EmployeeIqamaNo = rider.EmployeeIqamaNo,
                 StatusType = VehicleStatusType.Taken,
                 Reason = $"Assigned via import by {uploadedBy}",
                 IsActive = true,
-                Timestamp = DateTime.UtcNow.AddHours(3)
+                Timestamp = at
             });
-
             return (true, null);
         }
         catch (Exception ex)
@@ -6557,7 +6547,6 @@ public class ImportService(ApplicationDbcontext dbcontext, IRiderSub riderSub) :
             return (false, $"Assignment error: {ex.Message}");
         }
     }
-
     private IXLRow FindHeaderRow1(IXLWorksheet worksheet)
     {
         var knownColumns = new[]
@@ -8651,6 +8640,7 @@ public class ImportService(ApplicationDbcontext dbcontext, IRiderSub riderSub) :
                     foreach (var status in oldStatuses)
                     {
                         status.IsActive = false;
+                        status.PermissionEndDate = DateTime.UtcNow.AddHours(3);
                         if (status.StatusType != VehicleStatusType.Returned)
                         {
                             warnings.Add($"Cleared vehicle status: {status.StatusType}");

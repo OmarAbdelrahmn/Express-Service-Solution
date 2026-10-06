@@ -1,3 +1,4 @@
+using System.Data.Common;
 using Application.Contracts.RiderScorePerformance;
 using Application.Service.RiderScorePerformance;
 using Application.Service.Riders;
@@ -5,12 +6,42 @@ using ClosedXML.Excel;
 using Domain;
 using Domain.Entities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Xunit;
 
 namespace Accounting.Tests;
 
 public class RiderScorePerformanceServiceTests
 {
+    [Fact]
+    public async Task SqlServerQueries_TranslateBeforeOpeningConnection()
+    {
+        var options = new DbContextOptionsBuilder<ApplicationDbcontext>()
+            .UseSqlServer("Server=localhost;Database=QueryTranslationOnly;Integrated Security=True")
+            .AddInterceptors(new RejectConnectionInterceptor())
+            .Options;
+        await using var db = new ApplicationDbcontext(options);
+        var service = CreateService(db);
+
+        await Assert.ThrowsAsync<ConnectionReachedException>(() =>
+            service.ListAsync(new RiderScorePerformanceFilter(null, null, null, null, null, null)));
+        await Assert.ThrowsAsync<ConnectionReachedException>(() =>
+            service.ListForHousingAsync(1,
+                new RiderScorePerformanceFilter(null, null, null, null, null, null)));
+        await Assert.ThrowsAsync<ConnectionReachedException>(() => service.GetAsync(1));
+    }
+
+    private sealed class ConnectionReachedException : Exception;
+
+    private sealed class RejectConnectionInterceptor : DbConnectionInterceptor
+    {
+        public override ValueTask<InterceptionResult> ConnectionOpeningAsync(
+            DbConnection connection,
+            ConnectionEventData eventData,
+            InterceptionResult result,
+            CancellationToken cancellationToken = default) => throw new ConnectionReachedException();
+    }
+
     [Fact]
     public async Task Import_MapsExactHeadersByName_AndUsesTheSuppliedDate()
     {
@@ -156,8 +187,8 @@ public class RiderScorePerformanceServiceTests
     public async Task Import_KeepsExcelRiderAndReturnsSubstituteNameAsNote()
     {
         await using var db = CreateDbContext();
-        var original = await SeedRiderAsync(db, 103, "TEST-RIDER-103", 7100000003);
-        var substitute = await SeedRiderAsync(db, 104, "TEST-RIDER-104", 7100000004);
+        var original = await SeedRiderAsync(db, 103, "TEST-RIDER-103", 7100000003, housingId: 31);
+        var substitute = await SeedRiderAsync(db, 104, "TEST-RIDER-104", 7100000004, housingId: 32);
         db.RiderShiftSubstitutions.Add(new RiderShiftSubstitution
         {
             ActualRiderId = original.Id,
@@ -190,6 +221,7 @@ public class RiderScorePerformanceServiceTests
         Assert.Equal(original.Id, response.Value.RiderId);
         Assert.Equal(original.WorkingId, response.Value.WorkingId);
         Assert.Equal(substitute.Employee.NameAR, response.Value.SubstituteRiderName);
+        Assert.Equal(substitute.Employee.Housing!.Name, response.Value.HousingName);
 
         var list = await service.ListAsync(new RiderScorePerformanceFilter(
             original.Id, null, null, null, null, null));
@@ -197,6 +229,21 @@ public class RiderScorePerformanceServiceTests
         Assert.Equal(
             substitute.Employee.NameAR,
             list.Value.Days.Single().Records.Single().SubstituteRiderName);
+        Assert.Equal(
+            substitute.Employee.Housing!.Name,
+            list.Value.Days.Single().Records.Single().HousingName);
+
+        var substituteHousingList = await service.ListForHousingAsync(
+            substitute.Employee.HousingId!.Value,
+            new RiderScorePerformanceFilter(null, null, null, null, null, null));
+        Assert.True(substituteHousingList.IsSuccess);
+        Assert.Single(substituteHousingList.Value.Days.Single().Records);
+
+        var mainHousingList = await service.ListForHousingAsync(
+            original.Employee.HousingId!.Value,
+            new RiderScorePerformanceFilter(null, null, null, null, null, null));
+        Assert.True(mainHousingList.IsSuccess);
+        Assert.Empty(mainHousingList.Value.Days);
     }
 
     [Fact]
@@ -310,6 +357,7 @@ public class RiderScorePerformanceServiceTests
         Assert.True(result.IsSuccess);
         var record = Assert.Single(Assert.Single(result.Value.Days).Records);
         Assert.Equal(housingRider.Id, record.RiderId);
+        Assert.Equal(housingRider.Employee.Housing!.Name, record.HousingName);
         Assert.Equal(1, result.Value.Totals.RecordCount);
         Assert.Equal(1, result.Value.Totals.RiderCount);
     }
@@ -353,6 +401,23 @@ public class RiderScorePerformanceServiceTests
             db.Companies.Add(company);
         }
 
+        Housing? housing = null;
+        if (housingId.HasValue)
+        {
+            housing = await db.Housings.FirstOrDefaultAsync(x => x.Id == housingId.Value);
+            if (housing is null)
+            {
+                housing = new Housing
+                {
+                    Id = housingId.Value,
+                    Name = $"Test Housing {housingId.Value}",
+                    Address = $"Test Address {housingId.Value}",
+                    Capacity = 100
+                };
+                db.Housings.Add(housing);
+            }
+        }
+
         var employee = new Employees
         {
             IqamaNo = iqamaNo,
@@ -361,7 +426,8 @@ public class RiderScorePerformanceServiceTests
             NameEN = $"Synthetic Rider {riderId}",
             NameAR = $"Synthetic Rider {riderId}",
             DateOfBirth = new DateOnly(1992, 1, 1),
-            HousingId = housingId
+            HousingId = housingId,
+            Housing = housing
         };
         var rider = new RiderDetails
         {

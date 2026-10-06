@@ -31,6 +31,9 @@ public sealed class SwaggerGenerationTests
         var document = await swaggerProvider.GetSwaggerAsync("v1");
 
         Assert.Contains("/api/RiderSalaryImport", document.Paths.Keys);
+        Assert.Contains("/api/out-rider-infos", document.Paths.Keys);
+        Assert.Contains("/api/outage-shift-performances", document.Paths.Keys);
+        Assert.Contains("/api/outage-shift-performances/upload", document.Paths.Keys);
     }
 
     private sealed class TestWebHostEnvironment : IWebHostEnvironment
