@@ -15,7 +15,10 @@ public class VehiclePetrolCostConfiguration : IEntityTypeConfiguration<VehiclePe
         b.Property(x => x.ResolutionErrorMessage).HasMaxLength(500);
 
         // Index: find all costs for a vehicle in a month quickly
-        b.HasIndex(x => new { x.VehicleNumber, x.Date });
+        b.HasIndex(x => new { x.VehicleNumber, x.Date }).IsUnique()
+            .HasFilter("[VehicleNumber] IS NOT NULL");
+        b.HasIndex(x => new { x.PlateNumberE, x.Date }).IsUnique()
+            .HasFilter("[VehicleNumber] IS NULL");
         // Index: find all un-attributed rows for the background job
         b.HasIndex(x => x.IsAttributed);
 

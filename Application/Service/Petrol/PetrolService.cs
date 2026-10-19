@@ -27,6 +27,7 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
         string assignedBy,
         CancellationToken ct = default)
     {
+        var createdProfileEntities = new List<object>();
         try
         {
             await using var transaction = await BeginPetrolTransactionAsync(ct);
@@ -82,6 +83,11 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
                         "This rider already has petrol for another vehicle on this date and no matching vehicle switch was found.", 409));
             }
 
+            // Staff members can hold vehicles without a RiderDetails record.
+            // An explicit petrol assignment creates a minimal profile, preserving
+            // their employment classification and leaving work/platform fields empty.
+            await EnsureEmployeeRiderProfileAsync(riderIqamaNo, createdProfileEntities, ct);
+
             // ── 5. Assign the rider ─────────────────────────────────────────
             var previousNotes = unattributedRow.Notes;
 
@@ -102,21 +108,43 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             DiscardPetrolChanges();
+            foreach (var entity in createdProfileEntities) _db.Entry(entity).State = EntityState.Detached;
             return Result.Failure(
                 new Error("AssignmentError",
                     $"Failed to assign rider to petrol record: {ex.Message}", 500));
         }
+        catch (OperationCanceledException)
+        {
+            DiscardPetrolChanges();
+            foreach (var entity in createdProfileEntities) _db.Entry(entity).State = EntityState.Detached;
+            throw;
+        }
     }
 
-    // ── Vehicles excluded from the unattributed report (by PlateNumberE) ─
-    // Add any plate number here to hide it from GetUnattributedCostsAsync
-    private static readonly HashSet<string> _unattributedExclusions =
-    [
-         "4762GUR",
-         "6306DJR",
-         "8475UBR",
-         "5577LGA",
-    ];
+    private async Task EnsureEmployeeRiderProfileAsync(long iqama, List<object> created, CancellationToken ct)
+    {
+        if (await _db.RiderDetails.AnyAsync(r => r.EmployeeIqamaNo == iqama, ct)) return;
+        const string unassignedCompany = "Unassigned";
+        var company = await _db.Companies.SingleOrDefaultAsync(c => c.Name == unassignedCompany, ct);
+        if (company == null)
+        {
+            company = new Company { Name = unassignedCompany,
+                Details = "Minimal rider profiles for employee petrol accounting; employer/platform details have not been supplied." };
+            _db.Companies.Add(company);
+            created.Add(company);
+        }
+        var activeVehicles = await _db.RiderVehicleStatus.AsNoTracking()
+            .Where(s => s.EmployeeIqamaNo == iqama && s.IsActive
+                && (s.StatusType == VehicleStatusType.Taken || s.StatusType == VehicleStatusType.switched))
+            .Select(s => s.VehicleNumber).Distinct().ToListAsync(ct);
+        string? currentVehicle = null;
+        if (activeVehicles.Count == 1 && !await _db.RiderDetails.AnyAsync(r => r.VehicleNumber == activeVehicles[0], ct))
+            currentVehicle = activeVehicles[0];
+        var profile = new RiderDetails { EmployeeIqamaNo = iqama, Company = company,
+            VehicleNumber = currentVehicle, CreatedAt = DateTime.UtcNow.AddHours(3) };
+        _db.RiderDetails.Add(profile);
+        created.Insert(0, profile); // Detach dependents before a new company on failure.
+    }
 
     public async Task<Result> ShiftPermissionStartDateAsync(
     long iqamaNo,
@@ -306,7 +334,9 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
                 int attributedCount = attributions.Count(r => r.RiderIqamaNo != null);
 
                 totalAttributed += attributedCount;
-                totalUnattributed += unattributedCount;
+                // Unknown plates are vehicle-resolution exceptions, not rider
+                // assignments waiting in the "not attached" queue.
+                if (vc.VehicleNumber != null) totalUnattributed += unattributedCount;
 
                 return new DailyVehicleEntry(
                     VehicleNumber: vc.VehicleNumber,
@@ -324,7 +354,11 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
                 TotalVehicles: vehicleCosts.Count,
                 TotalAttributedRows: totalAttributed,
                 TotalUnattributedRows: totalUnattributed,
-                Vehicles: vehicleEntries));
+                Vehicles: vehicleEntries)
+            {
+                TotalUnknownVehicleRows = vehicleCosts.Count(v => v.VehicleNumber == null),
+                UnknownVehicleCost = vehicleCosts.Where(v => v.VehicleNumber == null).Sum(v => v.Cost)
+            });
         }
         catch (Exception ex)
         {
@@ -472,6 +506,28 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
         {
             DiscardPetrolChanges();
             return Result.Failure(new Error("AttributionError", $"Failed to attribute record: {ex.Message}", 500));
+        }
+    }
+    public async Task<Result> ReattributeCostsAsync(IReadOnlyCollection<int> vehiclePetrolCostIds, CancellationToken ct = default)
+    {
+        if (vehiclePetrolCostIds.Count == 0) return Result.Success();
+        if (vehiclePetrolCostIds.Count > 500)
+            return Result.Failure(new Error("BatchTooLarge", "Reattribute at most 500 source costs per batch.", 400));
+        try
+        {
+            await using var transaction = await BeginPetrolTransactionAsync(ct);
+            var records = await _db.VehiclePetrolCosts.Where(v => vehiclePetrolCostIds.Contains(v.Id)).ToListAsync(ct);
+            if (records.Count != vehiclePetrolCostIds.Distinct().Count())
+                return Result.Failure(new Error("NotFound", "One or more source costs no longer exist.", 404));
+            await RebuildAllocationsAsync(records, ct);
+            await _db.SaveChangesAsync(ct);
+            if (transaction != null) await transaction.CommitAsync(ct);
+            return Result.Success();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            DiscardPetrolChanges();
+            return Result.Failure(new Error("AttributionError", $"Failed to reattribute costs: {ex.Message}", 500));
         }
     }
     public async Task<Result<RiderPetrolMonthlyReport>> GetRiderMonthlyReportAsync(
@@ -740,7 +796,7 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
                 .Select(r => new
                 {
                     r.VehicleNumber,
-                    PlateNumberE = r.Vehicle != null ? r.Vehicle.PlateNumberE : null,
+                    PlateNumberE = r.Vehicle != null ? r.Vehicle.PlateNumberE : r.VehiclePetrolCost.PlateNumberE,
                     r.Cost,
                     r.RiderIqamaNo,
                     r.Date
@@ -826,19 +882,50 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
                 .AsNoTracking()
                 .Where(r => r.RiderIqamaNo == null
                          && r.Date.Year == year
-                         && r.Date.Month == month)
+                         && r.Date.Month == month
+                         // "Not attached" is an assignment queue for registered
+                         // vehicles. Unknown plates stay in raw/daily reports.
+                         && r.VehicleNumber != null && r.Vehicle != null)
                 .OrderBy(r => r.VehicleNumber)
                 .ThenBy(r => r.Date)
                 .ToListAsync(ct);
 
-            var entries = raw
-                // ── Exclude plates in the exclusion list ──────────────────
-                .Where(r => !_unattributedExclusions.Contains(r.Vehicle?.PlateNumberE ?? r.VehiclePetrolCost.PlateNumberE))
-                .Select(r => new VehicleUnattributedEntry(
+            var numbers = raw.Where(r => r.VehicleNumber != null).Select(r => r.VehicleNumber!).Distinct().ToList();
+            var history = await _db.RiderVehicleStatus.AsNoTracking()
+                .Where(s => numbers.Contains(s.VehicleNumber)).ToListAsync(ct);
+            var windows = await LoadAssignmentWindowsAsync(numbers, ct);
+            var manualAllocations = await _db.RiderPetrolCosts.AsNoTracking()
+                .Where(r => r.Date.Year == year && r.Date.Month == month
+                    && r.AttributionSource == PetrolAttributionSource.ManualOverride && r.RiderIqamaNo.HasValue)
+                .ToListAsync(ct);
+            var entries = raw.Select(r =>
+            {
+                var latest = history.Where(s => s.VehicleNumber == r.VehicleNumber
+                    && s.Timestamp < r.Date.AddDays(1).ToDateTime(TimeOnly.MinValue))
+                    .OrderByDescending(s => s.Timestamp).ThenByDescending(s => s.Id).FirstOrDefault();
+                var candidates = r.VehicleNumber == null ? [] : PetrolAssignmentTimeline.OnDate(windows, r.VehicleNumber, r.Date);
+                var hasCandidate = candidates.Count > 0;
+                var conflicts = manualAllocations.Where(m => m.Date == r.Date && m.VehicleNumber != r.VehicleNumber
+                    && candidates.Any(c => c.IqamaNo == m.RiderIqamaNo)
+                    && (m.VehicleNumber == null || !PetrolAssignmentTimeline.OnDate(windows, m.VehicleNumber, r.Date)
+                        .Any(c => c.IqamaNo == m.RiderIqamaNo)))
+                    .Select(m => m.VehiclePetrolCostId).Distinct().Order().ToList();
+                var reason = r.VehicleNumber == null || r.VehiclePetrolCost.HasResolutionError ? "UnknownPlate"
+                    : conflicts.Count > 0 ? "ManualOverrideConflict"
+                    : hasCandidate ? "AssignmentConflictOrStaleAllocation"
+                    : latest?.StatusType == VehicleStatusType.Returned ? "ReturnedBeforeReportDate"
+                    : latest?.StatusType is VehicleStatusType.Problem or VehicleStatusType.Stolen
+                        or VehicleStatusType.BreakUp or VehicleStatusType.OutOfService ? "VehicleUnavailableOnReportDate"
+                    : "MissingAssignmentHistory";
+                return new VehicleUnattributedEntry(
                     r.Vehicle?.PlateNumberE ?? r.VehiclePetrolCost.PlateNumberE,
                     r.Date,
                     r.Cost,
-                    r.VehiclePetrolCost?.Note ?? r.Notes))
+                    r.VehiclePetrolCost.Note ?? r.Notes)
+                { VehiclePetrolCostId = r.VehiclePetrolCostId, VehicleNumber = r.VehicleNumber,
+                    ReasonCode = reason, StatusType = latest?.StatusType, StatusRecordedAt = latest?.Timestamp,
+                    ConflictingVehiclePetrolCostIds = conflicts };
+            })
                 .ToList();
 
             return Result.Success<IReadOnlyList<VehicleUnattributedEntry>>(entries);
@@ -879,6 +966,15 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
     private async Task<Dictionary<VehiclePetrolCost, int>> RebuildAllocationsAsync(
         IReadOnlyList<VehiclePetrolCost> records, CancellationToken ct)
     {
+        var detectChanges = _db.ChangeTracker.AutoDetectChangesEnabled;
+        _db.ChangeTracker.AutoDetectChangesEnabled = false;
+        try { return await RebuildAllocationsCoreAsync(records, ct); }
+        finally { _db.ChangeTracker.AutoDetectChangesEnabled = detectChanges; }
+    }
+
+    private async Task<Dictionary<VehiclePetrolCost, int>> RebuildAllocationsCoreAsync(
+        IReadOnlyList<VehiclePetrolCost> records, CancellationToken ct)
+    {
         var ids = records.Where(r => r.Id > 0).Select(r => r.Id).ToList();
         var previous = await _db.RiderPetrolCosts.Where(r => ids.Contains(r.VehiclePetrolCostId)).ToListAsync(ct);
         var byCost = previous.ToLookup(r => r.VehiclePetrolCostId);
@@ -917,7 +1013,7 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
             var remaining = record.Cost - manualCost;
             if (manual.Count > 0 && remaining == 0)
             {
-                record.IsAttributed = true;
+                record.IsAttributed = !record.HasResolutionError && manual.All(r => r.RiderIqamaNo.HasValue);
                 counts[record] = manual.Count(r => r.RiderIqamaNo.HasValue);
                 continue;
             }
@@ -939,8 +1035,16 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
                         .Any(holder => holder.IqamaNo == r.IqamaNo)))).ToList();
             if (riders.Count == 0)
             {
+                var conflictingManual = shares.Where(r => validIqamas.Contains(r.IqamaNo))
+                    .SelectMany(r => manualByRiderDate[(r.IqamaNo, record.Date)]
+                        .Where(m => m.VehicleNumber != record.VehicleNumber
+                            && (m.VehicleNumber == null || !PetrolAssignmentTimeline.OnDate(windowsByVehicle[m.VehicleNumber], m.VehicleNumber, record.Date)
+                                .Any(holder => holder.IqamaNo == r.IqamaNo))))
+                    .Select(m => m.VehiclePetrolCostId).Distinct().Order().ToList();
                 AddAllocation(record, remaining, null, PetrolAttributionSource.Unattributed, null,
-                    record.ResolutionErrorMessage ?? (shares.Count > 0
+                    record.ResolutionErrorMessage ?? (conflictingManual.Count > 0
+                        ? $"ManualOverrideConflict: source cost(s) {string.Join(", ", conflictingManual)} manually charge another vehicle to the matching rider on {record.Date:yyyy-MM-dd}. Review the manual charge or record the actual vehicle switch."
+                        : shares.Count > 0
                         ? "Assigned rider could not be allocated; employee or manual allocation requires review."
                         : "No rider assignment found for this vehicle on this date."));
             }
@@ -961,8 +1065,28 @@ public class PetrolService(ApplicationDbcontext dbcontext) : IPetrolService
             }
             counts[record] = manual.Count(r => r.RiderIqamaNo.HasValue) + riders.Count;
             record.IsAttributed = !record.HasResolutionError && riders.Count > 0;
+            ReuseUnchangedAllocations(record, oldRows.Except(manual).ToList());
         }
         return counts;
+    }
+
+    private void ReuseUnchangedAllocations(VehiclePetrolCost record, List<RiderPetrolCost> previous)
+    {
+        var proposed = record.RiderPetrolCosts.Select(r => _db.Entry(r))
+            .Where(e => e.State == EntityState.Added).ToList();
+        foreach (var entry in proposed)
+        {
+            var row = entry.Entity;
+            var match = previous.FirstOrDefault(p => p.RiderIqamaNo == row.RiderIqamaNo && p.Cost == row.Cost
+                && p.Date == row.Date && p.VehicleNumber == row.VehicleNumber
+                && p.AttributionSource == row.AttributionSource && p.ResolvedFromStatusId == row.ResolvedFromStatusId);
+            if (match == null) continue;
+            previous.Remove(match);
+            entry.State = EntityState.Detached;
+            _db.Entry(match).State = EntityState.Unchanged;
+            // Keep identity and creation time for allocations whose financial result is unchanged.
+            match.Notes = row.Notes;
+        }
     }
 
     private void AddAllocation(VehiclePetrolCost record, decimal cost, long? iqama,

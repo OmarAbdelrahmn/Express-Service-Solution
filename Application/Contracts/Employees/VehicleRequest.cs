@@ -13,12 +13,14 @@ public record VehicleRequest
         string PlateNumberE,
         int ManufactureYear,
         string Manufacturer,
-        DateOnly LicenseExpiryDate,
+        DateOnly? LicenseExpiryDate,
         string? VehicleImagePath,
         string? LicenseImagePath,
         string? ExstraImage,
         string? ExstraImage1,
-        string Location
+        string Location,
+        DateOnly? InsuranceExpiryDate = null,
+        DateOnly? InspectionExpiryDate = null
     );
 public record UVehicleRequest
 (
@@ -30,12 +32,14 @@ public record UVehicleRequest
         string PlateNumberE,
         int ManufactureYear,
         string Manufacturer,
-        DateOnly LicenseExpiryDate,
+        DateOnly? LicenseExpiryDate,
         string? VehicleImagePath,
         string? LicenseImagePath,
         string? ExstraImage,
         string? ExstraImage1,
-        string Location
+        string Location,
+        DateOnly? InsuranceExpiryDate = null,
+        DateOnly? InspectionExpiryDate = null
     );
 public record VehicleResponse
 (
@@ -48,13 +52,15 @@ public record VehicleResponse
         string PlateNumberE,
         int ManufactureYear,
         string Manufacturer,
-        DateOnly LicenseExpiryDate,
+        DateOnly? LicenseExpiryDate,
         string? VehicleImagePath,
         string? LicenseImagePath,
         string? ExstraImage,
         string? ExstraImage1,
         DateTime CreatedAt,
-        string Location
+        string Location,
+        DateOnly? InsuranceExpiryDate = null,
+        DateOnly? InspectionExpiryDate = null
     );
 
 public class VehicleStatusGroupDto
@@ -105,7 +111,9 @@ public class VehicleWithRiderDto
     public string VehicleNumber { get; set; }
     public string VehicleType { get; set; }
     public int SerialNumber { get; set; }
-    public DateOnly LicenseExpiryDate { get; set; }
+    public DateOnly? LicenseExpiryDate { get; set; }
+    public DateOnly? InsuranceExpiryDate { get; set; }
+    public DateOnly? InspectionExpiryDate { get; set; }
     public string PlateNumberA { get; set; } = string.Empty;
     public string PlateNumberE { get; set; } = string.Empty;
     public long OwnerId { get; set; }
@@ -135,7 +143,9 @@ public class UnavailableVehicleDto
     public int ManufactureYear { get; set; }
     public string Manufacturer { get; set; } = string.Empty;
     public string Location { get; set; } = string.Empty; // ADDED
-    public DateOnly LicenseExpiryDate { get; set; }
+    public DateOnly? LicenseExpiryDate { get; set; }
+    public DateOnly? InsuranceExpiryDate { get; set; }
+    public DateOnly? InspectionExpiryDate { get; set; }
     public string StatusType { get; set; }
     public long? RiderIqamaNo { get; set; }
     public string RiderName { get; set; }

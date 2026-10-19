@@ -22,10 +22,15 @@ internal static class PetrolAssignmentTimeline
         var windows = new List<Window>();
         var vehicles = new Dictionary<string, Window>(StringComparer.Ordinal);
         var riders = new Dictionary<long, Window>();
+        var vehicleBoundaries = new Dictionary<string, DateTime>(StringComparer.Ordinal);
+        var riderBoundaries = new Dictionary<long, DateTime>();
 
         void Close(Window window, DateTime at)
         {
+            at = Max(at, window.Start);
             if (at < window.End) window.End = at;
+            vehicleBoundaries[window.Status.VehicleNumber] = at;
+            riderBoundaries[window.Status.EmployeeIqamaNo!.Value] = at;
             if (vehicles.TryGetValue(window.Status.VehicleNumber, out var vehicleWindow)
                 && ReferenceEquals(window, vehicleWindow))
                 vehicles.Remove(window.Status.VehicleNumber);
@@ -34,17 +39,30 @@ internal static class PetrolAssignmentTimeline
                 riders.Remove(iqama);
         }
 
-        foreach (var status in statuses.OrderBy(EffectiveTime).ThenBy(s => s.Timestamp).ThenBy(s => s.Id))
+        // Recorded events establish causality. A backdated permit must never move
+        // a later take before a return that was recorded before that take.
+        foreach (var status in statuses.OrderBy(s => s.Timestamp).ThenBy(s => s.Id))
         {
-            var at = EffectiveTime(status);
+            var at = status.Timestamp;
             if (IsTake(status) && status.EmployeeIqamaNo.HasValue)
             {
+                var start = EffectiveTime(status);
+                if (vehicleBoundaries.TryGetValue(status.VehicleNumber, out var vehicleBoundary))
+                    start = Max(start, vehicleBoundary);
+                if (riderBoundaries.TryGetValue(status.EmployeeIqamaNo.Value, out var riderBoundary))
+                    start = Max(start, riderBoundary);
                 if (vehicles.TryGetValue(status.VehicleNumber, out var previousVehicle))
-                    Close(previousVehicle, at);
+                {
+                    start = Max(start, previousVehicle.Start);
+                    Close(previousVehicle, start);
+                }
                 if (riders.TryGetValue(status.EmployeeIqamaNo.Value, out var previousRider))
-                    Close(previousRider, at);
+                {
+                    start = Max(start, previousRider.Start);
+                    Close(previousRider, start);
+                }
 
-                var window = new Window(status, at);
+                var window = new Window(status, start);
                 windows.Add(window);
                 vehicles[status.VehicleNumber] = window;
                 riders[status.EmployeeIqamaNo.Value] = window;
@@ -57,6 +75,12 @@ internal static class PetrolAssignmentTimeline
                     || status.EmployeeIqamaNo == holder.Status.EmployeeIqamaNo))
             {
                 Close(holder, at);
+            }
+            else if (EndsPossession(status.StatusType) && !vehicles.ContainsKey(status.VehicleNumber))
+            {
+                vehicleBoundaries[status.VehicleNumber] = at;
+                if (status.EmployeeIqamaNo.HasValue)
+                    riderBoundaries[status.EmployeeIqamaNo.Value] = at;
             }
         }
 

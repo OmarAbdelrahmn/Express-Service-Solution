@@ -845,7 +845,7 @@ public record HousingVehicleResponse(
     string PlateNumberE,
     int ManufactureYear,
     string Manufacturer,
-    DateOnly LicenseExpiryDate,
+    DateOnly? LicenseExpiryDate,
     string Location,
     string? CurrentStatus,
     long? AssignedRiderIqamaNo,

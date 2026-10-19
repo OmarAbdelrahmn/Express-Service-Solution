@@ -289,7 +289,8 @@ public class PetrolController(IPetrolService service) : ControllerBase
     // ═══════════════════════════════════════════════════════════════════════
 
     /// <summary>
-    /// All costs where no rider could be resolved. Used for manual review.
+    /// Registered vehicles whose petrol has no rider. Unknown plates are excluded;
+    /// their costs remain in the daily report and vehicle summary.
     /// </summary>
     [HttpGet("unattributed")]
     [Authorize(Roles = "Master,Admin")]

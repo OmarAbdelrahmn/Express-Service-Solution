@@ -757,7 +757,9 @@ public class ImportController(IImportService service, IBackgroundImportService s
                 "VehicleType / نوع المركبة (Default: Motorcycle)",
                 "Manufacturer / الصانع (Default: Unknown)",
                 "ManufactureYear / سنة الصنع (Default: Current year)",
-                "LicenseExpiryDate / تاريخ انتهاء الرخصة (Default: +1 year)",
+                "LicenseExpiryDate / تاريخ انتهاء الرخصة (Optional)",
+                "InsuranceExpiryDate / تاريخ انتهاء التأمين (Optional)",
+                "InspectionExpiryDate / تاريخ انتهاء الفحص (Optional)",
                 "Location / الموقع (Default: Unknown)",
                 "Status / الحالة (Default: Available | Options: Available, Problem, Stolen, BreakUp)",
                 "RiderIqamaNo / رقم اقامة السائق (Optional - assigns vehicle to rider)"
@@ -1041,7 +1043,8 @@ public class ImportController(IImportService service, IBackgroundImportService s
 
 
     [HttpPost("vehicle-assignments")]
-    public async Task<IActionResult> ImportVehicleAssignmentsAsync(IFormFile file)
+    public async Task<IActionResult> ImportVehicleAssignmentsAsync(IFormFile file,
+        [FromQuery] bool fullSnapshot = false, CancellationToken ct = default)
     {
         if (file == null || file.Length == 0)
             return BadRequest(new { error = "No file uploaded or file is empty" });
@@ -1051,7 +1054,7 @@ public class ImportController(IImportService service, IBackgroundImportService s
 
         var uploadedBy = User?.Identity?.Name ?? "System";
 
-        var result = await service.ImportVehicleAssignmentsAsync(file, uploadedBy);
+        var result = await service.ImportVehicleAssignmentsAsync(file, uploadedBy, fullSnapshot, ct);
 
         if (result.IsSuccess)
         {
@@ -1074,10 +1077,11 @@ public class ImportController(IImportService service, IBackgroundImportService s
                 },
                 systemSync = new
                 {
-                    message = "System synchronized with Excel sheet",
+                    message = fullSnapshot ? "Full assignment snapshot applied" : "Assignment updates applied",
                     vehiclesInExcel = result.Value.SuccessfulAssignments,
                     vehiclesReassigned = result.Value.VehicleUnavailable,
-                    note = "Vehicles not in Excel were automatically returned to available status"
+                    note = fullSnapshot ? "Vehicles omitted from the validated full snapshot were returned"
+                        : "Assignments omitted from Excel were preserved"
                 }
             });
         }
@@ -1093,7 +1097,7 @@ public class ImportController(IImportService service, IBackgroundImportService s
             requiredColumns = new[]
             {
             "IqamaNumber / رقم الإقامة (Employee Iqama - spaces will be removed)",
-            "PlateNumberA / رقم اللوحة (Arabic Plate Number - spaces will be removed)"
+            "VehicleNumber / رقم الهيكل (Vehicle/chassis number - spaces will be removed)"
         },
             optionalColumns = new[]
             {
@@ -1103,16 +1107,16 @@ public class ImportController(IImportService service, IBackgroundImportService s
         },
             criticalBehavior = new
             {
-                systemSync = "The system will MATCH the Excel sheet exactly",
+                systemSync = "Partial updates by default; fullSnapshot=true explicitly replaces the assignment snapshot",
                 reassignment = "Vehicles with different riders will be reassigned automatically",
-                autoReturn = "Vehicles NOT in Excel will be auto-returned to available status",
+                autoReturn = "Omitted vehicles are preserved unless fullSnapshot=true is supplied",
                 statusClearing = "All vehicle problems/statuses will be cleared during assignment",
                 history = "Every change is tracked in RiderVehicleStatus history table"
             },
             specialBehavior = new
             {
                 autoConversion = "Employees without RiderDetails will be automatically converted to riders",
-                spaceRemoval = "All spaces removed from IqamaNo and PlateNumberA for matching",
+                spaceRemoval = "All spaces removed from IqamaNo and VehicleNumber for matching",
                 housingLocation = "Vehicle location automatically updated to employee's housing name",
                 trafficPermission = "If permission contains 'مرور', defaults to 30-day period",
                 replaceVehicle = "If rider already has a vehicle, it will be returned and replaced"
@@ -1129,7 +1133,7 @@ public class ImportController(IImportService service, IBackgroundImportService s
                 {
                     name = "Auto-Return",
                     description = "Vehicle XYZ-789 is with Rider C. It's NOT in the Excel.",
-                    result = "Vehicle automatically returned from Rider C and marked as available"
+                    result = "Preserved by default; returned only with an explicit fullSnapshot=true import"
                 },
                 scenario3 = new
                 {
@@ -1148,8 +1152,8 @@ public class ImportController(IImportService service, IBackgroundImportService s
             },
             notes = new[]
             {
-            "⚠️ SYSTEM WILL MATCH EXCEL EXACTLY - Vehicles not in Excel will be auto-returned",
-            "Spaces automatically removed from IqamaNo and PlateNumberA",
+            "Omitted assignments are preserved by default; use fullSnapshot=true for a full replacement",
+            "Spaces automatically removed from IqamaNo and VehicleNumber",
             "Employee must exist - will not create new employees",
             "Vehicle must exist - will not create new vehicles",
             "Employees without RiderDetails converted automatically",
@@ -1157,7 +1161,7 @@ public class ImportController(IImportService service, IBackgroundImportService s
             "Permission containing 'مرور' gets special handling",
             "All assignments and returns tracked in RiderVehicleStatus history",
             "Problem/Stolen/BreakUp statuses cleared during assignment",
-            "Each row processed independently in transactions",
+            "All rows are validated before one transaction applies the entire workbook",
             "Maximum file size: 10MB"
         },
             exampleExcel = new
@@ -1165,7 +1169,7 @@ public class ImportController(IImportService service, IBackgroundImportService s
                 headers = new[]
                 {
                 "IqamaNumber",
-                "PlateNumberA",
+                "VehicleNumber",
                 "Permission",
                 "PermissionStartDate",
                 "PermissionEndDate"
@@ -1175,7 +1179,7 @@ public class ImportController(IImportService service, IBackgroundImportService s
                 new
                 {
                     IqamaNumber = "2234567890",
-                    PlateNumberA = "أ ب ج 1234",
+                    VehicleNumber = "ME4KC20G2PA005055",
                     Permission = "تصريح عمل",
                     PermissionStartDate = "01/01/2025",
                     PermissionEndDate = "31/12/2025"
@@ -1183,7 +1187,7 @@ public class ImportController(IImportService service, IBackgroundImportService s
                 new
                 {
                     IqamaNumber = "2345678901",
-                    PlateNumberA = "د هـ و 5678",
+                    VehicleNumber = "ME4KC20G2PA009896",
                     Permission = "تصريح مرور",
                     PermissionStartDate = "15/01/2025",
                     PermissionEndDate = "15/02/2025"

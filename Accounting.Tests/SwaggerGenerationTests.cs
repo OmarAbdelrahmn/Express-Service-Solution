@@ -34,6 +34,10 @@ public sealed class SwaggerGenerationTests
         Assert.Contains("/api/out-rider-infos", document.Paths.Keys);
         Assert.Contains("/api/outage-shift-performances", document.Paths.Keys);
         Assert.Contains("/api/outage-shift-performances/upload", document.Paths.Keys);
+        Assert.Contains("/api/vehicles/documents/expiring", document.Paths.Keys);
+        Assert.Contains("/api/vehicles/documents/missing", document.Paths.Keys);
+        Assert.Contains("/api/vehicles/documents/reminders", document.Paths.Keys);
+        Assert.Contains("/api/vehicles/documents/{vehicleNumber}", document.Paths.Keys);
     }
 
     private sealed class TestWebHostEnvironment : IWebHostEnvironment

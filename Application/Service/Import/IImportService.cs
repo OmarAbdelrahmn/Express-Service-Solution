@@ -250,7 +250,9 @@ public interface IImportService
 
     Task<Result<VehicleAssignmentImportResponse>> ImportVehicleAssignmentsAsync(
     IFormFile file,
-    string uploadedBy);
+    string uploadedBy,
+    bool fullSnapshot = false,
+    CancellationToken ct = default);
 
     Task<Result<VehicleUsageCheckResponse>> CheckVehicleUsageFromExcelAsync(
     IFormFile file,

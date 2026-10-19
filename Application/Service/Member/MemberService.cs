@@ -750,7 +750,7 @@ public class MemberService(UserManager<ApplicationUser> userManager, SignInManag
     string PlateNumberE,
     int ManufactureYear,
     string Manufacturer,
-    DateOnly LicenseExpiryDate,
+    DateOnly? LicenseExpiryDate,
     string Location,
     string ProblemReason,
     DateTime ProblemReportedAt,

@@ -904,7 +904,7 @@ public class AiToolDispatcher(
                 v.VehicleNumber,
                 v.PlateNumberA,
                 v.LicenseExpiryDate,
-                DaysLeft = (v.LicenseExpiryDate.ToDateTime(TimeOnly.MinValue) - DateTime.UtcNow.AddHours(3).Date).Days,
+                DaysLeft = (v.LicenseExpiryDate!.Value.ToDateTime(TimeOnly.MinValue) - DateTime.UtcNow.AddHours(3).Date).Days,
                 AssignedTo = v.RiderDetails != null ? v.RiderDetails.Employee.NameEN : "Unassigned"
             })
             .OrderBy(v => v.LicenseExpiryDate).ToListAsync();

@@ -1,4 +1,4 @@
-﻿using Application.Abstraction;
+using Application.Abstraction;
 using Application.Contracts.Employees;
 using ClosedXML.Excel;
 using Domain;
@@ -24,6 +24,9 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
             return Result.Failure<VehicleResponse>(new Error("vehicle.AlreadyExists", $"Company with name {Request.VehicleNumber} already exists.", 409));
 
         var company = Request.Adapt<Vehicle>();
+        company.LicenseExpiryDate = company.LicenseExpiryDate == DateOnly.MinValue ? null : company.LicenseExpiryDate;
+        company.InsuranceExpiryDate = company.InsuranceExpiryDate == DateOnly.MinValue ? null : company.InsuranceExpiryDate;
+        company.InspectionExpiryDate = company.InspectionExpiryDate == DateOnly.MinValue ? null : company.InspectionExpiryDate;
 
         dbcontext.Vehicles.Add(company);
 
@@ -86,7 +89,9 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
         companies.PlateNumberE = Request.PlateNumberE;
         companies.ManufactureYear = Request.ManufactureYear;
         companies.Manufacturer = Request.Manufacturer;
-        companies.LicenseExpiryDate = Request.LicenseExpiryDate;
+        companies.LicenseExpiryDate = Request.LicenseExpiryDate == DateOnly.MinValue ? null : Request.LicenseExpiryDate;
+        companies.InsuranceExpiryDate = Request.InsuranceExpiryDate == DateOnly.MinValue ? null : Request.InsuranceExpiryDate;
+        companies.InspectionExpiryDate = Request.InspectionExpiryDate == DateOnly.MinValue ? null : Request.InspectionExpiryDate;
         companies.VehicleImagePath = Request.VehicleImagePath;
         companies.LicenseImagePath = Request.LicenseImagePath;
         companies.ExstraImage = Request.ExstraImage;
@@ -2325,6 +2330,8 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
                     OwnerId = v.Vehicle.OwnerId,
                     Location = v.Vehicle.Location,
                     LicenseExpiryDate = v.Vehicle.LicenseExpiryDate,
+                    InsuranceExpiryDate = v.Vehicle.InsuranceExpiryDate,
+                    InspectionExpiryDate = v.Vehicle.InspectionExpiryDate,
                     CurrentStatus = "Taken",
                     StatusSince = v.TakenStatus.Timestamp,
                     IsAvailable = false,
@@ -2375,6 +2382,8 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
                     OwnerId = v.Vehicle.OwnerId,
                     Location = v.Vehicle.Location,
                     LicenseExpiryDate = v.Vehicle.LicenseExpiryDate,
+                    InsuranceExpiryDate = v.Vehicle.InsuranceExpiryDate,
+                    InspectionExpiryDate = v.Vehicle.InspectionExpiryDate,
                     CurrentStatus = currentStatus,
                     StatusSince = statusSince,
                     IsAvailable = currentStatus == "Available",
@@ -2514,6 +2523,8 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
                     OwnerId = v.Vehicle.OwnerId,
                     Location = v.Vehicle.Location, // ADDED
                     LicenseExpiryDate = v.Vehicle.LicenseExpiryDate,
+                    InsuranceExpiryDate = v.Vehicle.InsuranceExpiryDate,
+                    InspectionExpiryDate = v.Vehicle.InspectionExpiryDate,
                     CurrentStatus = currentStatus,
                     StatusSince = statusSince,
 
@@ -2641,6 +2652,8 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
                 OwnerName = vehicle.OwnerName,
                 OwnerId = vehicle.OwnerId,
                 LicenseExpiryDate = vehicle.LicenseExpiryDate,
+                InsuranceExpiryDate = vehicle.InsuranceExpiryDate,
+                InspectionExpiryDate = vehicle.InspectionExpiryDate,
                 CurrentRider = currentRider,
                 IsAvailable = isAvailable,
                 HasActiveProblem = hasActiveProblem,
@@ -2701,6 +2714,8 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
                             Manufacturer = sv.vehicle.Manufacturer,
                             ManufactureYear = sv.vehicle.ManufactureYear,
                             LicenseExpiryDate = sv.vehicle.LicenseExpiryDate,
+                            InsuranceExpiryDate = sv.vehicle.InsuranceExpiryDate,
+                            InspectionExpiryDate = sv.vehicle.InspectionExpiryDate,
                             Location = sv.vehicle.Location, // ADDED
                             StatusType = "Taken",
                             RiderIqamaNo = rider.EmployeeIqamaNo,
@@ -2749,7 +2764,9 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
                         OwnerId = vehicle?.OwnerId ?? 0,
                         OwnerName = vehicle?.OwnerName,
                         Location = vehicle.Location ?? "unkown", // ADDED
-                        LicenseExpiryDate = vehicle?.LicenseExpiryDate ?? default,
+                        LicenseExpiryDate = vehicle?.LicenseExpiryDate,
+                        InsuranceExpiryDate = vehicle?.InsuranceExpiryDate,
+                        InspectionExpiryDate = vehicle?.InspectionExpiryDate,
                         StatusType = "Problem",
                         RiderIqamaNo = rider?.EmployeeIqamaNo,
                         RiderName = rider?.Employee.NameAR ?? "N/A",
@@ -2790,7 +2807,9 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
                         PlateNumberE = vehicle?.PlateNumberE ?? string.Empty,
                         OwnerId = vehicle?.OwnerId ?? 0,
                         OwnerName = vehicle?.OwnerName ?? string.Empty,
-                        LicenseExpiryDate = vehicle?.LicenseExpiryDate ?? default,
+                        LicenseExpiryDate = vehicle?.LicenseExpiryDate,
+                        InsuranceExpiryDate = vehicle?.InsuranceExpiryDate,
+                        InspectionExpiryDate = vehicle?.InspectionExpiryDate,
                         StatusType = "Stolen",
                         RiderIqamaNo = rider?.EmployeeIqamaNo,
                         RiderName = rider?.Employee.NameAR ?? "Unknown",
@@ -2827,7 +2846,9 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
                         PlateNumberE = vehicle?.PlateNumberE ?? string.Empty,
                         OwnerId = vehicle?.OwnerId ?? 0,
                         OwnerName = vehicle?.OwnerName ?? string.Empty,
-                        LicenseExpiryDate = vehicle?.LicenseExpiryDate ?? default,
+                        LicenseExpiryDate = vehicle?.LicenseExpiryDate,
+                        InsuranceExpiryDate = vehicle?.InsuranceExpiryDate,
+                        InspectionExpiryDate = vehicle?.InspectionExpiryDate,
                         StatusType = "BreakUp",
                         RiderIqamaNo = null,
                         RiderName = "N/A",
@@ -2922,6 +2943,8 @@ public class VehicleService(ApplicationDbcontext dbcontext) : IVehicleService
                     Location = vehicle.Location, // ADDED
                     OwnerId = vehicle.OwnerId,
                     LicenseExpiryDate = vehicle.LicenseExpiryDate,
+                    InsuranceExpiryDate = vehicle.InsuranceExpiryDate,
+                    InspectionExpiryDate = vehicle.InspectionExpiryDate,
                     CurrentStatus = vehicleStatus?.ToString() ?? "Returned",
                     StatusSince = statusSince,
                     ActiveProblemsCount = status.Count(s => s.StatusType == VehicleStatusType.Problem),

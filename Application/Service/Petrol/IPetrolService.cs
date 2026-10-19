@@ -32,6 +32,7 @@ public interface IPetrolService
     Task<Result<(int total, int attributed, int unattributed)>> AttributePendingAsync(CancellationToken ct = default);
 
     Task<Result> AttributeSingleByIdAsync(int vehiclePetrolCostId, CancellationToken ct = default);
+    Task<Result> ReattributeCostsAsync(IReadOnlyCollection<int> vehiclePetrolCostIds, CancellationToken ct = default);
 
     Task<Result<RiderPetrolMonthlyReport>> GetRiderMonthlyReportAsync(
         long riderIqamaNo,

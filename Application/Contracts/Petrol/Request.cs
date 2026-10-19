@@ -1,5 +1,7 @@
 ﻿using Domain.Entities.Petrol;
 
+using Domain.Entities;
+
 namespace Application.Contracts.Petrol;
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -55,7 +57,11 @@ public record DailyPetrolReport(
     int TotalAttributedRows,
     int TotalUnattributedRows,
     IReadOnlyList<DailyVehicleEntry> Vehicles
-);
+)
+{
+    public int TotalUnknownVehicleRows { get; init; }
+    public decimal UnknownVehicleCost { get; init; }
+}
 
 public record DailyVehicleEntry(
     string? VehicleNumber,
@@ -160,7 +166,15 @@ public record VehicleUnattributedEntry(
     DateOnly Date,
     decimal Cost,
     string? Notes
-);
+)
+{
+    public int VehiclePetrolCostId { get; init; }
+    public string? VehicleNumber { get; init; }
+    public string ReasonCode { get; init; } = "MissingAssignmentHistory";
+    public VehicleStatusType? StatusType { get; init; }
+    public DateTime? StatusRecordedAt { get; init; }
+    public IReadOnlyList<int> ConflictingVehiclePetrolCostIds { get; init; } = [];
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // SUMMARY REPORTS  — lightweight list views for dashboards

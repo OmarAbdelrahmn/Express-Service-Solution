@@ -15,6 +15,241 @@ namespace Accounting.Tests;
 public class PetrolServiceTests
 {
     [Fact]
+    public async Task FailedEmployeePetrolAssignment_DiscardsMinimalProfileAndUnassignedCompany()
+    {
+        await using var db = new SaveCheckingDb(new DbContextOptionsBuilder<ApplicationDbcontext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
+        Seed(db);
+        await db.SaveChangesAsync();
+        var cost = await AddCost(db, "V1", 11);
+        var service = new PetrolService(db);
+        Assert.True((await service.AttributeSingleByIdAsync(cost.Id)).IsSuccess);
+        db.FailNextSave = true;
+        Assert.True((await service.AssignRiderToUnattributedAsync("AA111", cost.Date, 101, "Admin")).IsFailure);
+        Assert.False(db.ChangeTracker.HasChanges());
+        await db.SaveChangesAsync();
+        Assert.Empty(await db.RiderDetails.ToListAsync());
+        Assert.Empty(await db.Companies.ToListAsync());
+        Assert.Null((await db.RiderPetrolCosts.SingleAsync()).RiderIqamaNo);
+        Assert.False((await db.VehiclePetrolCosts.SingleAsync()).IsAttributed);
+    }
+
+    [Fact]
+    public async Task AssignPetrolToEmployee_CreatesMinimalProfileOnce_WithoutChangingEmploymentClassification()
+    {
+        await using var db = CreateDb();
+        Seed(db);
+        db.Employees.Local.Single(e => e.IqamaNo == 101).IsEmployee = true;
+        await db.SaveChangesAsync();
+        var first = await AddCost(db, "V1", 11);
+        var second = await AddCost(db, "V1", 12);
+        var service = new PetrolService(db);
+        Assert.True((await service.AttributePendingAsync()).IsSuccess);
+        Assert.True((await service.AssignRiderToUnattributedAsync("AA111", first.Date, 101, "Admin")).IsSuccess);
+        Assert.True((await service.AssignRiderToUnattributedAsync("AA111", second.Date, 101, "Admin")).IsSuccess);
+        var profile = await db.RiderDetails.Include(r => r.Company).SingleAsync();
+        Assert.Equal(101, profile.EmployeeIqamaNo);
+        Assert.Null(profile.WorkingId);
+        Assert.Null(profile.LicenseNumber);
+        Assert.Null(profile.TshirtSize);
+        Assert.Equal("Unassigned", profile.Company.Name);
+        Assert.True((await db.Employees.SingleAsync(e => e.IqamaNo == 101)).IsEmployee);
+        Assert.All(await db.RiderPetrolCosts.ToListAsync(), r => Assert.Equal(101, r.RiderIqamaNo));
+        Assert.Equal(1, await db.Companies.CountAsync());
+        await AssertConserved(db);
+    }
+
+    [Fact]
+    public async Task UnknownPlates_AreExcludedFromNotAttached_WithoutLosingCostsOrSummaryIdentity()
+    {
+        await using var db = CreateDb();
+        Seed(db);
+        await db.SaveChangesAsync();
+        var date = new DateOnly(2026, 9, 10);
+        var service = new PetrolService(db);
+        Assert.True((await service.ProcessUploadAsync(PetrolFile(("UNKNOWN123", "10.25"), ("MISSING456", "5.50")), date, "Admin")).IsSuccess);
+        Assert.Empty((await service.GetUnattributedCostsAsync(2026, 9)).Value);
+        var daily = (await service.GetDailyReportAsync(date)).Value;
+        Assert.Equal(15.75m, daily.TotalCost);
+        Assert.Equal(0, daily.TotalUnattributedRows);
+        Assert.Equal(2, daily.TotalUnknownVehicleRows);
+        Assert.Equal(15.75m, daily.UnknownVehicleCost);
+        Assert.Equal(2, daily.Vehicles.Count);
+        Assert.All(daily.Vehicles, c => Assert.True(c.HasResolutionError));
+        var summary = (await service.GetAllVehiclesSummaryAsync(2026, 9)).Value;
+        Assert.Equal(2, summary.Count);
+        Assert.Equal(new[] { "MISSING456", "UNKNOWN123" }, summary.Select(r => r.PlateNumberE).Order());
+        await AssertConserved(db);
+    }
+
+    [Theory]
+    [InlineData("31/10/2026", true)]
+    [InlineData("invalid-date", false)]
+    public async Task AssignmentDates_AcceptDocumentedDayFirstFormatAndRejectInvalidValues(string start, bool valid)
+    {
+        await using var db = CreateImportDb();
+        Seed(db);
+        db.RiderDetails.Add(new RiderDetails { EmployeeIqamaNo = 101, CompanyId = 1, VehicleNumber = "V1" });
+        db.RiderVehicleStatus.Add(Take("V1", 101, At(1), active: true));
+        await db.SaveChangesAsync();
+        var stream = new MemoryStream();
+        using (var book = new XLWorkbook())
+        {
+            var sheet = book.AddWorksheet("Assignments");
+            sheet.Cell(1, 1).Value = "IqamaNumber"; sheet.Cell(1, 2).Value = "VehicleNumber";
+            sheet.Cell(1, 3).Value = "PermissionStartDate"; sheet.Cell(1, 4).Value = "PermissionEndDate";
+            sheet.Cell(2, 1).Value = 101; sheet.Cell(2, 2).Value = "V1";
+            sheet.Cell(2, 3).Value = start; sheet.Cell(2, 4).Value = "31/12/2026";
+            book.SaveAs(stream);
+        }
+        stream.Position = 0;
+        var result = await new ImportService(db, null!).ImportVehicleAssignmentsAsync(
+            new FormFile(stream, 0, stream.Length, "file", "assignments.xlsx"), "Admin");
+        Assert.Equal(valid, result.IsSuccess);
+        var take = await db.RiderVehicleStatus.SingleAsync();
+        Assert.Equal(At(1), take.Timestamp);
+        Assert.Equal(valid ? new DateTime(2026, 10, 31) : (DateTime?)null, take.PermissionStartDate);
+    }
+
+    [Fact]
+    public async Task RepeatedAutomaticAttribution_KeepsAllocationIdentityAndCreatedTime()
+    {
+        await using var db = CreateDb();
+        Seed(db);
+        db.RiderVehicleStatus.Add(Take("V1", 101, At(1), active: true));
+        await db.SaveChangesAsync();
+        var cost = await AddCost(db, "V1", 10);
+        var service = new PetrolService(db);
+        Assert.True((await service.AttributeSingleByIdAsync(cost.Id)).IsSuccess);
+        var row = await db.RiderPetrolCosts.AsNoTracking().SingleAsync();
+        db.ChangeTracker.Clear();
+        Assert.True((await service.AttributeSingleByIdAsync(cost.Id)).IsSuccess);
+        var again = await db.RiderPetrolCosts.AsNoTracking().SingleAsync();
+        Assert.Equal(row.Id, again.Id);
+        Assert.Equal(row.CreatedAt, again.CreatedAt);
+    }
+
+    [Fact]
+    public async Task UnassignedReport_ShowsReturnedReasonAndPreviouslyHiddenPlate()
+    {
+        await using var db = CreateDb();
+        Seed(db);
+        db.Vehicles.Local.Single(v => v.VehicleNumber == "V1").PlateNumberE = "4762GUR";
+        db.RiderVehicleStatus.AddRange(Take("V1", 101, At(1)), Event("V1", 101, VehicleStatusType.Returned, At(5)));
+        await db.SaveChangesAsync();
+        var cost = await AddCost(db, "V1", 10);
+        var service = new PetrolService(db);
+        Assert.True((await service.AttributeSingleByIdAsync(cost.Id)).IsSuccess);
+        var report = await service.GetUnattributedCostsAsync(2026, 9);
+        var row = Assert.Single(report.Value);
+        Assert.Equal("ReturnedBeforeReportDate", row.ReasonCode);
+        Assert.Equal(cost.Id, row.VehiclePetrolCostId);
+        Assert.Equal(VehicleStatusType.Returned, row.StatusType);
+        Assert.Equal(At(5), row.StatusRecordedAt);
+        Assert.Equal("4762GUR", row.PlateNumberE);
+    }
+
+    [Fact]
+    public async Task OlderReturn_DoesNotCloseLaterTakeWithBackdatedPermission()
+    {
+        await using var db = CreateDb();
+        Seed(db);
+        db.RiderVehicleStatus.AddRange(Take("V1", 101, At(1), At(1), At(10)),
+            Event("V1", 101, VehicleStatusType.Returned, At(10, 12)),
+            Take("V1", 101, At(10, 13), At(1), At(30), true));
+        await db.SaveChangesAsync();
+        await AddCost(db, "V1", 5);
+        await AddCost(db, "V1", 11);
+        Assert.True((await new PetrolService(db).AttributePendingAsync()).IsSuccess);
+        Assert.All(await db.RiderPetrolCosts.ToListAsync(), r => Assert.Equal(101, r.RiderIqamaNo));
+        await AssertConserved(db);
+    }
+
+    [Fact]
+    public async Task BackdatedRetake_DoesNotOverlapAnotherRidersCompletedPossession()
+    {
+        await using var db = CreateDb();
+        Seed(db);
+        db.RiderVehicleStatus.AddRange(Take("V1", 101, At(1)),
+            Event("V1", 101, VehicleStatusType.Returned, At(10)),
+            Take("V1", 102, At(12), At(5), At(30), true));
+        await db.SaveChangesAsync();
+        await AddCost(db, "V1", 6);
+        await AddCost(db, "V1", 13);
+        Assert.True((await new PetrolService(db).AttributePendingAsync()).IsSuccess);
+        Assert.Equal(101, (await db.RiderPetrolCosts.SingleAsync(r => r.Date.Day == 6)).RiderIqamaNo);
+        Assert.Equal(102, (await db.RiderPetrolCosts.SingleAsync(r => r.Date.Day == 13)).RiderIqamaNo);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AssignmentSheet_UsesChassisKey_AndPreservesUnchangedTake(bool fullSnapshot)
+    {
+        await using var db = CreateImportDb();
+        Seed(db);
+        db.RiderDetails.AddRange(new RiderDetails { EmployeeIqamaNo = 101, CompanyId = 1, VehicleNumber = "V1" },
+            new RiderDetails { EmployeeIqamaNo = 102, CompanyId = 1, VehicleNumber = "V2" });
+        db.RiderVehicleStatus.AddRange(Take("V1", 101, At(1), active: true), Take("V2", 102, At(1), active: true));
+        await db.SaveChangesAsync();
+        var result = await new ImportService(db, null!).ImportVehicleAssignmentsAsync(AssignmentFile((101, " v 1 ")), "Admin", fullSnapshot);
+        Assert.True(result.IsSuccess, result.IsFailure ? result.Error.Description : null);
+        Assert.Equal("V1", (await db.RiderDetails.SingleAsync(r => r.EmployeeIqamaNo == 101)).VehicleNumber);
+        Assert.Equal(At(1), (await db.RiderVehicleStatus.SingleAsync(s => s.VehicleNumber == "V1")).Timestamp);
+        Assert.Equal(fullSnapshot ? null : "V2", (await db.RiderDetails.SingleAsync(r => r.EmployeeIqamaNo == 102)).VehicleNumber);
+        Assert.Equal(fullSnapshot ? 1 : 0, await db.RiderVehicleStatus.CountAsync(s => s.StatusType == VehicleStatusType.Returned));
+    }
+
+    [Fact]
+    public async Task InvalidAssignmentSnapshot_DoesNotReturnOrChangeAnyVehicle()
+    {
+        await using var db = CreateImportDb();
+        Seed(db);
+        db.RiderDetails.Add(new RiderDetails { EmployeeIqamaNo = 101, CompanyId = 1, VehicleNumber = "V1" });
+        db.RiderVehicleStatus.Add(Take("V1", 101, At(1), active: true));
+        await db.SaveChangesAsync();
+        var result = await new ImportService(db, null!).ImportVehicleAssignmentsAsync(
+            AssignmentFile((101, "V2"), (102, "UNKNOWN")), "Admin", true);
+        Assert.True(result.IsFailure);
+        Assert.Equal("V1", (await db.RiderDetails.SingleAsync()).VehicleNumber);
+        Assert.True((await db.RiderVehicleStatus.SingleAsync()).IsActive);
+        Assert.False(db.ChangeTracker.HasChanges());
+    }
+
+    [Fact]
+    public async Task AssignmentSheet_SwapsVehiclesWithoutLeavingFormerRidersAssigned()
+    {
+        await using var db = CreateImportDb();
+        Seed(db);
+        db.RiderDetails.AddRange(new RiderDetails { EmployeeIqamaNo = 101, CompanyId = 1, VehicleNumber = "V1" },
+            new RiderDetails { EmployeeIqamaNo = 102, CompanyId = 1, VehicleNumber = "V2" });
+        db.RiderVehicleStatus.AddRange(Take("V1", 101, At(1), active: true), Take("V2", 102, At(1), active: true));
+        await db.SaveChangesAsync();
+        Assert.True((await new ImportService(db, null!).ImportVehicleAssignmentsAsync(
+            AssignmentFile((101, "V2"), (102, "V1")), "Admin")).IsSuccess);
+        Assert.Equal("V2", (await db.RiderDetails.SingleAsync(r => r.EmployeeIqamaNo == 101)).VehicleNumber);
+        Assert.Equal("V1", (await db.RiderDetails.SingleAsync(r => r.EmployeeIqamaNo == 102)).VehicleNumber);
+        Assert.Equal(2, await db.RiderVehicleStatus.CountAsync(s => s.IsActive));
+        Assert.Equal(2, await db.RiderVehicleStatus.CountAsync(s => s.StatusType == VehicleStatusType.Returned));
+    }
+
+    private static IFormFile AssignmentFile(params (long Iqama, string Vehicle)[] rows)
+    {
+        var stream = new MemoryStream();
+        using (var workbook = new XLWorkbook())
+        {
+            var sheet = workbook.AddWorksheet("Assignments");
+            sheet.Cell(1, 1).Value = "IqamaNumber";
+            sheet.Cell(1, 2).Value = "VehicleNumber";
+            for (var i = 0; i < rows.Length; i++)
+            { sheet.Cell(i + 2, 1).Value = rows[i].Iqama; sheet.Cell(i + 2, 2).Value = rows[i].Vehicle; }
+            workbook.SaveAs(stream);
+        }
+        stream.Position = 0;
+        return new FormFile(stream, 0, stream.Length, "file", "assignments.xlsx");
+    }
+
+    [Fact]
     public async Task ImportedReplacement_ClosesStalePermission_AndAllowsTwoVehiclesOnlyOnSwitchDay()
     {
         await using var db = CreateDb();
@@ -249,7 +484,7 @@ public class PetrolServiceTests
     }
 
     [Fact]
-    public async Task UnresolvedPlate_RemainsVisibleAcrossRetries_AndResolvesWhenVehicleIsAdded()
+    public async Task UnresolvedPlate_RemainsInDailyReportAcrossRetries_AndResolvesWhenVehicleIsAdded()
     {
         await using var db = CreateDb();
         Seed(db);
@@ -258,7 +493,9 @@ public class PetrolServiceTests
         var upload = await service.ProcessUploadAsync(PetrolFile(("UNKNOWN999", "100"), ("AA111", "200")), new DateOnly(2026, 9, 11), "Admin");
         Assert.True(upload.IsSuccess);
         Assert.Equal(1, upload.Value.UnresolvedVehicles);
-        Assert.Contains((await service.GetUnattributedCostsAsync(2026, 9)).Value, r => r.PlateNumberE == "UNKNOWN999" && r.Notes!.Contains("matched"));
+        Assert.DoesNotContain((await service.GetUnattributedCostsAsync(2026, 9)).Value, r => r.PlateNumberE == "UNKNOWN999");
+        Assert.Contains((await service.GetDailyReportAsync(new DateOnly(2026, 9, 11))).Value.Vehicles,
+            r => r.PlateNumberE == "UNKNOWN999" && r.HasResolutionError);
         Assert.True((await service.AttributePendingAsync()).IsSuccess);
         Assert.True((await service.AttributePendingAsync()).IsSuccess);
         Assert.Equal(2, await db.RiderPetrolCosts.CountAsync());
@@ -377,6 +614,10 @@ public class PetrolServiceTests
         var automaticCost = await AddCost(db, "V2", 11);
         Assert.True((await service.AttributeSingleByIdAsync(automaticCost.Id)).IsSuccess);
         Assert.Null((await db.RiderPetrolCosts.SingleAsync(r => r.VehiclePetrolCostId == automaticCost.Id)).RiderIqamaNo);
+        var review = Assert.Single((await service.GetUnattributedCostsAsync(2026, 9)).Value);
+        Assert.Equal("ManualOverrideConflict", review.ReasonCode);
+        Assert.Equal(new[] { manualCost.Id }, review.ConflictingVehiclePetrolCostIds);
+        Assert.StartsWith("ManualOverrideConflict:", (await db.RiderPetrolCosts.SingleAsync(r => r.VehiclePetrolCostId == automaticCost.Id)).Notes);
         await AssertConserved(db);
     }
 

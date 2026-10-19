@@ -5594,7 +5594,13 @@ namespace Domain.Migrations
 
                     b.HasIndex("IsAttributed");
 
-                    b.HasIndex("VehicleNumber", "Date");
+                    b.HasIndex("PlateNumberE", "Date")
+                        .IsUnique()
+                        .HasFilter("[VehicleNumber] IS NULL");
+
+                    b.HasIndex("VehicleNumber", "Date")
+                        .IsUnique()
+                        .HasFilter("[VehicleNumber] IS NOT NULL");
 
                     b.ToTable("VehiclePetrolCosts");
                 });
@@ -7357,7 +7363,13 @@ namespace Domain.Migrations
                     b.Property<string>("ExstraImage1")
                         .HasColumnType("nvarchar(max)");
 
-                    b.Property<DateOnly>("LicenseExpiryDate")
+                    b.Property<DateOnly?>("InspectionExpiryDate")
+                        .HasColumnType("date");
+
+                    b.Property<DateOnly?>("InsuranceExpiryDate")
+                        .HasColumnType("date");
+
+                    b.Property<DateOnly?>("LicenseExpiryDate")
                         .HasColumnType("date");
 
                     b.Property<string>("LicenseImagePath")

@@ -14,7 +14,9 @@ public class Vehicle
     public string OwnerName { get; set; } = string.Empty;
     public int ManufactureYear { get; set; }
     public string Manufacturer { get; set; } = string.Empty;
-    public DateOnly LicenseExpiryDate { get; set; }
+    public DateOnly? LicenseExpiryDate { get; set; }
+    public DateOnly? InsuranceExpiryDate { get; set; }
+    public DateOnly? InspectionExpiryDate { get; set; }
     public string? VehicleImagePath { get; set; }
     public string? LicenseImagePath { get; set; }
     public string? ExstraImage { get; set; }
