@@ -115,6 +115,7 @@ public static class ApplicationDependencies
         Services.AddScoped<IRiderService, RiderService>();
         Services.AddScoped<IRiderSub, RiderSub>();
         Services.AddScoped<IRiderShiftService, RiderShiftService>();
+        Services.AddScoped<Application.Service.DailyWork.IDailyWorkService, Application.Service.DailyWork.DailyWorkService>();
         Services.AddScoped<IRiderScorePerformanceService, RiderScorePerformanceService>();
         Services.AddScoped<IReportService, ReportService>();
         Services.AddScoped<ITemp, Temp>();
@@ -275,6 +276,7 @@ public static class ApplicationDependencies
         }
 
         Services.Configure<JwtOptions>(configuration.GetSection("Jwt"));
+        Services.AddRiderMobile(configuration);
 
         Services.AddAuthentication(options =>
         {

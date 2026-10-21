@@ -3,6 +3,7 @@
 public class RiderDetails
 {
     public int Id { get; set; }
+    public string PreferredLanguage { get; set; } = "ar";
     public string? WorkingId { get; set; }
     public long EmployeeIqamaNo { get; set; }
     public string? TshirtSize { get; set; }

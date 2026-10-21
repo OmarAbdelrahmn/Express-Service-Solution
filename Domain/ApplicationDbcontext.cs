@@ -126,9 +126,11 @@ public class ApplicationDbcontext : IdentityDbContext<ApplicationUser, Applicati
     public DbSet<VacationCancellationRequest> VacationCancellationRequests { get; set; }
     public DbSet<VacationHrDocument> VacationHrDocuments { get; set; }
     public required DbSet<Employees> Employees { get; set; }
+    public DbSet<DailyWorkEntry> DailyWorkEntries { get; set; }
     public required DbSet<EmployeeDocuments> EmployeeDocuments { get; set; }
     public required DbSet<Housing> Housings { get; set; }
     public required DbSet<RiderDetails> RiderDetails { get; set; }
+    public DbSet<RiderMobileSession> RiderMobileSessions { get; set; }
     public required DbSet<RiderShift> RiderShifts { get; set; }
     public DbSet<RiderScorePerformance> RiderScorePerformances { get; set; }
     public required DbSet<RiderShiftSubstitution> RiderShiftSubstitutions { get; set; }

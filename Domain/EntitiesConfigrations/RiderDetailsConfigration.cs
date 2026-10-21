@@ -8,6 +8,7 @@ public class RiderDetailsConfigration : IEntityTypeConfiguration<RiderDetails>
     public void Configure(Microsoft.EntityFrameworkCore.Metadata.Builders.EntityTypeBuilder<RiderDetails> builder)
     {
         builder.HasKey(rd => rd.Id);
+        builder.Property(rd => rd.PreferredLanguage).HasMaxLength(2).HasDefaultValue("ar");
 
         builder.HasIndex(rd => rd.WorkingId);
 

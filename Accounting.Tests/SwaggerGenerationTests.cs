@@ -37,6 +37,7 @@ public sealed class SwaggerGenerationTests
         Assert.Contains("/api/vehicles/documents/expiring", document.Paths.Keys);
         Assert.Contains("/api/vehicles/documents/missing", document.Paths.Keys);
         Assert.Contains("/api/vehicles/documents/reminders", document.Paths.Keys);
+        Assert.Contains("/api/vehicles/documents/import", document.Paths.Keys);
         Assert.Contains("/api/vehicles/documents/{vehicleNumber}", document.Paths.Keys);
     }
 

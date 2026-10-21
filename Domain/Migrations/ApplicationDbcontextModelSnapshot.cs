@@ -2697,6 +2697,28 @@ namespace Domain.Migrations
                     b.ToTable("DailyReportLogs");
                 });
 
+            modelBuilder.Entity("Domain.Entities.DailyWorkEntry", b =>
+                {
+                    b.Property<DateOnly>("Date")
+                        .HasColumnType("date");
+
+                    b.Property<long>("EmployeeIqamaNo")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("Orders")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("WorkingHours")
+                        .HasPrecision(5, 2)
+                        .HasColumnType("decimal(5,2)");
+
+                    b.HasKey("Date", "EmployeeIqamaNo");
+
+                    b.HasIndex("EmployeeIqamaNo");
+
+                    b.ToTable("DailyWorkEntries");
+                });
+
             modelBuilder.Entity("Domain.Entities.DeletedEmployees", b =>
                 {
                     b.Property<int>("Id")
@@ -5659,6 +5681,13 @@ namespace Domain.Migrations
                     b.Property<string>("LicenseNumber")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<string>("PreferredLanguage")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(2)
+                        .HasColumnType("nvarchar(2)")
+                        .HasDefaultValue("ar");
+
                     b.Property<string>("TshirtSize")
                         .HasColumnType("nvarchar(max)");
 
@@ -5682,6 +5711,36 @@ namespace Domain.Migrations
                     b.HasIndex("WorkingId");
 
                     b.ToTable("RiderDetails");
+                });
+
+            modelBuilder.Entity("Domain.Entities.RiderMobileSession", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("ExpiresAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Language")
+                        .IsRequired()
+                        .HasMaxLength(2)
+                        .HasColumnType("nvarchar(2)");
+
+                    b.Property<DateTime?>("RevokedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("RiderId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RiderId", "ExpiresAtUtc");
+
+                    b.ToTable("RiderMobileSessions");
                 });
 
             modelBuilder.Entity("Domain.Entities.RiderMonthlyValidity", b =>
@@ -8352,6 +8411,17 @@ namespace Domain.Migrations
                     b.Navigation("LegalEntity");
                 });
 
+            modelBuilder.Entity("Domain.Entities.DailyWorkEntry", b =>
+                {
+                    b.HasOne("Domain.Entities.Employees", "Employee")
+                        .WithMany()
+                        .HasForeignKey("EmployeeIqamaNo")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Employee");
+                });
+
             modelBuilder.Entity("Domain.Entities.EmployeeDocuments", b =>
                 {
                     b.HasOne("Domain.Entities.Employees", "Employee")
@@ -9084,6 +9154,17 @@ namespace Domain.Migrations
                     b.Navigation("Employee");
 
                     b.Navigation("Vehicle");
+                });
+
+            modelBuilder.Entity("Domain.Entities.RiderMobileSession", b =>
+                {
+                    b.HasOne("Domain.Entities.RiderDetails", "Rider")
+                        .WithMany()
+                        .HasForeignKey("RiderId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Rider");
                 });
 
             modelBuilder.Entity("Domain.Entities.RiderMonthlyValidity", b =>

@@ -328,6 +328,8 @@ Service query-validation errors use title `VehicleDocuments.InvalidQuery`. ASP.N
 
 ## 12. Excel import updates
 
+For serial-number-only registration/inspection expiry sheets with Hijri dates, use the new dedicated `POST /api/vehicles/documents/import` endpoint. It supports `dryRun=true`, converts Umm al-Qura Hijri dates, preserves blank/dash dates, and reports each row. See [bulk expiry sheet import](vehicle-document-sheet-import.md) for its complete contract. The full-vehicle import described below is a separate workflow.
+
 Existing admin import: `POST /api/Import/vehicles`, multipart form field `file`. Template metadata: `GET /api/Import/vehicle-template-info`. Prefer `.xlsx` files. Let the browser set the multipart boundary.
 
 Optional columns:

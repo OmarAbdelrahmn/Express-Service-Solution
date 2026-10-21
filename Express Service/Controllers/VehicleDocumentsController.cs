@@ -1,4 +1,5 @@
 using Application.Contracts.Employees;
+using Application.Abstraction;
 using Application.Extensions;
 using Application.Service.Empolyee;
 using Microsoft.AspNetCore.Authorization;
@@ -11,6 +12,23 @@ namespace Express_Service.Controllers;
 [Authorize(Roles = "Master,Admin")]
 public sealed class VehicleDocumentsController(IVehicleDocumentService service) : ControllerBase
 {
+    /// <summary>Update registration/inspection expiry dates from .xlsx, matched by serial number. Hijri dates are converted using Umm al-Qura.</summary>
+    [HttpPost("import")]
+    [Consumes("multipart/form-data")]
+    [RequestSizeLimit(11 * 1024 * 1024)]
+    public async Task<IActionResult> Import(
+        IFormFile file, [FromQuery] bool dryRun = false, [FromQuery] string? worksheetName = null, CancellationToken ct = default)
+    {
+        if (file is null || file.Length == 0 || file.Length > 10 * 1024 * 1024 ||
+            !string.Equals(Path.GetExtension(file.FileName), ".xlsx", StringComparison.OrdinalIgnoreCase))
+            return Result.Failure<VehicleDocumentSheetImportReport>(new Error(
+                "VehicleDocuments.InvalidFile", "Upload a non-empty .xlsx file up to 10 MB using the file form field.", 400)).ToProblem();
+
+        await using var stream = file.OpenReadStream();
+        var result = await service.ImportExpiryDatesAsync(stream, dryRun, worksheetName, ct);
+        return result.IsSuccess ? Ok(result.Value) : result.ToProblem();
+    }
+
     /// <summary>Documents expiring today or within the selected window (default 30 days).</summary>
     [HttpGet("expiring")]
     public async Task<IActionResult> GetExpiring([FromQuery] VehicleDocumentQuery query, CancellationToken ct)

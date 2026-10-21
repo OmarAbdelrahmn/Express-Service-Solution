@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Application.Service.Empolyee;
 
-public sealed class VehicleDocumentService(ApplicationDbcontext db, TimeProvider clock) : IVehicleDocumentService
+public sealed partial class VehicleDocumentService(ApplicationDbcontext db, TimeProvider clock) : IVehicleDocumentService
 {
     public Task<Result<VehicleDocumentReport>> GetExpiringAsync(VehicleDocumentQuery query, CancellationToken ct = default)
         => GetReportAsync(query, ReportKind.Expiring, ct);
