@@ -7,7 +7,8 @@ public record RiderMobileLoginRequest(
     string? Language = null);
 public record RiderMobileLanguageRequest([Required] string Language);
 public record RiderMobileProfile(int RiderId, string IqamaNo, string? WorkingId,
-    string Name, string NameAR, string NameEN, string Company, string? VehicleNumber, string Language);
+    string Name, string NameAR, string NameEN, string Company, string? VehicleNumber, string Language,
+    decimal CurrentMonthPetrolCost);
 public record RiderMobileLoginResponse(string AccessToken, string TokenType,
     DateTime ExpiresAtUtc, string Language, RiderMobileProfile Rider);
 public record RiderMobileDashboard(string Language, DateOnly Today, RiderMobileProfile Rider,

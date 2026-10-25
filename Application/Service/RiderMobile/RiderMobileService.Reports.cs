@@ -20,7 +20,7 @@ public partial class RiderMobileService
         var start = new DateOnly(today.Year, today.Month, 1);
         var current = await BuildMonthAsync(riderId, language, start, today, ct);
         var previous = await BuildMonthAsync(riderId, language, start.AddMonths(-1), today, ct);
-        return Result.Success(new RiderMobileDashboard(language, today, Profile(rider, language), current, previous));
+        return Result.Success(new RiderMobileDashboard(language, today, await ProfileAsync(rider, language, today, ct), current, previous));
     }
 
     public async Task<Result<RiderMobileMonth>> GetMonthAsync(int riderId, string language, int year, int month, CancellationToken ct = default)

@@ -131,6 +131,10 @@ public class ApplicationDbcontext : IdentityDbContext<ApplicationUser, Applicati
     public required DbSet<Housing> Housings { get; set; }
     public required DbSet<RiderDetails> RiderDetails { get; set; }
     public DbSet<RiderMobileSession> RiderMobileSessions { get; set; }
+    public DbSet<Domain.Entities.Notifications.RiderPushDevice> RiderPushDevices { get; set; }
+    public DbSet<Domain.Entities.Notifications.NotificationRequest> NotificationRequests { get; set; }
+    public DbSet<Domain.Entities.Notifications.NotificationRecipient> NotificationRecipients { get; set; }
+    public DbSet<Domain.Entities.Notifications.NotificationDelivery> NotificationDeliveries { get; set; }
     public required DbSet<RiderShift> RiderShifts { get; set; }
     public DbSet<RiderScorePerformance> RiderScorePerformances { get; set; }
     public required DbSet<RiderShiftSubstitution> RiderShiftSubstitutions { get; set; }

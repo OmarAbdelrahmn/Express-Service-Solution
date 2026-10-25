@@ -17,6 +17,7 @@ using Microsoft.Extensions.Options;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Text.Json;
 using Xunit;
 
 namespace Accounting.Tests;
@@ -60,8 +61,11 @@ public class RiderMobileHttpTests
         await using (var scope = app.Services.CreateAsyncScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<ApplicationDbcontext>();
-            await RiderMobileServiceTests.Seed(db);
-            await RiderMobileServiceTests.Seed(db, 2);
+            var rider = await RiderMobileServiceTests.Seed(db);
+            var other = await RiderMobileServiceTests.Seed(db, 2);
+            var today = DateOnly.FromDateTime(TimeProvider.System.GetUtcNow().ToOffset(TimeSpan.FromHours(3)).DateTime);
+            RiderMobileServiceTests.AddPetrolCost(db, rider.EmployeeIqamaNo, today, 42.75m);
+            RiderMobileServiceTests.AddPetrolCost(db, other.EmployeeIqamaNo, today, 900m, "V2");
             db.Users.Add(new ApplicationUser
             {
                 Id = "staff-user", UserName = "staff-user", SecurityStamp = "staff-stamp"
@@ -82,8 +86,11 @@ public class RiderMobileHttpTests
 
         var me = await client.GetAsync("/api/rider-mobile/me?riderId=2");
         Assert.Equal(HttpStatusCode.OK, me.StatusCode);
-        var profile = (await me.Content.ReadFromJsonAsync<RiderMobileProfile>())!;
+        var profileJson = await me.Content.ReadFromJsonAsync<JsonElement>();
+        var profile = profileJson.Deserialize<RiderMobileProfile>(new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
         Assert.Equal(1, profile.RiderId); // Extra query input cannot select another rider.
+        Assert.Equal(42.75m, profile.CurrentMonthPetrolCost);
+        Assert.Equal(42.75m, profileJson.GetProperty("currentMonthPetrolCost").GetDecimal());
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/rider-mobile/dashboard")).StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/RiderScorePerformance")).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync("/api/rider-mobile/performance?year=2026&month=13")).StatusCode);

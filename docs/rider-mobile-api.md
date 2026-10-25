@@ -11,7 +11,7 @@ does not send a rider ID or Iqama again to select data. Responses must not be ca
 | Method | Route | Purpose |
 | --- | --- | --- |
 | POST | `/login` | Sign in using Iqama and optional language; returns session and profile |
-| GET | `/me` | Rider's own profile |
+| GET | `/me` | Rider's own profile, including current-month petrol cost |
 | GET | `/dashboard` | Profile, current month, previous month, daily details and improvement notes |
 | GET | `/performance?year=2026&month=10` | Full performance and attendance for one month |
 | GET | `/shifts?year=2026&month=10` | Daily hours, orders, attendance totals and break restrictions |
@@ -46,6 +46,18 @@ Replace the stored access token with the token from this response. Updating the
 language revokes the previous session and creates a replacement with the **same
 expiry**. Other devices keep their existing session language; subsequent logins
 without a language use the new saved preference.
+
+## Profile petrol cost
+
+`GET /api/rider-mobile/me` includes the numeric field `currentMonthPetrolCost`,
+for example `"currentMonthPetrolCost": 125.50`. The same field is populated in the
+`rider` profile returned by login, language updates, and the dashboard.
+
+It sums petrol costs attributed to the authenticated rider's Iqama across all
+vehicles, from the first day of the current Gregorian month through today in
+Saudi time (UTC+3), inclusive. Other riders, unattributed costs, previous months,
+and future-dated usage are excluded. The total reflects recorded allocations,
+including manual overrides; when none exist, it is `0`.
 
 ## Sessions and identity
 

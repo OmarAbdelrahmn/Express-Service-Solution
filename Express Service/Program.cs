@@ -1,5 +1,6 @@
 using Application.Authentication;
 using Application.Service.AccountingOutbox;
+using Application.Service.Notifications;
 using Application.Service.VehiclePermission;
 using Application.Service.Vacation;
 using Domain.Auditing;
@@ -99,6 +100,28 @@ using (var scope = app.Services.CreateScope())
 
 app.UseHangfireDashboard("/job");
 
+RecurringJob.AddOrUpdate<INotificationJob>("rider-notifications",
+    job => job.ProcessAsync(CancellationToken.None), "* * * * *",
+    new RecurringJobOptions { TimeZone = TimeZoneInfo.Utc });
+RecurringJob.AddOrUpdate<INotificationJob>("rider-notification-cleanup",
+    job => job.CleanupAsync(CancellationToken.None), "15 2 * * *",
+    new RecurringJobOptions { TimeZone = TimeZoneInfo.Utc });
+RecurringJob.AddOrUpdate<IRiderMobileCoachingJob>("rider-mobile-rejection-alerts",
+    job => job.NotifyRejectionsAsync(CancellationToken.None), "* * * * *",
+    new RecurringJobOptions { TimeZone = TimeZoneInfo.Utc });
+RecurringJob.AddOrUpdate<IRiderMobileCoachingJob>("rider-mobile-rank-change-alerts",
+    job => job.NotifyRankChangesAsync(CancellationToken.None), "* * * * *",
+    new RecurringJobOptions { TimeZone = TimeZoneInfo.Utc });
+RecurringJob.AddOrUpdate<IRiderMobileCoachingJob>("rider-mobile-on-time-delivery-alerts",
+    job => job.NotifyOnTimeDeliveryAsync(CancellationToken.None), "* * * * *",
+    new RecurringJobOptions { TimeZone = TimeZoneInfo.Utc });
+if (app.Configuration.GetValue<bool>("Notifications:DailyReminderEnabled"))
+    RecurringJob.AddOrUpdate<INotificationJob>("rider-notification-reminder",
+        job => job.ReminderAsync(CancellationToken.None),
+        app.Configuration["Notifications:DailyReminderCron"] ?? "0 12 * * *",
+        new RecurringJobOptions { TimeZone = TimeZoneInfo.FindSystemTimeZoneById("Asia/Riyadh") });
+else RecurringJob.RemoveIfExists("rider-notification-reminder");
+
 // Remove legacy recurring jobs that send email. Hangfire persists recurring
 // jobs, so removing their registration alone would leave old schedules active.
 foreach (var emailJobId in new[]
@@ -170,9 +193,9 @@ app.UseHttpsRedirection();
 
 app.UseCors("AllowFrontend");
 
-app.UseRateLimiter();
-
 app.UseAuthentication();
+
+app.UseRateLimiter();
 
 app.Use(async (context, next) =>
 {

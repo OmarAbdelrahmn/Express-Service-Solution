@@ -3,6 +3,7 @@ using Application.Contracts.RiderMobile;
 using Application.Service.RiderMobile;
 using Domain;
 using Domain.Entities;
+using Domain.Entities.Petrol;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
@@ -19,6 +20,92 @@ public class RiderMobileServiceTests
         Issuer = "rider-tests", Audience = "staff-tests", ExpiryIn = 60,
         Key = "test-only-secret-key-with-more-than-thirty-two-bytes"
     };
+
+    [Theory]
+    [InlineData("ar")]
+    [InlineData("en")]
+    [InlineData("bn")]
+    public async Task Profile_SumsOwnMonthToDateAllocationsAcrossVehicles(string language)
+    {
+        await using var db = Database();
+        var rider = await Seed(db);
+        var other = await Seed(db, 2);
+        AddPetrolCost(db, rider.EmployeeIqamaNo, new(2026, 10, 1), 12.35m);
+        AddPetrolCost(db, rider.EmployeeIqamaNo, new(2026, 10, 20), 7.80m, "V2");
+        AddPetrolCost(db, rider.EmployeeIqamaNo, new(2026, 10, 21), 100m);
+        AddPetrolCost(db, rider.EmployeeIqamaNo, new(2026, 9, 30), 200m);
+        AddPetrolCost(db, rider.EmployeeIqamaNo, new(2026, 11, 1), 300m);
+        AddPetrolCost(db, rider.EmployeeIqamaNo, new(2025, 10, 1), 400m);
+        AddPetrolCost(db, other.EmployeeIqamaNo, new(2026, 10, 1), 500m, "V2");
+        AddPetrolCost(db, null, new(2026, 10, 2), 600m);
+        await db.SaveChangesAsync();
+
+        var result = await Service(db).GetProfileAsync(rider.Id, language);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(20.15m, result.Value.CurrentMonthPetrolCost);
+        Assert.Equal(language, result.Value.Language);
+    }
+
+    [Fact]
+    public async Task Profile_ReturnsZeroWithoutCurrentUsage_AndRejectsUnknownOrInactiveRiders()
+    {
+        await using var db = Database();
+        var rider = await Seed(db);
+        AddPetrolCost(db, rider.EmployeeIqamaNo, new(2026, 9, 30), 100m);
+        await db.SaveChangesAsync();
+        var service = Service(db);
+
+        Assert.Equal(0m, (await service.GetProfileAsync(rider.Id, "en")).Value.CurrentMonthPetrolCost);
+        var unknown = await service.GetProfileAsync(999, "en");
+        Assert.True(unknown.IsFailure);
+        Assert.Equal(401, unknown.Error.StatuesCode);
+
+        rider.Employee.IsDeleted = true;
+        await db.SaveChangesAsync();
+        var inactive = await service.GetProfileAsync(rider.Id, "en");
+        Assert.True(inactive.IsFailure);
+        Assert.Equal(401, inactive.Error.StatuesCode);
+    }
+
+    [Theory]
+    [InlineData(2025, 12, 31)]
+    [InlineData(2024, 2, 29)]
+    [InlineData(2026, 10, 31)]
+    public async Task Profile_UsesSaudiMonthAtUtcMonthBoundary(int year, int month, int day)
+    {
+        await using var db = Database();
+        var rider = await Seed(db);
+        var clock = new TestClock { Now = new DateTimeOffset(year, month, day, 20, 59, 0, TimeSpan.Zero) };
+        var previousDay = new DateOnly(year, month, day);
+        AddPetrolCost(db, rider.EmployeeIqamaNo, previousDay, 10m);
+        AddPetrolCost(db, rider.EmployeeIqamaNo, previousDay.AddDays(1), 25m);
+        AddPetrolCost(db, rider.EmployeeIqamaNo, previousDay.AddDays(2), 50m);
+        await db.SaveChangesAsync();
+        var service = Service(db, clock);
+
+        Assert.Equal(10m, (await service.GetProfileAsync(rider.Id, "en")).Value.CurrentMonthPetrolCost);
+        clock.Now = clock.Now.AddMinutes(1); // Midnight in Saudi time starts the next month.
+        Assert.Equal(25m, (await service.GetProfileAsync(rider.Id, "en")).Value.CurrentMonthPetrolCost);
+    }
+
+    [Fact]
+    public async Task SharedProfiles_IncludeCurrentPetrolCostOnLoginDashboardAndLanguageChange()
+    {
+        await using var db = Database();
+        var rider = await Seed(db);
+        AddPetrolCost(db, rider.EmployeeIqamaNo, new(2026, 10, 20), 19.95m);
+        await db.SaveChangesAsync();
+        var service = Service(db);
+
+        var login = await service.LoginAsync(new("2100000001", "en"));
+        Assert.Equal(19.95m, login.Value.Rider.CurrentMonthPetrolCost);
+        var dashboard = await service.GetDashboardAsync(rider.Id, "en");
+        Assert.Equal(19.95m, dashboard.Value.Rider.CurrentMonthPetrolCost);
+        var session = await db.RiderMobileSessions.SingleAsync();
+        var changed = await service.SetLanguageAsync(session.Id, rider.Id, "ar");
+        Assert.Equal(19.95m, changed.Value.Rider.CurrentMonthPetrolCost);
+    }
 
     [Theory]
     [InlineData("ar")]
@@ -312,6 +399,26 @@ public class RiderMobileServiceTests
         db.RiderDetails.Add(rider);
         await db.SaveChangesAsync();
         return rider;
+    }
+
+    internal static void AddPetrolCost(ApplicationDbcontext db, long? iqama, DateOnly date, decimal cost, string vehicleNumber = "V1")
+    {
+        var vehicle = db.Vehicles.Local.SingleOrDefault(x => x.VehicleNumber == vehicleNumber);
+        if (vehicle is null)
+        {
+            vehicle = new Vehicle { VehicleNumber = vehicleNumber, PlateNumberE = vehicleNumber,
+                SerialNumber = db.Vehicles.Local.Count + 1 };
+            db.Vehicles.Add(vehicle);
+        }
+        db.RiderPetrolCosts.Add(new RiderPetrolCost
+        {
+            RiderIqamaNo = iqama, Date = date, Cost = cost, Vehicle = vehicle,
+            AttributionSource = iqama is null ? PetrolAttributionSource.Unattributed : PetrolAttributionSource.ManualOverride,
+            VehiclePetrolCost = new VehiclePetrolCost
+            {
+                PlateNumberE = vehicle.PlateNumberE, Vehicle = vehicle, Date = date, Cost = cost
+            }
+        });
     }
 
     private static void AddShift(ApplicationDbcontext db, RiderDetails rider, DateOnly date, float hours,

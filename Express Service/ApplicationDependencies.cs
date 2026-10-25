@@ -111,6 +111,7 @@ public static class ApplicationDependencies
         Services.AddScoped<IHousingService, HousingService>();
         Services.AddScoped<IVehicleService, VehicleService>();
         Services.AddSingleton(TimeProvider.System);
+        Services.AddNotifications(configuration);
         Services.AddScoped<IVehicleDocumentService, VehicleDocumentService>();
         Services.AddScoped<IRiderService, RiderService>();
         Services.AddScoped<IRiderSub, RiderSub>();
