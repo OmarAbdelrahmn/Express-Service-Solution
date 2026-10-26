@@ -1,3 +1,4 @@
+using System.Data;
 using System.Globalization;
 using Application.Abstraction;
 using Application.Abstraction.Errors;
@@ -28,7 +29,6 @@ public class RiderScorePerformanceService(
             request.GrossOrders,
             request.CompletedOrders,
             request.CompletedOrdersInTime,
-            request.FailedOrdersByRider,
             request.OnTimeDeliveryScore,
             request.FinalDeliveryQualityScore,
             request.Segment);
@@ -233,7 +233,6 @@ public class RiderScorePerformanceService(
                 request.GrossOrders ?? entity.GrossOrders,
                 request.CompletedOrders ?? entity.CompletedOrders,
                 request.CompletedOrdersInTime ?? entity.CompletedOrdersInTime,
-                request.FailedOrdersByRider ?? entity.FailedOrdersByRider,
                 request.OnTimeDeliveryScore ?? entity.OnTimeDeliveryScore,
                 request.FinalDeliveryQualityScore ?? entity.FinalDeliveryQualityScore,
                 request.Segment ?? entity.Segment);
@@ -319,6 +318,12 @@ public class RiderScorePerformanceService(
             var recordsToAdd = new List<Domain.Entities.RiderScorePerformance>();
             var riderIdsInFile = new HashSet<int>();
             var periodStart = new DateOnly(performanceDate.Year, performanceDate.Month, 1);
+            var periodEnd = new DateOnly(performanceDate.Year, performanceDate.Month,
+                DateTime.DaysInMonth(performanceDate.Year, performanceDate.Month));
+            // Protect the baseline read and the insert/successor adjustment as one operation.
+            await using var transaction = dbcontext.Database.IsRelational() && dbcontext.Database.CurrentTransaction is null
+                ? await dbcontext.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken)
+                : null;
             var existingRiderIds = await dbcontext.RiderScorePerformances
                 .AsNoTracking()
                 .Where(x => x.PerformanceDate == performanceDate)
@@ -336,6 +341,13 @@ public class RiderScorePerformanceService(
                     x.Sum(y => y.CompletedOrders),
                     x.Sum(y => y.CompletedOrdersInTime),
                     x.Sum(y => y.FailedOrdersByRider)))
+                .ToDictionaryAsync(x => x.RiderId, cancellationToken);
+            // Inserting an older snapshot splits the interval represented by the next record.
+            // Reduce that record's counters so all subsequent cumulative totals stay unchanged.
+            var nextDailyRecords = await dbcontext.RiderScorePerformances
+                .Where(x => x.PerformanceDate > performanceDate && x.PerformanceDate <= periodEnd &&
+                    !dbcontext.RiderScorePerformances.Any(earlier => earlier.RiderId == x.RiderId &&
+                        earlier.PerformanceDate > performanceDate && earlier.PerformanceDate < x.PerformanceDate))
                 .ToDictionaryAsync(x => x.RiderId, cancellationToken);
 
             var rowNumber = 1;
@@ -391,7 +403,7 @@ public class RiderScorePerformanceService(
                 }
 
                 var baseline = priorDailyTotals.GetValueOrDefault(rider.Id);
-                var dailyCounters = GetDailyCounters(data, baseline);
+                var dailyCounters = GetDailyCounters(data, baseline, performanceDate);
                 if (!dailyCounters.IsValid)
                 {
                     errors.Add(new RiderScorePerformanceImportError(
@@ -399,6 +411,25 @@ public class RiderScorePerformanceService(
                         data.RiderWorkingId,
                         dailyCounters.ErrorMessage!));
                     continue;
+                }
+
+                if (nextDailyRecords.TryGetValue(rider.Id, out var nextRecord))
+                {
+                    var nextCounters = RebalanceNextCounters(data, baseline, dailyCounters, nextRecord);
+                    if (!nextCounters.IsValid)
+                    {
+                        errors.Add(new RiderScorePerformanceImportError(
+                            rowNumber, data.RiderWorkingId, nextCounters.ErrorMessage!));
+                        continue;
+                    }
+
+                    nextRecord.TotalVerificationRequests = nextCounters.TotalVerificationRequests;
+                    nextRecord.SuccessfulVerificationRequests = nextCounters.SuccessfulVerificationRequests;
+                    nextRecord.GrossOrders = nextCounters.GrossOrders;
+                    nextRecord.CompletedOrders = nextCounters.CompletedOrders;
+                    nextRecord.CompletedOrdersInTime = nextCounters.CompletedOrdersInTime;
+                    nextRecord.FailedOrdersByRider = nextCounters.FailedOrdersByRider;
+                    nextRecord.UpdatedAt = DateTime.UtcNow.AddHours(3);
                 }
 
                 recordsToAdd.Add(new Domain.Entities.RiderScorePerformance
@@ -427,6 +458,9 @@ public class RiderScorePerformanceService(
                 dbcontext.RiderScorePerformances.AddRange(recordsToAdd);
                 await dbcontext.SaveChangesAsync(cancellationToken);
             }
+
+            if (transaction is not null)
+                await transaction.CommitAsync(cancellationToken);
 
             return Result.Success(new RiderScorePerformanceImportResult(
                 rows.Count,
@@ -587,14 +621,15 @@ public class RiderScorePerformanceService(
         int grossOrders,
         int completedOrders,
         int completedOrdersInTime,
-        int failedOrdersByRider,
         decimal onTimeDeliveryScore,
         decimal finalDeliveryQualityScore,
         string? segment)
     {
+        // Failed orders are signed daily adjustments: a successful appeal reduces the month total.
+        // Uploaded cumulative failed-order totals are still checked as non-negative by ParseRow.
         if (totalVerificationRequests < 0 || successfulVerificationRequests < 0 || grossOrders < 0 ||
-            completedOrders < 0 || completedOrdersInTime < 0 || failedOrdersByRider < 0)
-            return "Request and order counts must be zero or greater.";
+            completedOrders < 0 || completedOrdersInTime < 0)
+            return "Verification requests, gross orders and completed order counts must be zero or greater.";
         if (verificationSuccessRate is < 0 or > 1)
             return "VerificationSuccessRate must be between 0 and 1.";
         if (onTimeDeliveryScore is < 0 or > 1)
@@ -701,7 +736,6 @@ public class RiderScorePerformanceService(
             grossOrders,
             completedOrders,
             completedOrdersInTime,
-            failedOrdersByRider,
             onTimeDeliveryScore,
             finalDeliveryQualityScore,
             segment);
@@ -750,19 +784,22 @@ public class RiderScorePerformanceService(
 
     private static DailyPerformanceCounters GetDailyCounters(
         PerformanceRowData uploadedTotals,
-        CumulativePerformanceBaseline? baseline)
+        CumulativePerformanceBaseline? baseline,
+        DateOnly performanceDate)
     {
         var prior = baseline ?? CumulativePerformanceBaseline.Empty;
 
-        if (uploadedTotals.TotalVerificationRequests < prior.TotalVerificationRequests ||
-            uploadedTotals.SuccessfulVerificationRequests < prior.SuccessfulVerificationRequests ||
-            uploadedTotals.GrossOrders < prior.GrossOrders ||
-            uploadedTotals.CompletedOrders < prior.CompletedOrders ||
-            uploadedTotals.CompletedOrdersInTime < prior.CompletedOrdersInTime ||
-            uploadedTotals.FailedOrdersByRider < prior.FailedOrdersByRider)
+        var conflicts = DescribeCounterConflicts(true,
+            ("total_verification_requests", uploadedTotals.TotalVerificationRequests, prior.TotalVerificationRequests),
+            ("successful_verification_requests", uploadedTotals.SuccessfulVerificationRequests, prior.SuccessfulVerificationRequests),
+            ("gross_orders", uploadedTotals.GrossOrders, prior.GrossOrders),
+            ("completed_orders", uploadedTotals.CompletedOrders, prior.CompletedOrders),
+            ("completed_orders_in_time", uploadedTotals.CompletedOrdersInTime, prior.CompletedOrdersInTime));
+        if (conflicts.Count > 0)
         {
             return DailyPerformanceCounters.Invalid(
-                "Cumulative totals are lower than the records already saved for this rider in the current month. " +
+                $"Cumulative totals for {performanceDate:yyyy-MM-dd} are lower than the saved totals " +
+                $"from {performanceDate:yyyy-MM}-01 up to, but excluding, this report date: {string.Join("; ", conflicts)}. " +
                 "The row was skipped to avoid creating negative daily performance values.");
         }
 
@@ -774,6 +811,43 @@ public class RiderScorePerformanceService(
             uploadedTotals.CompletedOrdersInTime - prior.CompletedOrdersInTime,
             uploadedTotals.FailedOrdersByRider - prior.FailedOrdersByRider);
     }
+
+    private static DailyPerformanceCounters RebalanceNextCounters(
+        PerformanceRowData uploadedTotals,
+        CumulativePerformanceBaseline? baseline,
+        DailyPerformanceCounters insertedCounters,
+        Domain.Entities.RiderScorePerformance next)
+    {
+        var prior = baseline ?? CumulativePerformanceBaseline.Empty;
+        var conflicts = DescribeCounterConflicts(false,
+            ("total_verification_requests", uploadedTotals.TotalVerificationRequests, (long)prior.TotalVerificationRequests + next.TotalVerificationRequests),
+            ("successful_verification_requests", uploadedTotals.SuccessfulVerificationRequests, (long)prior.SuccessfulVerificationRequests + next.SuccessfulVerificationRequests),
+            ("gross_orders", uploadedTotals.GrossOrders, (long)prior.GrossOrders + next.GrossOrders),
+            ("completed_orders", uploadedTotals.CompletedOrders, (long)prior.CompletedOrders + next.CompletedOrders),
+            ("completed_orders_in_time", uploadedTotals.CompletedOrdersInTime, (long)prior.CompletedOrdersInTime + next.CompletedOrdersInTime));
+        if (conflicts.Count > 0)
+        {
+            return DailyPerformanceCounters.Invalid(
+                $"Cumulative totals exceed the saved totals through the next report on {next.PerformanceDate:yyyy-MM-dd}: " +
+                $"{string.Join("; ", conflicts)}. The row was skipped to avoid creating negative values in that report.");
+        }
+
+        return DailyPerformanceCounters.Valid(
+            next.TotalVerificationRequests - insertedCounters.TotalVerificationRequests,
+            next.SuccessfulVerificationRequests - insertedCounters.SuccessfulVerificationRequests,
+            next.GrossOrders - insertedCounters.GrossOrders,
+            next.CompletedOrders - insertedCounters.CompletedOrders,
+            next.CompletedOrdersInTime - insertedCounters.CompletedOrdersInTime,
+            next.FailedOrdersByRider - insertedCounters.FailedOrdersByRider);
+    }
+
+    private static List<string> DescribeCounterConflicts(
+        bool rejectLower,
+        params (string Metric, int Uploaded, long Saved)[] counters) =>
+        counters
+            .Where(x => rejectLower ? x.Uploaded < x.Saved : x.Uploaded > x.Saved)
+            .Select(x => $"{x.Metric} (uploaded={x.Uploaded}, saved={x.Saved})")
+            .ToList();
 
     private sealed class PerformanceColumnMapping
     {

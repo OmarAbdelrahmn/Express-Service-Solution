@@ -184,6 +184,264 @@ public class RiderScorePerformanceServiceTests
     }
 
     [Fact]
+    public async Task Import_AcceptsCumulativeSnapshotAfterTwentyDayGap()
+    {
+        await using var db = CreateDbContext();
+        var rider = await SeedRiderAsync(db, 120, "TEST-RIDER-120", 7100000020);
+        var service = CreateService(db);
+        using var oldSnapshot = CreateCanonicalWorkbook(
+            rider.WorkingId!, 10, 8, 100, 90, 80, 1, 0.8m, 0.9m, 0.9m);
+        Assert.Equal(1, (await service.ImportAsync(oldSnapshot, new DateOnly(2026, 10, 6))).Value.SuccessCount);
+        using var newSnapshot = CreateCanonicalWorkbook(
+            rider.WorkingId!, 30, 28, 700, 690, 680, 1, 0.9m, 0.95m, 0.94m);
+
+        var result = await service.ImportAsync(newSnapshot, new DateOnly(2026, 10, 26));
+
+        Assert.Equal(1, result.Value.SuccessCount);
+        Assert.Empty(result.Value.Errors);
+        var saved = await db.RiderScorePerformances.SingleAsync(x => x.PerformanceDate.Day == 26);
+        Assert.Equal(600, saved.GrossOrders);
+        Assert.Equal(0, saved.FailedOrdersByRider);
+    }
+
+    [Fact]
+    public async Task Import_BackdatedSnapshotPreservesLaterTotals_AndDoesNotRejectNextUpload()
+    {
+        await using var db = CreateDbContext();
+        var rider = await SeedRiderAsync(db, 121, "TEST-RIDER-121", 7100000021);
+        var service = CreateService(db);
+        // Reproduce the affected rider's sequence: October 3 was entered after October 6.
+        var snapshots = new[]
+        {
+            (Day: 1, Verified: 3, Gross: 18, Completed: 17, OnTime: 17, Failed: 0),
+            (Day: 2, Verified: 7, Gross: 66, Completed: 66, OnTime: 64, Failed: 0),
+            (Day: 4, Verified: 16, Gross: 119, Completed: 117, OnTime: 114, Failed: 1),
+            (Day: 5, Verified: 24, Gross: 152, Completed: 150, OnTime: 147, Failed: 1),
+            (Day: 6, Verified: 27, Gross: 182, Completed: 180, OnTime: 177, Failed: 1),
+            (Day: 3, Verified: 10, Gross: 92, Completed: 91, OnTime: 88, Failed: 1)
+        };
+        foreach (var snapshot in snapshots)
+        {
+            using var workbook = CreateCanonicalWorkbook(rider.WorkingId!, snapshot.Verified,
+                snapshot.Verified, snapshot.Gross, snapshot.Completed, snapshot.OnTime, snapshot.Failed,
+                1m, 0.93m, 0.91m);
+            var imported = await service.ImportAsync(workbook, new DateOnly(2026, 10, snapshot.Day));
+            Assert.Equal(1, imported.Value.SuccessCount);
+        }
+
+        db.ChangeTracker.Clear();
+        var records = await db.RiderScorePerformances.OrderBy(x => x.PerformanceDate).ToListAsync();
+        Assert.Equal(27, records.Sum(x => x.TotalVerificationRequests));
+        Assert.Equal(27, records.Sum(x => x.SuccessfulVerificationRequests));
+        Assert.Equal(182, records.Sum(x => x.GrossOrders));
+        Assert.Equal(180, records.Sum(x => x.CompletedOrders));
+        Assert.Equal(177, records.Sum(x => x.CompletedOrdersInTime));
+        Assert.Equal(1, records.Sum(x => x.FailedOrdersByRider));
+        var next = records.Single(x => x.PerformanceDate.Day == 4);
+        Assert.Equal(6, next.TotalVerificationRequests);
+        Assert.Equal(27, next.GrossOrders);
+        Assert.Equal(26, next.CompletedOrders);
+        Assert.Equal(26, next.CompletedOrdersInTime);
+        Assert.Equal(0, next.FailedOrdersByRider);
+        Assert.Equal(0.91m, next.FinalDeliveryQualityScore);
+        Assert.Equal(30, records.Single(x => x.PerformanceDate.Day == 6).GrossOrders);
+
+        // Values from the affected rider's day 24 workbook. Failed orders remain at one.
+        using var latest = CreateCanonicalWorkbook(rider.WorkingId!, 68, 68, 707, 699, 688, 1,
+            1m, 0.9842632331902719m, 0.9914244030166353m);
+        var result = await service.ImportAsync(latest, new DateOnly(2026, 10, 24));
+        Assert.Equal(1, result.Value.SuccessCount);
+        Assert.Empty(result.Value.Errors);
+        Assert.Equal(707, await db.RiderScorePerformances.SumAsync(x => x.GrossOrders));
+        var day24 = await db.RiderScorePerformances.SingleAsync(x => x.PerformanceDate.Day == 24);
+        Assert.Equal(41, day24.TotalVerificationRequests);
+        Assert.Equal(525, day24.GrossOrders);
+        Assert.Equal(519, day24.CompletedOrders);
+        Assert.Equal(511, day24.CompletedOrdersInTime);
+        Assert.Equal(0, day24.FailedOrdersByRider);
+    }
+
+    [Fact]
+    public async Task Import_Day24WorkbookValuesAcceptFailedOrderReduction()
+    {
+        await using var db = CreateDbContext();
+        var rider = await SeedRiderAsync(db, 125, "TEST-RIDER-125", 7100000025);
+        var service = CreateService(db);
+        // Existing totals for the affected rider after the legacy backfill bug.
+        using var inflated = CreateCanonicalWorkbook(rider.WorkingId!, 30, 30, 208, 205, 201, 2,
+            1m, 0.95m, 0.94m);
+        await service.ImportAsync(inflated, new DateOnly(2026, 10, 6));
+        using var day24 = CreateCanonicalWorkbook(rider.WorkingId!, 68, 68, 707, 699, 688, 1,
+            1m, 0.9842632331902719m, 0.9914244030166353m);
+
+        var result = await service.ImportAsync(day24, new DateOnly(2026, 10, 24));
+
+        Assert.Equal(1, result.Value.SuccessCount);
+        Assert.Empty(result.Value.Errors);
+        db.ChangeTracker.Clear();
+        var saved = await db.RiderScorePerformances.SingleAsync(x => x.PerformanceDate.Day == 24);
+        Assert.Equal(-1, saved.FailedOrdersByRider);
+        Assert.Equal(499, saved.GrossOrders);
+        Assert.Equal(1, await db.RiderScorePerformances.SumAsync(x => x.FailedOrdersByRider));
+
+        var list = await service.ListAsync(new RiderScorePerformanceFilter(
+            rider.Id, null, null, new DateOnly(2026, 10, 1), new DateOnly(2026, 10, 24), null));
+        Assert.Equal(1, list.Value.Totals.FailedOrdersByRider);
+        var update = await service.UpdateAsync(saved.Id, new UpdateRiderScorePerformanceRequest(
+            null, null, null, null, null, null, null, null, null, null, null, "A"));
+        Assert.True(update.IsSuccess);
+        Assert.Equal(-1, update.Value.FailedOrdersByRider);
+    }
+
+    [Fact]
+    public async Task Import_BackdatedFailedOrdersCanExceedLaterTotalAfterAppeals()
+    {
+        await using var db = CreateDbContext();
+        var rider = await SeedRiderAsync(db, 126, "TEST-RIDER-126", 7100000026);
+        var service = CreateService(db);
+        using var later = CreateCanonicalWorkbook(rider.WorkingId!, 10, 10, 100, 90, 80, 2,
+            1m, 0.9m, 0.9m);
+        await service.ImportAsync(later, new DateOnly(2026, 10, 24));
+        using var earlier = CreateCanonicalWorkbook(rider.WorkingId!, 5, 5, 50, 45, 40, 3,
+            1m, 0.9m, 0.9m);
+
+        var result = await service.ImportAsync(earlier, new DateOnly(2026, 10, 3));
+
+        Assert.Equal(1, result.Value.SuccessCount);
+        Assert.Empty(result.Value.Errors);
+        db.ChangeTracker.Clear();
+        var records = await db.RiderScorePerformances.OrderBy(x => x.PerformanceDate).ToListAsync();
+        Assert.Equal(3, records[0].FailedOrdersByRider);
+        Assert.Equal(-1, records[1].FailedOrdersByRider);
+        Assert.Equal(2, records.Sum(x => x.FailedOrdersByRider));
+        Assert.Equal(100, records.Sum(x => x.GrossOrders));
+    }
+
+    [Theory]
+    [InlineData(3, 2, -1)]
+    [InlineData(3, 0, -3)]
+    [InlineData(2, 2, 0)]
+    [InlineData(2, 3, 1)]
+    public async Task Import_FailedOrderAdjustmentsMatchLatestCumulativeTotal(int oldTotal, int newTotal, int adjustment)
+    {
+        await using var db = CreateDbContext();
+        var rider = await SeedRiderAsync(db, 127, "TEST-RIDER-127", 7100000027);
+        var service = CreateService(db);
+        using var older = CreateCanonicalWorkbook(rider.WorkingId!, 10, 10, 100, 90, 80, oldTotal,
+            1m, 0.9m, 0.9m);
+        await service.ImportAsync(older, new DateOnly(2026, 10, 1));
+        using var latest = CreateCanonicalWorkbook(rider.WorkingId!, 20, 20, 200, 190, 180, newTotal,
+            1m, 0.95m, 0.94m);
+        var result = await service.ImportAsync(latest, new DateOnly(2026, 10, 24));
+
+        Assert.Equal(1, result.Value.SuccessCount);
+        Assert.Empty(result.Value.Errors);
+        db.ChangeTracker.Clear();
+        var saved = await db.RiderScorePerformances.SingleAsync(x => x.PerformanceDate.Day == 24);
+        Assert.Equal(adjustment, saved.FailedOrdersByRider);
+        Assert.Equal(newTotal, await db.RiderScorePerformances.SumAsync(x => x.FailedOrdersByRider));
+
+        using var duplicate = CreateCanonicalWorkbook(rider.WorkingId!, 20, 20, 200, 190, 180, newTotal,
+            1m, 0.95m, 0.94m);
+        Assert.Equal(0, (await service.ImportAsync(duplicate, new DateOnly(2026, 10, 24))).Value.SuccessCount);
+        Assert.Equal(newTotal, await db.RiderScorePerformances.SumAsync(x => x.FailedOrdersByRider));
+    }
+
+    [Fact]
+    public async Task Import_StillRejectsNegativeCumulativeFailedOrderValueInWorkbook()
+    {
+        await using var db = CreateDbContext();
+        var rider = await SeedRiderAsync(db, 128, "TEST-RIDER-128", 7100000028);
+        var service = CreateService(db);
+        using var workbook = CreateCanonicalWorkbook(rider.WorkingId!, 10, 10, 100, 90, 80, -1,
+            1m, 0.9m, 0.9m);
+
+        var result = await service.ImportAsync(workbook, new DateOnly(2026, 10, 24));
+
+        Assert.Equal(0, result.Value.SuccessCount);
+        Assert.Contains("failed_orders_by_rider", Assert.Single(result.Value.Errors).Message);
+        Assert.Empty(await db.RiderScorePerformances.ToListAsync());
+    }
+
+    [Fact]
+    public async Task Import_RejectsBackdatedSnapshotAboveNextSnapshot_WithoutChangingSavedRecords()
+    {
+        await using var db = CreateDbContext();
+        var rider = await SeedRiderAsync(db, 122, "TEST-RIDER-122", 7100000022);
+        var service = CreateService(db);
+        using var later = CreateCanonicalWorkbook(rider.WorkingId!, 10, 8, 100, 90, 80, 1,
+            0.8m, 0.9m, 0.9m);
+        await service.ImportAsync(later, new DateOnly(2026, 10, 6));
+        using var earlier = CreateCanonicalWorkbook(rider.WorkingId!, 5, 4, 101, 45, 40, 2,
+            0.8m, 0.9m, 0.9m);
+
+        var result = await service.ImportAsync(earlier, new DateOnly(2026, 10, 3));
+
+        Assert.Equal(0, result.Value.SuccessCount);
+        var error = Assert.Single(result.Value.Errors);
+        Assert.Contains("2026-10-06", error.Message);
+        Assert.Contains("gross_orders", error.Message);
+        // A later save in the same unit of work must not persist a rejected row's adjustments.
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        var saved = await db.RiderScorePerformances.SingleAsync();
+        Assert.Equal(100, saved.GrossOrders);
+        Assert.Equal(1, saved.FailedOrdersByRider);
+    }
+
+    [Fact]
+    public async Task Import_DoesNotSubtractPreviousMonth_OrAdjustNextMonth()
+    {
+        await using var db = CreateDbContext();
+        var rider = await SeedRiderAsync(db, 123, "TEST-RIDER-123", 7100000023);
+        var service = CreateService(db);
+        foreach (var date in new[] { new DateOnly(2026, 9, 30), new DateOnly(2026, 11, 1) })
+        {
+            using var workbook = CreateCanonicalWorkbook(rider.WorkingId!);
+            await service.ImportAsync(workbook, date);
+        }
+        using var october = CreateCanonicalWorkbook(rider.WorkingId!);
+
+        var result = await service.ImportAsync(october, new DateOnly(2026, 10, 26));
+
+        Assert.Equal(1, result.Value.SuccessCount);
+        Assert.Equal(3, await db.RiderScorePerformances.CountAsync());
+        Assert.All(await db.RiderScorePerformances.ToListAsync(), x => Assert.Equal(16, x.GrossOrders));
+    }
+
+    [Theory]
+    [InlineData(0, "total_verification_requests")]
+    [InlineData(1, "successful_verification_requests")]
+    [InlineData(2, "gross_orders")]
+    [InlineData(3, "completed_orders")]
+    [InlineData(4, "completed_orders_in_time")]
+    public async Task Import_LowerCounterErrorIdentifiesMetricValuesAndDate(int index, string metric)
+    {
+        await using var db = CreateDbContext();
+        var rider = await SeedRiderAsync(db, 124, "TEST-RIDER-124", 7100000024);
+        var service = CreateService(db);
+        using var first = CreateCanonicalWorkbook(rider.WorkingId!, 10, 10, 10, 10, 10, 10,
+            1m, 1m, 1m);
+        await service.ImportAsync(first, new DateOnly(2026, 10, 6));
+        var counts = Enumerable.Repeat(20, 6).ToArray();
+        counts[index] = 9;
+        counts[5] = 9; // An appeal is allowed, but must not hide a decrease in another counter.
+        using var lower = CreateCanonicalWorkbook(rider.WorkingId!, counts[0], counts[1], counts[2],
+            counts[3], counts[4], counts[5], 1m, 1m, 1m);
+
+        var result = await service.ImportAsync(lower, new DateOnly(2026, 10, 26));
+
+        Assert.Equal(0, result.Value.SuccessCount);
+        var error = Assert.Single(result.Value.Errors);
+        Assert.Contains(metric, error.Message);
+        Assert.Contains("uploaded=9", error.Message);
+        Assert.Contains("saved=10", error.Message);
+        Assert.Contains("2026-10-26", error.Message);
+        Assert.DoesNotContain("failed_orders_by_rider", error.Message);
+        Assert.Single(await db.RiderScorePerformances.ToListAsync());
+    }
+
+    [Fact]
     public async Task Import_KeepsExcelRiderAndReturnsSubstituteNameAsNote()
     {
         await using var db = CreateDbContext();

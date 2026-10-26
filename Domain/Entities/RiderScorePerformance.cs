@@ -14,6 +14,7 @@ public class RiderScorePerformance
     public int GrossOrders { get; set; }
     public int CompletedOrders { get; set; }
     public int CompletedOrdersInTime { get; set; }
+    // Signed daily adjustment; successful appeals can reduce the cumulative failed-order total.
     public int FailedOrdersByRider { get; set; }
     public decimal OnTimeDeliveryScore { get; set; }
     public decimal FinalDeliveryQualityScore { get; set; }
